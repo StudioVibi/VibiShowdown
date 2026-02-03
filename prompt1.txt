@@ -1,0 +1,106 @@
+me ajuda com as palavras que me faltam para ue falar ocm o codex. me avise se ele iria precisar de mais informações ou se algo ficar confuso
+
+eu quero uma aplicação web baseado no jogo showdown do pokemon com um esquema mobile first, que vai ter uma tela quadrada ( preciso ver o tamanho da tela) 
+
+vou explicar o game primeiro e depois eu falo sobre a aparencia do game em si
+
+é 1v1;
+é jogo de turno;
+toda vez q eu falar pokemon ou mon, é a mesma coisa... e eles se referem a monstros. se tiver problema de politica, por favor considere q são mosntros.
+cada player tem 3 pokemons, totalizando 6;
+cada pokemon tem 4 habilidades;
+ambos os jogadores sabem quais são os pokemons que tem na partida;
+não existe fog de guerra nesse game;
+não existe random ou fatores aleatorios;
+em cada lado do jogo, vai ter 3 posições. uma posição que fica o pokemon principal, outras duas por enquanto são posições de "guardar pokemon"
+mas no futuro provavlemtne faremos algo mais singular para cada, então guarde como se fossem espaços diferentes entre si;
+as ações sempre são deferidas pelo pokemon principal.
+o pokemon tem as seguintes caracteristicas:
+pokemon{
+    Name:string, 
+    HP:int, 
+    Attack:int, 
+    Speed:int, 
+    Defense:int,
+    PossiblePassive:[int], (vai ter uma lista de passivas que são possiveis para esse pokemon e dentro todas que existem ele vai escolher uma para ser) 
+    PossibleMoves:[int], (vai ter uma lista de moves que são possiveis para esse pokemon e dentro todas que existem ele vai escolher 4 para serem desse pokemon) 
+    Protect: booleano
+}
+não sabemos quantas fases de ataques teremos no jogo, estaremos adicionando cada vez mais fases de ataque então considere o seguinte
+inicialmente teremos 4 fases de ataque. mas esse numero não é fixo e pode aumentar, então a estrutura do codigo deve ser capaz de receber mais fases de ataque.
+cada fase tem 
+{
+    nome
+    ordem (pode ser um numero, id, algo para ordenar mesmo.)
+    o que considera para definir quem vai realizar a ação primeiro: (pode ser algum indentificador para caracteristicas do pokemon. Speed > Attack > HP > Defense 
+    só que em um vetor[] por exemplo [Speed; Attack; HP; Defense] que diz que primeiro speed depois attack depois hp e depois defense) 
+}
+
+cada habilidade(move)tem inicialmente:
+{
+    nome
+    dano 
+    fase
+    function especifica:
+}
+e se uma habilidade causa dano, sempre depois de receber um DANO o pokemon atualiza a vida e verifica se morreu (se esta com 0 ou menos de vida) se ele morreu
+
+
+
+simulando um jogo:
+
+eu escolho com que pokemon eu começo. e meu adversario tambem.
+
+inicio de um turno:
+eu escolho minha habilidade que vou usar no primeiro turno, meu adversario tbm. 
+
+
+agora vão ter grupos de "sequencia de eventos" com uma ordem bem determinada.
+um grupo de "sequencia de eventos" vamos chamar de fase 
+
+obrigatoriamente em todos os jogos iniciamos com a fase de "switch";
+fase de "switch" é uma feature de troca os pokemons de lugar. inicialmente o switch só troca o principal com algum secundario.
+se ambos os players decidirem fazer a decisão de switch, quem vai trocar primeiro é definido pela caracteristica VELOCIDADE do pokemon atual de cada.
+
+teriamos todas as fase de ataques existentes no momento na ordem definida pela caracteristica ORDEM em fase.
+
+
+grupo de fase de ataques:
+
+fase de ataque 01:
+fase de ataque 02:
+fase de ataque 03:
+fase de ataque 04:
+
+anteriormente falamos de se ambos escolhessem switch, mas agora vamos pensar se ambos escolhessemos uma das 4 habilidade existentes no pokemon.
+eu escolho uma habilidade que tem como fase  a "fase de ataque 02" e meu inimigo esolhe uma habilidade que tem fase como "fase de ataque 01",
+meu inimigo ataca primeiro por ganhar no quisito fase de ataque, mesmo que eu tenha mais velocidade que ele. 
+mas na situação que ambos escolhemos habilidades que ficam na fase de ataque 03, dai eu atacaria primeiro considerando que minha VELOCIDADE é maior que a dele.
+considerando que estamos na mesma FASE e temos VELOCIDADE iguais, dai teriamos que comparar attack assim como é na lista [Speed; Attack; HP; Defense]
+
+e como sempre em cada turno quem está jogando escolhe 1 unico movimento, ou troca pokemon ou usar uma das 4 habilidades, na maioria dos turnos ira ter 2 fases com conteudo dentro no maximo,
+fazendo com que todo esse esquema de fases aconteçam de forma muito rapida e não demorada. (não crie um limitante de 2 aqui. planejando para o inicio)
+
+passado todas as fases, iniciamos o proximo turno.
+
+
+
+
+
+
+
+
+
+eu vou precisar  de que tenha um espaço na esquerda superior separada para info do pokemon adversario, nome, level, hp com a barra de hp. e na parte direita dessas infos, 
+gostaria que tivesse a imagem do pokemon. referente. eu tenho aqui no repositorio uma pasta icons com algumas imagens q vc pode usar nesse local.
+
+e a mesma coisa se repete na parte inferior da tela, mas espelhado. inferior esquerdo é a imagem e inferior direiro é as infos do pokemon de baixo.
+
+|  |  |  |  |
+\/ \/ \/ \/ \/
+
+fase final: ????? duvida, como mesmo q vai ficar verificando a morte do pokemon?
+???? criaremos pokemon que da ataque em fases diferentes? isso só valeria a pena se vc acha q aquele pokemon vai morrer, dai daria um daninho menor no total, só q 
+separado em dois ataques.
+?????? temos um problema de fog de guerra aqui, se a decisao for em turno aqui (não é oq eu quero) e a outra pessoa receber essa informação, seria uma info vazada.
+a decisao pode ser simultanea (ideal), e implementarmos alguma forma que só envia a informação do que esta selecionado depois de ambos estarem no estado de "pronto"

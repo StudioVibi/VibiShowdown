@@ -1,0 +1,15 @@
+{
+  "name": "vibi-showdown",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --target esnext --noEmit --skipLibCheck",
+    "dev": "bun run src/server.ts",
+    "server": "bun run src/server.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
+}
