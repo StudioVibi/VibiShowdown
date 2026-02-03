@@ -1,22 +1,42 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { randomBytes } from "crypto";
 import type { ClientMessage, ServerMessage, RoomId, PlayerSlot, DummyState } from "./shared.ts";
 
 const PORT = 8080;
 const ROOM_SIZE = 2;
-const BROADCAST_MS = 1000;
+const TURN_MS = 50 * 60 * 1000;
+const DEADLINE_CHECK_MS = 1000;
+
+type PlayerRecord = {
+  slot: PlayerSlot;
+  token: string;
+  ws: WebSocket | null;
+};
 
 type Room = {
   id: RoomId;
-  players: Map<PlayerSlot, WebSocket>;
-  tick: number;
+  players: Record<PlayerSlot, PlayerRecord | null>;
+  turn: number;
+  deadline_at: number;
+  intents: Record<PlayerSlot, unknown | null>;
+  last_state: DummyState;
+  last_log: string[];
 };
 
 let room_counter = 1;
 const rooms = new Map<RoomId, Room>();
-const socket_info = new Map<WebSocket, { room_id: RoomId; slot: PlayerSlot }>();
+const socket_info = new Map<WebSocket, { room_id: RoomId; slot: PlayerSlot; token: string }>();
 
 function now(): number {
   return Math.floor(Date.now());
+}
+
+function gen_token(): string {
+  try {
+    return randomBytes(12).toString("base64url");
+  } catch {
+    return Math.random().toString(36).slice(2);
+  }
 }
 
 function send(ws: WebSocket, message: ServerMessage): void {
@@ -25,25 +45,60 @@ function send(ws: WebSocket, message: ServerMessage): void {
 
 function broadcast(room: Room, message: ServerMessage): void {
   const payload = JSON.stringify(message);
-  for (const ws of room.players.values()) {
-    ws.send(payload);
+  for (const record of Object.values(room.players)) {
+    if (record?.ws) {
+      record.ws.send(payload);
+    }
   }
 }
 
 function room_players(room: Room): PlayerSlot[] {
-  return Array.from(room.players.keys());
+  const out: PlayerSlot[] = [];
+  if (room.players.player1) out.push("player1");
+  if (room.players.player2) out.push("player2");
+  return out;
+}
+
+function room_intents(room: Room): Record<PlayerSlot, boolean> {
+  return {
+    player1: room.intents.player1 !== null,
+    player2: room.intents.player2 !== null
+  };
+}
+
+function build_state(room: Room, turn: number, note: string): DummyState {
+  return {
+    turn,
+    players: {
+      player1: room.players.player1 !== null,
+      player2: room.players.player2 !== null
+    },
+    note
+  };
 }
 
 function create_room(): Room {
   const id = `room-${room_counter++}`;
-  const room: Room = { id, players: new Map(), tick: 0 };
+  const room: Room = {
+    id,
+    players: { player1: null, player2: null },
+    turn: 0,
+    deadline_at: 0,
+    intents: { player1: null, player2: null },
+    last_state: { turn: 0, players: { player1: false, player2: false }, note: "init" },
+    last_log: []
+  };
   rooms.set(id, room);
   return room;
 }
 
+function has_open_slot(room: Room): boolean {
+  return room.players.player1 === null || room.players.player2 === null;
+}
+
 function find_open_room(): Room | null {
   for (const room of rooms.values()) {
-    if (room.players.size < ROOM_SIZE) {
+    if (has_open_slot(room)) {
       return room;
     }
   }
@@ -51,22 +106,130 @@ function find_open_room(): Room | null {
 }
 
 function assign_slot(room: Room): PlayerSlot {
-  if (!room.players.has("player1")) {
-    return "player1";
-  }
-  if (!room.players.has("player2")) {
-    return "player2";
-  }
+  if (!room.players.player1) return "player1";
+  if (!room.players.player2) return "player2";
   throw new Error("Room is full");
 }
 
-function join_room(ws: WebSocket, requested?: RoomId): void {
-  if (socket_info.has(ws)) {
+function start_turn(room: Room): void {
+  room.turn += 1;
+  room.deadline_at = now() + TURN_MS;
+  room.intents = { player1: null, player2: null };
+  broadcast(room, {
+    $: "info_turn",
+    room: room.id,
+    turn: room.turn,
+    deadline_at: room.deadline_at,
+    intents: room_intents(room)
+  });
+}
+
+function ensure_turn_started(room: Room): void {
+  if (room.deadline_at > 0) {
+    return;
+  }
+  if (room.players.player1 && room.players.player2) {
+    start_turn(room);
+  }
+}
+
+function resolve_turn(room: Room): void {
+  const resolved_turn = room.turn;
+  const log = [
+    `resolved turn ${resolved_turn}`,
+    `player1_intent:${room.intents.player1 !== null ? "locked" : "missing"}`,
+    `player2_intent:${room.intents.player2 !== null ? "locked" : "missing"}`
+  ];
+
+  const state = build_state(room, resolved_turn, "dummy state");
+  room.last_state = state;
+  room.last_log = log;
+
+  broadcast(room, { $: "info_state", room: room.id, state, log });
+  start_turn(room);
+}
+
+function intents_complete(room: Room): boolean {
+  if (!room.players.player1 || !room.players.player2) {
+    return false;
+  }
+  return room.intents.player1 !== null && room.intents.player2 !== null;
+}
+
+function end_match(room: Room, losers: PlayerSlot[]): void {
+  let winner: PlayerSlot | undefined;
+  if (losers.length === 1) {
+    winner = losers[0] === "player1" ? "player2" : "player1";
+  }
+
+  broadcast(room, {
+    $: "info_forfeit",
+    room: room.id,
+    turn: room.turn,
+    losers,
+    winner
+  });
+
+  for (const record of Object.values(room.players)) {
+    if (record?.ws) {
+      socket_info.delete(record.ws);
+    }
+  }
+
+  rooms.delete(room.id);
+}
+
+function attach(ws: WebSocket, room: Room, slot: PlayerSlot, token: string, reconnect: boolean): void {
+  const record: PlayerRecord = room.players[slot] ?? { slot, token, ws: null };
+  record.ws = ws;
+  room.players[slot] = record;
+  socket_info.set(ws, { room_id: room.id, slot, token });
+
+  send(ws, { $: "info_join", room: room.id, slot, token, reconnect });
+  send(ws, { $: "info_state", room: room.id, state: room.last_state, log: room.last_log });
+
+  if (room.deadline_at > 0) {
+    send(ws, {
+      $: "info_turn",
+      room: room.id,
+      turn: room.turn,
+      deadline_at: room.deadline_at,
+      intents: room_intents(room)
+    });
+  }
+
+  if (!reconnect) {
+    broadcast(room, { $: "info_room", room: room.id, players: room_players(room) });
+  }
+
+  ensure_turn_started(room);
+}
+
+function find_by_token(token: string): { room: Room; slot: PlayerSlot } | null {
+  for (const room of rooms.values()) {
+    for (const slot of ["player1", "player2"] as const) {
+      const record = room.players[slot];
+      if (record && record.token === token) {
+        return { room, slot };
+      }
+    }
+  }
+  return null;
+}
+
+function join_room(ws: WebSocket, requested?: RoomId, token?: string): void {
+  if (token) {
+    const match = find_by_token(token);
+    if (!match) {
+      send(ws, { $: "info_error", message: "Invalid token" });
+      return;
+    }
+    attach(ws, match.room, match.slot, token, true);
     return;
   }
 
   let room = requested ? rooms.get(requested) || null : null;
-  if (room && room.players.size >= ROOM_SIZE) {
+  if (room && !has_open_slot(room)) {
     send(ws, { $: "info_error", message: `Room full: ${room.id}` });
     room = null;
   }
@@ -76,14 +239,11 @@ function join_room(ws: WebSocket, requested?: RoomId): void {
   }
 
   const slot = assign_slot(room);
-  room.players.set(slot, ws);
-  socket_info.set(ws, { room_id: room.id, slot });
-
-  send(ws, { $: "info_join", room: room.id, slot });
-  broadcast(room, { $: "info_room", room: room.id, players: room_players(room) });
+  const new_token = gen_token();
+  attach(ws, room, slot, new_token, false);
 }
 
-function leave_room(ws: WebSocket): void {
+function detach_socket(ws: WebSocket): void {
   const info = socket_info.get(ws);
   if (!info) {
     return;
@@ -91,10 +251,9 @@ function leave_room(ws: WebSocket): void {
 
   const room = rooms.get(info.room_id);
   if (room) {
-    room.players.delete(info.slot);
-    broadcast(room, { $: "info_room", room: room.id, players: room_players(room) });
-    if (room.players.size === 0) {
-      rooms.delete(room.id);
+    const record = room.players[info.slot];
+    if (record && record.token === info.token) {
+      record.ws = null;
     }
   }
 
@@ -119,13 +278,13 @@ function handle_message(ws: WebSocket, msg: ClientMessage): void {
       send(ws, { $: "info_time", time: now() });
       return;
     case "join":
-      leave_room(ws);
-      join_room(ws, msg.room);
+      detach_socket(ws);
+      join_room(ws, msg.room, msg.token);
       return;
     case "leave":
-      leave_room(ws);
+      detach_socket(ws);
       return;
-    case "input": {
+    case "submit_intent": {
       const info = socket_info.get(ws);
       if (!info) {
         send(ws, { $: "info_error", message: "Not in a room" });
@@ -136,7 +295,32 @@ function handle_message(ws: WebSocket, msg: ClientMessage): void {
         send(ws, { $: "info_error", message: "Room not found" });
         return;
       }
-      broadcast(room, { $: "info_input", room: room.id, slot: info.slot, input: msg.input, seq: msg.seq });
+      if (room.deadline_at === 0) {
+        send(ws, { $: "info_error", message: "Turn not active" });
+        return;
+      }
+      if (msg.turn !== undefined && msg.turn !== room.turn) {
+        send(ws, { $: "info_error", message: `Wrong turn: ${msg.turn}` });
+        return;
+      }
+      if (room.intents[info.slot] !== null) {
+        send(ws, { $: "info_error", message: "Intent already locked" });
+        return;
+      }
+
+      room.intents[info.slot] = msg.intent;
+      broadcast(room, { $: "info_intent_locked", room: room.id, slot: info.slot, turn: room.turn });
+      broadcast(room, {
+        $: "info_turn",
+        room: room.id,
+        turn: room.turn,
+        deadline_at: room.deadline_at,
+        intents: room_intents(room)
+      });
+
+      if (intents_complete(room)) {
+        resolve_turn(room);
+      }
       return;
     }
     case "ping":
@@ -160,26 +344,30 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
-    leave_room(ws);
+    detach_socket(ws);
   });
 });
 
 setInterval(() => {
+  const t = now();
   for (const room of rooms.values()) {
-    if (room.players.size === 0) {
+    if (room.deadline_at === 0) {
       continue;
     }
-    room.tick += 1;
-    const state: DummyState = {
-      tick: room.tick,
-      players: {
-        player1: room.players.has("player1"),
-        player2: room.players.has("player2")
-      },
-      note: "dummy state"
-    };
-    broadcast(room, { $: "info_state", room: room.id, state });
+    if (t < room.deadline_at) {
+      continue;
+    }
+    const losers: PlayerSlot[] = [];
+    if (room.players.player1 && room.intents.player1 === null) {
+      losers.push("player1");
+    }
+    if (room.players.player2 && room.intents.player2 === null) {
+      losers.push("player2");
+    }
+    if (losers.length > 0) {
+      end_match(room, losers);
+    }
   }
-}, BROADCAST_MS);
+}, DEADLINE_CHECK_MS);
 
 console.log(`[WS] Listening on ws://localhost:${PORT}`);
