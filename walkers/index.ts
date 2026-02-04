@@ -179,6 +179,8 @@ const enemy_hp = document.getElementById("enemy-hp")!;
 const player_hp = document.getElementById("player-hp")!;
 const player_sprite = document.getElementById("player-sprite") as HTMLImageElement;
 const enemy_sprite = document.getElementById("enemy-sprite") as HTMLImageElement;
+const player_sprite_wrap = document.getElementById("player-sprite-wrap") as HTMLDivElement;
+const enemy_sprite_wrap = document.getElementById("enemy-sprite-wrap") as HTMLDivElement;
 
 const prematch = document.getElementById("prematch")!;
 const prematch_hint = document.getElementById("prematch-hint")!;
@@ -222,6 +224,8 @@ let last_ready_snapshot: Record<PlayerSlot, boolean> | null = null;
 let participants: { players: Record<PlayerSlot, string | null>; spectators: string[] } | null = null;
 let ready_order: PlayerSlot[] = [];
 let intent_locked = false;
+const hp_animation: { player?: number; enemy?: number } = {};
+const animation_timers: number[] = [];
 
 const selected: string[] = [];
 let active_tab: string | null = null;
@@ -838,7 +842,10 @@ function log_events(log: EventLog[]): void {
   }
 }
 
-function update_panels(state: GameState): void {
+function update_panels(
+  state: GameState,
+  opts?: { skipMeta?: { player?: boolean; enemy?: boolean }; skipBar?: { player?: boolean; enemy?: boolean } }
+): void {
   if (!slot) return;
   const me = state.players[slot];
   const opp = state.players[slot === "player1" ? "player2" : "player1"];
@@ -846,19 +853,175 @@ function update_panels(state: GameState): void {
   const opp_active = opp.team[opp.activeIndex];
 
   player_title.textContent = me.name || player_name;
-  player_meta.textContent = `Lv ${my_active.level} · HP ${my_active.hp}/${my_active.maxHp}`;
-  player_hp.style.width = `${Math.max(0, Math.min(1, my_active.hp / my_active.maxHp)) * 100}%`;
+  if (!opts?.skipMeta?.player) {
+    player_meta.textContent = `Lv ${my_active.level} · HP ${my_active.hp}/${my_active.maxHp}`;
+  }
+  if (!opts?.skipBar?.player) {
+    player_hp.style.width = `${Math.max(0, Math.min(1, my_active.hp / my_active.maxHp)) * 100}%`;
+  }
   player_sprite.src = icon_path(my_active.id);
 
   enemy_title.textContent = opp.name || "Opponent";
-  enemy_meta.textContent = `Lv ${opp_active.level} · HP ${opp_active.hp}/${opp_active.maxHp}`;
-  enemy_hp.style.width = `${Math.max(0, Math.min(1, opp_active.hp / opp_active.maxHp)) * 100}%`;
+  if (!opts?.skipMeta?.enemy) {
+    enemy_meta.textContent = `Lv ${opp_active.level} · HP ${opp_active.hp}/${opp_active.maxHp}`;
+  }
+  if (!opts?.skipBar?.enemy) {
+    enemy_hp.style.width = `${Math.max(0, Math.min(1, opp_active.hp / opp_active.maxHp)) * 100}%`;
+  }
   enemy_sprite.src = icon_path(opp_active.id);
 }
 
+function animate_hp_text(
+  side: "player" | "enemy",
+  level: number,
+  from: number,
+  to: number,
+  maxHp: number,
+  delay: number = 180
+): void {
+  const target = side === "player" ? player_meta : enemy_meta;
+  const start = performance.now();
+  const duration = 260;
+  const raf_key = side;
+  if (hp_animation[raf_key]) {
+    cancelAnimationFrame(hp_animation[raf_key]!);
+  }
+  const tick = (now: number) => {
+    const elapsed = now - start;
+    if (elapsed < delay) {
+      hp_animation[raf_key] = requestAnimationFrame(tick);
+      return;
+    }
+    const t = Math.min(1, (elapsed - delay) / duration);
+    const value = Math.round(from + (to - from) * t);
+    target.textContent = `Lv ${level} · HP ${value}/${maxHp}`;
+    if (t < 1) {
+      hp_animation[raf_key] = requestAnimationFrame(tick);
+    }
+  };
+  hp_animation[raf_key] = requestAnimationFrame(tick);
+}
+
+function clear_animation_timers(): void {
+  while (animation_timers.length) {
+    const id = animation_timers.pop();
+    if (id !== undefined) {
+      clearTimeout(id);
+    }
+  }
+}
+
+function schedule_animation(fn: () => void, delay: number): void {
+  const id = window.setTimeout(fn, delay);
+  animation_timers.push(id);
+}
+
+function side_from_slot(viewer_slot: PlayerSlot | null, slot_id: PlayerSlot): "player" | "enemy" {
+  if (!viewer_slot) {
+    return slot_id === "player1" ? "player" : "enemy";
+  }
+  return slot_id === viewer_slot ? "player" : "enemy";
+}
+
+type DamageStep = {
+  attackerSide: "player" | "enemy";
+  defenderSide: "player" | "enemy";
+  from: number;
+  to: number;
+  level: number;
+  maxHp: number;
+};
+
+function build_damage_steps(prev_state: GameState, log: EventLog[], viewer_slot: PlayerSlot | null): DamageStep[] {
+  const temp: GameState = JSON.parse(JSON.stringify(prev_state));
+  const steps: DamageStep[] = [];
+  for (const entry of log) {
+    if (entry.type === "switch" || entry.type === "forced_switch") {
+      const data = entry.data as { slot?: PlayerSlot; to?: number } | undefined;
+      if (!data || !data.slot || typeof data.to !== "number") continue;
+      temp.players[data.slot].activeIndex = data.to;
+      continue;
+    }
+    if (entry.type !== "damage") continue;
+    const payload = entry.data as { slot?: PlayerSlot; damage?: number } | undefined;
+    if (!payload || typeof payload.damage !== "number" || payload.damage <= 0 || !payload.slot) {
+      continue;
+    }
+    const defender_slot = payload.slot === "player1" ? "player2" : "player1";
+    const defender_player = temp.players[defender_slot];
+    const defender = defender_player.team[defender_player.activeIndex];
+    const from = defender.hp;
+    const to = Math.max(0, from - payload.damage);
+    defender.hp = to;
+    const defenderSide = side_from_slot(viewer_slot, defender_slot);
+    const attackerSide = defenderSide === "player" ? "enemy" : "player";
+    steps.push({
+      attackerSide,
+      defenderSide,
+      from,
+      to,
+      level: defender.level,
+      maxHp: defender.maxHp
+    });
+  }
+  return steps;
+}
+
+function animate_hp_bar(bar: HTMLSpanElement, from: number, to: number): void {
+  bar.classList.remove("hp-anim");
+  bar.style.transition = "none";
+  bar.style.width = `${from}%`;
+  void bar.offsetWidth;
+  bar.style.transition = "";
+  bar.classList.add("hp-anim");
+  bar.style.width = `${to}%`;
+  window.setTimeout(() => {
+    bar.classList.remove("hp-anim");
+  }, 450);
+}
+
 function handle_state(data: { state: GameState; log: EventLog[] }): void {
+  const prev_state = latest_state;
+  clear_animation_timers();
+  const damage_steps = prev_state ? build_damage_steps(prev_state, data.log, slot) : [];
+  const hit_sides = new Set<"player" | "enemy">(damage_steps.map((step) => step.defenderSide));
   latest_state = data.state;
-  update_panels(data.state);
+  update_panels(data.state, {
+    skipMeta: {
+      player: hit_sides.has("player"),
+      enemy: hit_sides.has("enemy")
+    },
+    skipBar: {
+      player: hit_sides.has("player"),
+      enemy: hit_sides.has("enemy")
+    }
+  });
+  if (damage_steps.length > 0) {
+    const step_duration = 650;
+    damage_steps.forEach((step, index) => {
+      const delay = index * step_duration;
+      schedule_animation(() => {
+        const attacker_wrap = step.attackerSide === "player" ? player_sprite_wrap : enemy_sprite_wrap;
+        const defender_wrap = step.defenderSide === "player" ? player_sprite_wrap : enemy_sprite_wrap;
+        attacker_wrap.classList.remove("jump");
+        void attacker_wrap.offsetWidth;
+        attacker_wrap.classList.add("jump");
+        defender_wrap.classList.remove("hit");
+        void defender_wrap.offsetWidth;
+        defender_wrap.classList.add("hit");
+        const bar = step.defenderSide === "player" ? player_hp : enemy_hp;
+        const from_percent = Math.max(0, Math.min(1, step.from / step.maxHp)) * 100;
+        const to_percent = Math.max(0, Math.min(1, step.to / step.maxHp)) * 100;
+        animate_hp_bar(bar, from_percent, to_percent);
+        animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, 180);
+      }, delay);
+    });
+    schedule_animation(() => {
+      update_panels(data.state);
+    }, damage_steps.length * step_duration + 50);
+  } else {
+    update_panels(data.state);
+  }
   close_switch_modal();
   if (data.log.length) {
     log_events(data.log);

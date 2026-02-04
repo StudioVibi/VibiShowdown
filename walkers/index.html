@@ -124,6 +124,12 @@
         height: 100%;
         width: 100%;
         background: linear-gradient(90deg, #5ef2a0 0%, #ffcf6a 65%, #ff7d7d 100%);
+        transition: width 0.25s ease;
+        will-change: width;
+      }
+
+      .hp-bar span.hp-anim {
+        transition-delay: 0.18s;
       }
 
       .sprite {
@@ -136,6 +142,24 @@
         justify-content: center;
         overflow: hidden;
         position: relative;
+      }
+
+      .sprite::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: rgba(255, 70, 70, 0.8);
+        opacity: 0;
+        pointer-events: none;
+        mix-blend-mode: screen;
+      }
+
+      .sprite.hit::after {
+        animation: hitFlash 0.4s ease;
+      }
+
+      .sprite.jump {
+        animation: jump 0.3s ease;
       }
 
       .sprite img {
@@ -706,6 +730,39 @@
         }
       }
 
+      @keyframes jump {
+        0% {
+          transform: translateY(0);
+        }
+        40% {
+          transform: translateY(-8px);
+        }
+        70% {
+          transform: translateY(0);
+        }
+        100% {
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes hitFlash {
+        0% {
+          opacity: 0;
+        }
+        20% {
+          opacity: 0.8;
+        }
+        40% {
+          opacity: 0;
+        }
+        60% {
+          opacity: 0.8;
+        }
+        100% {
+          opacity: 0;
+        }
+      }
+
       @media (max-width: 680px) {
         #frame {
           padding: 14px;
@@ -749,9 +806,9 @@
                 <div class="panel-sub" id="enemy-meta">Lv 10 · HP 40/40</div>
                 <div class="hp-bar"><span id="enemy-hp"></span></div>
               </div>
-              <div class="sprite">
-                <img id="enemy-sprite" src="/icons/unit_harpy.png" alt="Enemy" />
-              </div>
+            <div class="sprite" id="enemy-sprite-wrap">
+              <img id="enemy-sprite" src="/icons/unit_harpy.png" alt="Enemy" />
+            </div>
             </section>
 
             <section class="arena">
@@ -779,9 +836,9 @@
             </section>
 
             <section class="panel player">
-              <div class="sprite">
-                <img id="player-sprite" src="/icons/unit_knight.png" alt="Player" />
-              </div>
+            <div class="sprite" id="player-sprite-wrap">
+              <img id="player-sprite" src="/icons/unit_knight.png" alt="Player" />
+            </div>
               <div class="panel-info">
                 <div class="panel-name" id="player-name">Player</div>
                 <div class="panel-sub" id="player-meta">Lv 10 · HP 40/40</div>
