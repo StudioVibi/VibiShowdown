@@ -34,19 +34,21 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        overflow: hidden;
       }
 
       #app {
         width: 100%;
+        height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 24px;
+        padding: 16px;
       }
 
       #game {
-        width: min(100vw, 100vh);
-        height: min(100vw, 100vh);
+        width: min(calc(100vw - 32px), calc(100vh - 32px));
+        height: min(calc(100vw - 32px), calc(100vh - 32px));
         max-width: 780px;
         max-height: 780px;
         background: linear-gradient(160deg, #1a1f2b 0%, #0f121b 70%);
@@ -61,16 +63,16 @@
         height: 100%;
         display: grid;
         grid-template-rows: 1fr 1.4fr 1fr;
-        gap: 10px;
-        padding: 18px;
+        gap: 8px;
+        padding: 14px;
       }
 
       .panel {
         background: rgba(31, 36, 49, 0.9);
         border-radius: 18px;
-        padding: 16px;
+        padding: 12px;
         display: grid;
-        gap: 14px;
+        gap: 10px;
         align-items: center;
         box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
       }
@@ -90,7 +92,7 @@
       }
 
       .panel-name {
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 700;
       }
 
@@ -135,16 +137,16 @@
       .arena {
         background: linear-gradient(160deg, #121827 0%, #0e111a 70%);
         border-radius: 18px;
-        padding: 16px;
+        padding: 12px;
         display: grid;
         grid-template-rows: auto 1fr auto;
-        gap: 12px;
+        gap: 10px;
         border: 1px solid rgba(255, 255, 255, 0.04);
       }
 
       .arena-top {
-        display: flex;
-        justify-content: space-between;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
         align-items: center;
         gap: 12px;
         font-size: 12px;
@@ -165,15 +167,68 @@
       .log {
         background: rgba(12, 14, 20, 0.6);
         border-radius: 12px;
-        padding: 10px;
+        padding: 8px;
         overflow: auto;
         font-family: "Space Mono", monospace;
-        font-size: 12px;
+        font-size: 11px;
         color: #c9d2ff;
       }
 
       .log p {
         margin: 0 0 6px 0;
+      }
+
+      .chat {
+        background: rgba(8, 10, 14, 0.8);
+        border-radius: 12px;
+        padding: 8px;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 6px;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: #d0d6ff;
+        border: 1px solid rgba(255, 255, 255, 0.04);
+      }
+
+      .chat h6 {
+        margin: 0;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .chat-messages {
+        overflow: auto;
+        display: grid;
+        gap: 4px;
+      }
+
+      .chat-input {
+        display: flex;
+        gap: 6px;
+      }
+
+      .chat-input input {
+        flex: 1;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(10, 12, 18, 0.8);
+        color: var(--text);
+        padding: 5px 8px;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+      }
+
+      .chat-input button {
+        border: none;
+        border-radius: 8px;
+        padding: 6px 8px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        cursor: pointer;
+        font-size: 11px;
       }
 
       .actions {
@@ -206,7 +261,7 @@
       .actions button {
         border: none;
         border-radius: 12px;
-        padding: 10px 8px;
+        padding: 8px;
         background: #222a3a;
         color: var(--text);
         font-weight: 600;
@@ -232,7 +287,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 18px;
+        padding: 12px;
         animation: fadeIn 0.4s ease;
       }
 
@@ -241,10 +296,10 @@
         height: 100%;
         background: rgba(23, 27, 37, 0.95);
         border-radius: 18px;
-        padding: 18px;
+        padding: 14px;
         display: grid;
         grid-template-rows: auto 1fr auto;
-        gap: 12px;
+        gap: 10px;
         border: 1px solid rgba(255, 255, 255, 0.05);
       }
 
@@ -259,14 +314,14 @@
       .setup-grid {
         display: grid;
         grid-template-columns: 1.1fr 0.9fr;
-        gap: 14px;
+        gap: 10px;
         height: 100%;
       }
 
       .roster {
         background: rgba(15, 18, 26, 0.8);
         border-radius: 14px;
-        padding: 12px;
+        padding: 10px;
         display: grid;
         grid-template-rows: auto 1fr;
         gap: 10px;
@@ -282,17 +337,17 @@
       .roster-list {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
-        gap: 10px;
+        gap: 8px;
         overflow: auto;
       }
 
       .roster-card {
         background: rgba(255, 255, 255, 0.04);
         border-radius: 12px;
-        padding: 10px;
+        padding: 8px;
         display: grid;
-        grid-template-columns: 44px 1fr;
-        gap: 10px;
+        grid-template-columns: 36px 1fr;
+        gap: 8px;
         align-items: center;
         border: 1px solid transparent;
       }
@@ -330,14 +385,14 @@
 
       .build {
         display: grid;
-        gap: 10px;
+        gap: 8px;
         grid-template-rows: auto auto 1fr;
       }
 
       .slots {
         background: rgba(15, 18, 26, 0.8);
         border-radius: 14px;
-        padding: 12px;
+        padding: 10px;
         display: grid;
         gap: 8px;
       }
@@ -355,7 +410,7 @@
       .config {
         background: rgba(15, 18, 26, 0.8);
         border-radius: 14px;
-        padding: 12px;
+        padding: 10px;
         display: grid;
         gap: 10px;
       }
@@ -404,7 +459,7 @@
       .config-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
-        gap: 8px;
+        gap: 6px;
       }
 
       .config-grid label {
@@ -419,7 +474,31 @@
         border: 1px solid rgba(255, 255, 255, 0.08);
         background: rgba(10, 12, 18, 0.8);
         color: var(--text);
-        padding: 6px 8px;
+        padding: 5px 8px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      .status-pill.ok {
+        background: rgba(94, 242, 160, 0.2);
+        color: var(--ok);
+      }
+
+      .status-pill.warn {
+        background: rgba(255, 207, 106, 0.2);
+        color: var(--accent);
+      }
+
+      .status-pill.off {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--muted);
       }
 
       .warning {
@@ -500,14 +579,22 @@
                 <div>Room: <span id="status-room">-</span></div>
                 <div>Player: <span id="status-name">-</span></div>
                 <div>Slot: <span id="status-slot">-</span></div>
-                <div>You: <span id="status-ready">not ready</span></div>
-                <div>Opponent: <span id="status-opponent">waiting</span></div>
+                <div>You: <span id="status-ready" class="status-pill off">not ready</span></div>
+                <div>Opponent: <span id="status-opponent" class="status-pill off">waiting</span></div>
                 <div>Ping: <span id="status-ping">--</span></div>
                 <div>WS: <span id="status-conn">connecting</span></div>
               </div>
               <div class="turn-info">
                 Turn <span id="status-turn">0</span><br />
                 <span id="status-deadline">--:--</span>
+              </div>
+              <div class="chat">
+                <h6>Room Log</h6>
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-input">
+                  <input id="chat-input" type="text" placeholder="(system only)" disabled />
+                  <button id="chat-send" disabled>Send</button>
+                </div>
               </div>
             </div>
             <div class="log" id="log-list"></div>

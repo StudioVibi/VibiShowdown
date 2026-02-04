@@ -167,6 +167,7 @@ const status_deadline = document.getElementById("status-deadline")!;
 const status_ready = document.getElementById("status-ready")!;
 const status_opponent = document.getElementById("status-opponent")!;
 const log_list = document.getElementById("log-list")!;
+const chat_messages = document.getElementById("chat-messages")!;
 
 const player_title = document.getElementById("player-name")!;
 const player_meta = document.getElementById("player-meta")!;
@@ -222,6 +223,13 @@ function append_log(line: string): void {
   p.textContent = line;
   log_list.appendChild(p);
   log_list.scrollTop = log_list.scrollHeight;
+}
+
+function append_chat(line: string): void {
+  const p = document.createElement("p");
+  p.textContent = line;
+  chat_messages.appendChild(p);
+  chat_messages.scrollTop = chat_messages.scrollHeight;
 }
 
 function update_deadline(): void {
@@ -532,7 +540,7 @@ function render_roster(): void {
     const is_disabled = (!is_selected && selected.length >= 3) || (is_ready && !match_started);
     card.className = `roster-card${is_selected ? " active" : ""}${is_disabled ? " disabled" : ""}`;
     card.innerHTML = `
-      <div class="sprite" style="width:44px;height:44px;">
+      <div class="sprite" style="width:36px;height:36px;">
         <img src="${icon_path(entry.id)}" alt="${entry.name}" />
       </div>
       <div>
@@ -641,6 +649,7 @@ function send_ready(next_ready: boolean): void {
 function update_ready_ui(): void {
   status_ready.textContent = is_ready ? "ready" : "not ready";
   ready_btn.textContent = is_ready ? "Unready" : "Ready";
+  status_ready.className = `status-pill ${is_ready ? "ok" : "off"}`;
   if (match_started) {
     prematch_hint.textContent = "Match started.";
     return;
@@ -659,6 +668,7 @@ function update_ready_ui(): void {
 
 function update_opponent_ui(opponent_ready: boolean, opponent_name: string | null): void {
   status_opponent.textContent = opponent_ready ? "ready" : opponent_name ? "waiting" : "offline";
+  status_opponent.className = `status-pill ${opponent_ready ? "ok" : opponent_name ? "warn" : "off"}`;
 }
 
 function handle_turn_start(data: { turn: number; deadline_at: number }): void {
@@ -720,15 +730,20 @@ function handle_post(message: any): void {
         stored_token = data.token;
       }
       append_log(`assigned ${data.slot}`);
+      append_chat(`${data.name} assigned to ${data.slot}`);
       return;
     case "ready_state": {
       if (!slot) return;
-      is_ready = data.ready[slot];
       const opponent_slot = slot === "player1" ? "player2" : "player1";
+      const prev_ready = opponent_ready;
+      is_ready = data.ready[slot];
       opponent_ready = data.ready[opponent_slot];
       opponent_name = data.names[opponent_slot];
       update_ready_ui();
       update_opponent_ui(opponent_ready, opponent_name);
+      if (opponent_name && prev_ready !== opponent_ready) {
+        append_chat(opponent_ready ? `${opponent_name} is ready` : `${opponent_name} is waiting`);
+      }
       return;
     }
     case "turn_start":
@@ -742,13 +757,16 @@ function handle_post(message: any): void {
       return;
     case "forfeit":
       append_log(`forfeit: ${data.losers.join(", ")}`);
+      append_chat(`forfeit: ${data.losers.join(", ")}`);
       return;
     case "error":
       append_log(`error: ${data.message}`);
       show_warning(data.message);
+      append_chat(`error: ${data.message}`);
       return;
     case "join":
       append_log(`join: ${data.name}`);
+      append_chat(`${data.name} joined the room`);
       return;
     case "intent":
       append_log(`intent received for turn ${data.turn}`);
