@@ -152,10 +152,26 @@
         opacity: 0;
         pointer-events: none;
         mix-blend-mode: screen;
+        z-index: 4;
       }
 
       .sprite.hit::after {
         animation: hitFlash 0.4s ease;
+      }
+
+      .sprite::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: rgba(80, 255, 140, 0.75);
+        opacity: 0;
+        pointer-events: none;
+        mix-blend-mode: screen;
+        z-index: 3;
+      }
+
+      .sprite.heal::before {
+        animation: healFlash 0.35s ease;
       }
 
       .sprite.jump {
@@ -167,6 +183,28 @@
         height: 100%;
         object-fit: contain;
         filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.45));
+        position: relative;
+        z-index: 1;
+      }
+
+      .shield {
+        position: absolute;
+        width: 42%;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: rgba(200, 200, 200, 0.6);
+        opacity: 0;
+        transform: scale(0.7);
+        box-shadow: 0 0 10px rgba(200, 200, 200, 0.35);
+        z-index: 2;
+      }
+
+      .sprite.shield-on .shield {
+        animation: shieldAppear 0.4s ease;
+      }
+
+      .sprite.shield-hit .shield {
+        animation: shieldHit 0.45s ease;
       }
 
       .arena {
@@ -763,6 +801,48 @@
         }
       }
 
+      @keyframes healFlash {
+        0% {
+          opacity: 0;
+        }
+        35% {
+          opacity: 0.75;
+        }
+        100% {
+          opacity: 0;
+        }
+      }
+
+      @keyframes shieldAppear {
+        0% {
+          opacity: 0;
+          transform: scale(0.6);
+        }
+        60% {
+          opacity: 0.6;
+          transform: scale(1);
+        }
+        100% {
+          opacity: 0;
+          transform: scale(1);
+        }
+      }
+
+      @keyframes shieldHit {
+        0% {
+          opacity: 0.6;
+          background: rgba(200, 200, 200, 0.6);
+        }
+        35% {
+          opacity: 0.9;
+          background: rgba(255, 70, 70, 0.8);
+        }
+        100% {
+          opacity: 0;
+          background: rgba(255, 70, 70, 0);
+        }
+      }
+
       @media (max-width: 680px) {
         #frame {
           padding: 14px;
@@ -807,6 +887,7 @@
                 <div class="hp-bar"><span id="enemy-hp"></span></div>
               </div>
             <div class="sprite" id="enemy-sprite-wrap">
+              <div class="shield"></div>
               <img id="enemy-sprite" src="/icons/unit_harpy.png" alt="Enemy" />
             </div>
             </section>
@@ -837,6 +918,7 @@
 
             <section class="panel player">
             <div class="sprite" id="player-sprite-wrap">
+              <div class="shield"></div>
               <img id="player-sprite" src="/icons/unit_knight.png" alt="Player" />
             </div>
               <div class="panel-info">

@@ -40,7 +40,7 @@ const MOVE_LABELS: Record<string, string> = {
 
 const PASSIVE_LABELS: Record<string, string> = {
   none: "none",
-  regen_5pct: "Regen 5%"
+  regen_5pct: "Regen 3%"
 };
 
 const roster: MonsterSpec[] = [
@@ -923,23 +923,42 @@ function side_from_slot(viewer_slot: PlayerSlot | null, slot_id: PlayerSlot): "p
   return slot_id === viewer_slot ? "player" : "enemy";
 }
 
-type DamageStep = {
-  attackerSide: "player" | "enemy";
-  defenderSide: "player" | "enemy";
-  from: number;
-  to: number;
-  level: number;
-  maxHp: number;
-};
+type VisualStep =
+  | { kind: "damage"; attackerSide: "player" | "enemy"; defenderSide: "player" | "enemy"; from: number; to: number; level: number; maxHp: number }
+  | { kind: "shield_on"; side: "player" | "enemy" }
+  | { kind: "shield_hit"; attackerSide: "player" | "enemy"; defenderSide: "player" | "enemy" }
+  | { kind: "heal"; side: "player" | "enemy" };
 
-function build_damage_steps(prev_state: GameState, log: EventLog[], viewer_slot: PlayerSlot | null): DamageStep[] {
+function build_visual_steps(prev_state: GameState, log: EventLog[], viewer_slot: PlayerSlot | null): VisualStep[] {
   const temp: GameState = JSON.parse(JSON.stringify(prev_state));
-  const steps: DamageStep[] = [];
+  const steps: VisualStep[] = [];
   for (const entry of log) {
     if (entry.type === "switch" || entry.type === "forced_switch") {
       const data = entry.data as { slot?: PlayerSlot; to?: number } | undefined;
       if (!data || !data.slot || typeof data.to !== "number") continue;
       temp.players[data.slot].activeIndex = data.to;
+      continue;
+    }
+    if (entry.type === "protect") {
+      const data = entry.data as { slot?: PlayerSlot } | undefined;
+      if (!data?.slot) continue;
+      const side = side_from_slot(viewer_slot, data.slot);
+      steps.push({ kind: "shield_on", side });
+      continue;
+    }
+    if (entry.type === "damage_blocked") {
+      const data = entry.data as { slot?: PlayerSlot } | undefined;
+      if (!data?.slot) continue;
+      const defenderSide = side_from_slot(viewer_slot, data.slot);
+      const attackerSide = defenderSide === "player" ? "enemy" : "player";
+      steps.push({ kind: "shield_hit", attackerSide, defenderSide });
+      continue;
+    }
+    if (entry.type === "passive_heal") {
+      const data = entry.data as { slot?: PlayerSlot } | undefined;
+      if (!data?.slot) continue;
+      const side = side_from_slot(viewer_slot, data.slot);
+      steps.push({ kind: "heal", side });
       continue;
     }
     if (entry.type !== "damage") continue;
@@ -956,6 +975,7 @@ function build_damage_steps(prev_state: GameState, log: EventLog[], viewer_slot:
     const defenderSide = side_from_slot(viewer_slot, defender_slot);
     const attackerSide = defenderSide === "player" ? "enemy" : "player";
     steps.push({
+      kind: "damage",
       attackerSide,
       defenderSide,
       from,
@@ -980,11 +1000,26 @@ function animate_hp_bar(bar: HTMLSpanElement, from: number, to: number): void {
   }, 450);
 }
 
+function sprite_wrap(side: "player" | "enemy"): HTMLDivElement {
+  return side === "player" ? player_sprite_wrap : enemy_sprite_wrap;
+}
+
+function trigger_class(el: HTMLElement, className: string, duration: number): void {
+  el.classList.remove(className);
+  void el.offsetWidth;
+  el.classList.add(className);
+  window.setTimeout(() => {
+    el.classList.remove(className);
+  }, duration);
+}
+
 function handle_state(data: { state: GameState; log: EventLog[] }): void {
   const prev_state = latest_state;
   clear_animation_timers();
-  const damage_steps = prev_state ? build_damage_steps(prev_state, data.log, slot) : [];
-  const hit_sides = new Set<"player" | "enemy">(damage_steps.map((step) => step.defenderSide));
+  const steps = prev_state ? build_visual_steps(prev_state, data.log, slot) : [];
+  const hit_sides = new Set<"player" | "enemy">(
+    steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide)
+  );
   latest_state = data.state;
   update_panels(data.state, {
     skipMeta: {
@@ -996,29 +1031,46 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
       enemy: hit_sides.has("enemy")
     }
   });
-  if (damage_steps.length > 0) {
-    const step_duration = 650;
-    damage_steps.forEach((step, index) => {
-      const delay = index * step_duration;
+  if (steps.length > 0) {
+    let cursor = 0;
+    for (const step of steps) {
+      const duration =
+        step.kind === "damage" ? 650 : step.kind === "shield_hit" ? 420 : step.kind === "shield_on" ? 360 : 320;
       schedule_animation(() => {
-        const attacker_wrap = step.attackerSide === "player" ? player_sprite_wrap : enemy_sprite_wrap;
-        const defender_wrap = step.defenderSide === "player" ? player_sprite_wrap : enemy_sprite_wrap;
-        attacker_wrap.classList.remove("jump");
-        void attacker_wrap.offsetWidth;
-        attacker_wrap.classList.add("jump");
-        defender_wrap.classList.remove("hit");
-        void defender_wrap.offsetWidth;
-        defender_wrap.classList.add("hit");
-        const bar = step.defenderSide === "player" ? player_hp : enemy_hp;
-        const from_percent = Math.max(0, Math.min(1, step.from / step.maxHp)) * 100;
-        const to_percent = Math.max(0, Math.min(1, step.to / step.maxHp)) * 100;
-        animate_hp_bar(bar, from_percent, to_percent);
-        animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, 180);
-      }, delay);
-    });
+        if (step.kind === "damage") {
+          const attacker_wrap = sprite_wrap(step.attackerSide);
+          const defender_wrap = sprite_wrap(step.defenderSide);
+          trigger_class(attacker_wrap, "jump", 300);
+          trigger_class(defender_wrap, "hit", 420);
+          const bar = step.defenderSide === "player" ? player_hp : enemy_hp;
+          const from_percent = Math.max(0, Math.min(1, step.from / step.maxHp)) * 100;
+          const to_percent = Math.max(0, Math.min(1, step.to / step.maxHp)) * 100;
+          animate_hp_bar(bar, from_percent, to_percent);
+          animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, 180);
+          return;
+        }
+        if (step.kind === "shield_on") {
+          const wrap = sprite_wrap(step.side);
+          trigger_class(wrap, "shield-on", 400);
+          return;
+        }
+        if (step.kind === "shield_hit") {
+          const attacker_wrap = sprite_wrap(step.attackerSide);
+          const defender_wrap = sprite_wrap(step.defenderSide);
+          trigger_class(attacker_wrap, "jump", 300);
+          trigger_class(defender_wrap, "shield-hit", 450);
+          return;
+        }
+        if (step.kind === "heal") {
+          const wrap = sprite_wrap(step.side);
+          trigger_class(wrap, "heal", 360);
+        }
+      }, cursor);
+      cursor += duration;
+    }
     schedule_animation(() => {
       update_panels(data.state);
-    }, damage_steps.length * step_duration + 50);
+    }, cursor + 50);
   } else {
     update_panels(data.state);
   }
