@@ -70,6 +70,10 @@ function clone_monster(monster: MonsterState): MonsterState {
   };
 }
 
+function empty_pending(): Record<PlayerSlot, boolean> {
+  return { player1: false, player2: false };
+}
+
 function clone_player(player: PlayerState): PlayerState {
   return {
     slot: player.slot,
@@ -87,7 +91,8 @@ export function clone_state(state: GameState): GameState {
     players: {
       player1: clone_player(state.players.player1),
       player2: clone_player(state.players.player2)
-    }
+    },
+    pendingSwitch: { ...state.pendingSwitch }
   };
 }
 
@@ -190,13 +195,12 @@ function handle_faint(state: GameState, log: EventLog[], slot: PlayerSlot): void
   if (next_index === null) {
     return;
   }
-  const from = player.activeIndex;
-  player.activeIndex = next_index;
+  state.pendingSwitch[slot] = true;
   log.push({
-    type: "forced_switch",
+    type: "forced_switch_pending",
     turn: state.turn,
-    summary: `${slot} forced switch to ${player.team[next_index].name}`,
-    data: { slot, from, to: next_index }
+    summary: `${slot} must choose a replacement`,
+    data: { slot }
   });
 }
 
@@ -403,7 +407,8 @@ export function create_initial_state(
     players: {
       player1: build_player("player1"),
       player2: build_player("player2")
-    }
+    },
+    pendingSwitch: empty_pending()
   };
 }
 
@@ -416,6 +421,10 @@ export function resolve_turn(
 
   if (next.status !== "running") {
     return { state: next, log };
+  }
+
+  if (!next.pendingSwitch) {
+    next.pendingSwitch = empty_pending();
   }
 
   reset_protect_flags(next);
@@ -492,10 +501,45 @@ export function resolve_turn(
   return { state: next, log };
 }
 
+export function apply_forced_switch(
+  state: GameState,
+  slot: PlayerSlot,
+  targetIndex: number
+): { state: GameState; log: EventLog[]; error?: string } {
+  const next = clone_state(state);
+  const log: EventLog[] = [];
+  const player = next.players[slot];
+  if (!next.pendingSwitch[slot]) {
+    return { state: next, log, error: "no pending switch" };
+  }
+  if (targetIndex < 0 || targetIndex >= player.team.length) {
+    return { state: next, log, error: "invalid switch target" };
+  }
+  if (targetIndex === player.activeIndex) {
+    return { state: next, log, error: "already active" };
+  }
+  if (!is_alive(player.team[targetIndex])) {
+    return { state: next, log, error: "target fainted" };
+  }
+  const from = player.activeIndex;
+  player.activeIndex = targetIndex;
+  next.pendingSwitch[slot] = false;
+  log.push({
+    type: "forced_switch",
+    turn: next.turn,
+    summary: `${slot} switched to ${player.team[targetIndex].name}`,
+    data: { slot, from, to: targetIndex }
+  });
+  return { state: next, log };
+}
+
 export function validate_intent(state: GameState, slot: PlayerSlot, intent: PlayerIntent): string | null {
   const player = state.players[slot];
   if (!player) {
     return "unknown player";
+  }
+  if (state.pendingSwitch[slot]) {
+    return "pending switch";
   }
   const active = active_monster(player);
   if (intent.action === "switch") {

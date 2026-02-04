@@ -14,13 +14,19 @@ function from_global_override(): string | undefined {
 }
 
 function normalize(value: string): string {
-  if (value.startsWith("wss://")) {
+  if (value.startsWith("wss://") || value.startsWith("ws://")) {
     return value;
   }
-  if (value.startsWith("ws://")) {
-    return `wss://${value.slice("ws://".length)}`;
+  if (value.startsWith("https://")) {
+    return `wss://${value.slice("https://".length)}`;
   }
-  return `wss://${value}`;
+  if (value.startsWith("http://")) {
+    return `ws://${value.slice("http://".length)}`;
+  }
+  const lower = value.toLowerCase();
+  const is_local =
+    lower.startsWith("localhost") || lower.startsWith("127.0.0.1") || lower.startsWith("0.0.0.0");
+  return `${is_local ? "ws" : "wss"}://${value}`;
 }
 
 function from_query_param(): string | undefined {

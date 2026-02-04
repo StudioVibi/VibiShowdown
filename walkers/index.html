@@ -44,11 +44,22 @@
         align-items: center;
         justify-content: center;
         padding: 16px;
+        position: relative;
+      }
+
+      #stage {
+        --side-chat-width: min(210px, 34vw);
+        --game-size: min(calc(100vw - 32px - var(--side-chat-width) - 12px), calc(100vh - 32px));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        flex-wrap: wrap;
       }
 
       #game {
-        width: min(calc(100vw - 32px), calc(100vh - 32px));
-        height: min(calc(100vw - 32px), calc(100vh - 32px));
+        width: min(var(--game-size), 780px);
+        height: min(var(--game-size), 780px);
         max-width: 780px;
         max-height: 780px;
         background: linear-gradient(160deg, #1a1f2b 0%, #0f121b 70%);
@@ -139,14 +150,15 @@
         border-radius: 18px;
         padding: 12px;
         display: grid;
-        grid-template-rows: auto 1fr auto;
+        grid-template-rows: auto 1fr;
         gap: 10px;
         border: 1px solid rgba(255, 255, 255, 0.04);
+        position: relative;
       }
 
       .arena-top {
         display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-columns: 1fr auto;
         align-items: center;
         gap: 12px;
         font-size: 12px;
@@ -164,18 +176,46 @@
         text-align: right;
       }
 
-      .log {
+      .action-pad {
         background: rgba(12, 14, 20, 0.6);
-        border-radius: 12px;
-        padding: 8px;
-        overflow: auto;
+        border-radius: 16px;
+        padding: 14px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        align-content: center;
+        justify-content: center;
         font-family: "Space Mono", monospace;
-        font-size: 11px;
-        color: #c9d2ff;
+        font-size: 12px;
       }
 
-      .log p {
-        margin: 0 0 6px 0;
+      .action-pad .action-btn {
+        border: none;
+        border-radius: 12px;
+        padding: 12px 10px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-weight: 600;
+        cursor: pointer;
+        min-height: 44px;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .action-pad .action-btn:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.35);
+      }
+
+      .action-pad .action-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .action-pad .switch-btn {
+        grid-column: span 2;
+        background: linear-gradient(140deg, #6ed6ff, #5ef2a0);
+        color: #0b1220;
+        font-weight: 700;
       }
 
       .chat {
@@ -186,7 +226,7 @@
         grid-template-rows: auto 1fr auto;
         gap: 6px;
         font-family: "Space Mono", monospace;
-        font-size: 11px;
+        font-size: 12px;
         color: #d0d6ff;
         border: 1px solid rgba(255, 255, 255, 0.04);
       }
@@ -202,7 +242,12 @@
       .chat-messages {
         overflow: auto;
         display: grid;
-        gap: 4px;
+        gap: 3px;
+        align-content: start;
+      }
+
+      .chat-messages p {
+        margin: 0;
       }
 
       .chat-input {
@@ -229,6 +274,132 @@
         color: var(--text);
         cursor: pointer;
         font-size: 11px;
+      }
+
+      .side-panel {
+        width: var(--side-chat-width);
+        height: min(var(--game-size), 780px);
+        display: grid;
+        grid-template-rows: auto 2fr 3fr;
+        gap: 6px;
+      }
+
+      .side-panel > * {
+        min-height: 0;
+      }
+
+      .side-info {
+        background: rgba(8, 10, 14, 0.8);
+        border-radius: 12px;
+        padding: 8px;
+        display: grid;
+        gap: 4px;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: #d0d6ff;
+        border: 1px solid rgba(255, 255, 255, 0.04);
+      }
+
+      .participants {
+        background: rgba(8, 10, 14, 0.8);
+        border-radius: 12px;
+        padding: 8px;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 6px;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: #d0d6ff;
+        border: 1px solid rgba(255, 255, 255, 0.04);
+      }
+
+      .participants h6 {
+        margin: 0;
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .participants-list {
+        overflow: auto;
+        display: grid;
+        gap: 3px;
+        align-content: start;
+      }
+
+      .participant {
+        display: flex;
+        justify-content: space-between;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .participant-meta {
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .switch-modal {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(8, 10, 14, 0.7);
+        backdrop-filter: blur(4px);
+        z-index: 3;
+      }
+
+      .switch-modal.open {
+        display: flex;
+      }
+
+      .switch-panel {
+        background: rgba(18, 22, 32, 0.95);
+        border-radius: 14px;
+        padding: 12px;
+        width: min(240px, 80%);
+        display: grid;
+        gap: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .switch-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--accent);
+      }
+
+      .switch-options {
+        display: grid;
+        gap: 6px;
+      }
+
+      .switch-options button {
+        border: none;
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .switch-options button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .switch-close {
+        border: none;
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        font-size: 11px;
+        cursor: pointer;
+      }
       }
 
       .actions {
@@ -544,6 +715,19 @@
           padding: 14px;
         }
 
+        #stage {
+          flex-direction: column;
+        }
+
+        #stage {
+          --game-size: min(calc(100vw - 32px), calc(100vh - 32px - 180px));
+        }
+
+        .side-panel {
+          width: min(320px, calc(100vw - 32px));
+          height: 220px;
+        }
+
         .setup-grid {
           grid-template-columns: 1fr;
         }
@@ -560,121 +744,125 @@
   </head>
   <body>
     <div id="app">
-      <div id="game">
-        <div id="frame">
-          <section class="panel enemy">
-            <div class="panel-info">
-              <div class="panel-name" id="enemy-name">Enemy</div>
-              <div class="panel-sub" id="enemy-meta">Lv 10 · HP 40/40</div>
-              <div class="hp-bar"><span id="enemy-hp"></span></div>
-            </div>
-            <div class="sprite">
-              <img id="enemy-sprite" src="/icons/unit_harpy.png" alt="Enemy" />
-            </div>
-          </section>
+      <div id="stage">
+        <div id="game">
+          <div id="frame">
+            <section class="panel enemy">
+              <div class="panel-info">
+                <div class="panel-name" id="enemy-name">Enemy</div>
+                <div class="panel-sub" id="enemy-meta">Lv 10 · HP 40/40</div>
+                <div class="hp-bar"><span id="enemy-hp"></span></div>
+              </div>
+              <div class="sprite">
+                <img id="enemy-sprite" src="/icons/unit_harpy.png" alt="Enemy" />
+              </div>
+            </section>
 
-          <section class="arena">
-            <div class="arena-top">
-              <div class="status-stack">
-                <div>Room: <span id="status-room">-</span></div>
-                <div>Player: <span id="status-name">-</span></div>
-                <div>Slot: <span id="status-slot">-</span></div>
-                <div>You: <span id="status-ready" class="status-pill off">not ready</span></div>
-                <div>Opponent: <span id="status-opponent" class="status-pill off">waiting</span></div>
-                <div>Ping: <span id="status-ping">--</span></div>
-                <div>WS: <span id="status-conn">connecting</span></div>
-              </div>
-              <div class="turn-info">
-                Turn <span id="status-turn">0</span><br />
-                <span id="status-deadline">--:--</span>
-              </div>
-              <div class="chat">
-                <h6>Room Log</h6>
-                <div class="chat-messages" id="chat-messages"></div>
-                <div class="chat-input">
-                  <input id="chat-input" type="text" placeholder="(system only)" disabled />
-                  <button id="chat-send" disabled>Send</button>
+            <section class="arena">
+              <div class="arena-top">
+                <div class="status-stack">
+                  <div>Slot: <span id="status-slot">-</span></div>
+                  <div>You: <span id="status-ready" class="status-pill off">not ready</span></div>
+                  <div>Opponent: <span id="status-opponent" class="status-pill off">waiting</span></div>
+                  <div>WS: <span id="status-conn">connecting</span></div>
+                </div>
+                <div class="turn-info">
+                  Turn <span id="status-turn">0</span><br />
+                  <span id="status-deadline">--:--</span>
                 </div>
               </div>
-            </div>
-            <div class="log" id="log-list"></div>
-            <div class="actions">
-              <div class="action-grid">
-                <label>
-                  Action
-                  <select id="action-select">
-                    <option value="use_move">Use Move</option>
-                    <option value="switch">Switch</option>
-                  </select>
-                </label>
-                <label>
-                  Move
-                  <select id="move-select"></select>
-                </label>
-                <label>
-                  Switch To
-                  <select id="switch-select"></select>
-                </label>
+              <div class="action-pad" id="action-pad">
+                <button class="action-btn" id="move-btn-0">Move 1</button>
+                <button class="action-btn" id="move-btn-1">Move 2</button>
+                <button class="action-btn" id="move-btn-2">Move 3</button>
+                <button class="action-btn" id="move-btn-3">Move 4</button>
+                <button class="action-btn switch-btn" id="switch-btn">Switch</button>
               </div>
-              <button class="primary" id="intent-btn">Lock Intent</button>
-            </div>
-          </section>
+              <div class="switch-modal" id="switch-modal">
+                <div class="switch-panel">
+                  <div class="switch-title">Switch Pokemon</div>
+                  <div class="switch-options" id="switch-options"></div>
+                  <button class="switch-close" id="switch-close">Cancel</button>
+                </div>
+              </div>
+            </section>
 
-          <section class="panel player">
-            <div class="sprite">
-              <img id="player-sprite" src="/icons/unit_knight.png" alt="Player" />
+            <section class="panel player">
+              <div class="sprite">
+                <img id="player-sprite" src="/icons/unit_knight.png" alt="Player" />
+              </div>
+              <div class="panel-info">
+                <div class="panel-name" id="player-name">Player</div>
+                <div class="panel-sub" id="player-meta">Lv 10 · HP 40/40</div>
+                <div class="hp-bar"><span id="player-hp"></span></div>
+              </div>
+            </section>
+          </div>
+
+          <div id="prematch">
+            <div class="setup-card">
+              <div class="setup-title">
+                <span>Pre-match Setup</span>
+                <span class="chip">3 Monsters · 4 Moves · 1 Passive</span>
+              </div>
+              <div class="setup-grid">
+                <section class="roster">
+                  <div class="roster-header">
+                    <strong>Roster</strong>
+                    <span class="chip" id="roster-count">0/3</span>
+                  </div>
+                  <div class="roster-list" id="roster-list"></div>
+                </section>
+                <section class="build">
+                  <div class="slots">
+                    <strong>Team Slots</strong>
+                    <div class="slot">Active <span class="chip" id="slot-active">empty</span></div>
+                    <div class="slot">Bench A <span class="chip" id="slot-bench-a">empty</span></div>
+                    <div class="slot">Bench B <span class="chip" id="slot-bench-b">empty</span></div>
+                  </div>
+                  <div class="config">
+                    <h5>Monster Builder</h5>
+                    <div class="tabs" id="monster-tabs"></div>
+                    <div class="config-group">
+                      <h6>Moves (4)</h6>
+                      <div class="config-grid" id="moves-grid"></div>
+                    </div>
+                    <div class="config-group">
+                      <h6>Passive</h6>
+                      <div class="config-grid" id="passive-grid"></div>
+                    </div>
+                    <div class="config-group">
+                      <h6>Stats</h6>
+                      <div class="config-grid" id="stats-grid"></div>
+                    </div>
+                    <div class="warning" id="config-warning"></div>
+                  </div>
+                </section>
+              </div>
+              <div class="setup-actions">
+                <span class="hint" id="prematch-hint">Select 3 monsters, configure, then Ready.</span>
+                <button id="ready-btn">Ready</button>
+              </div>
             </div>
-            <div class="panel-info">
-              <div class="panel-name" id="player-name">Player</div>
-              <div class="panel-sub" id="player-meta">Lv 10 · HP 40/40</div>
-              <div class="hp-bar"><span id="player-hp"></span></div>
-            </div>
-          </section>
+          </div>
         </div>
 
-        <div id="prematch">
-          <div class="setup-card">
-            <div class="setup-title">
-              <span>Pre-match Setup</span>
-              <span class="chip">3 Monsters · 4 Moves · 1 Passive</span>
-            </div>
-            <div class="setup-grid">
-              <section class="roster">
-                <div class="roster-header">
-                  <strong>Roster</strong>
-                  <span class="chip" id="roster-count">0/3</span>
-                </div>
-                <div class="roster-list" id="roster-list"></div>
-              </section>
-              <section class="build">
-                <div class="slots">
-                  <strong>Team Slots</strong>
-                  <div class="slot">Active <span class="chip" id="slot-active">empty</span></div>
-                  <div class="slot">Bench A <span class="chip" id="slot-bench-a">empty</span></div>
-                  <div class="slot">Bench B <span class="chip" id="slot-bench-b">empty</span></div>
-                </div>
-                <div class="config">
-                  <h5>Monster Builder</h5>
-                  <div class="tabs" id="monster-tabs"></div>
-                  <div class="config-group">
-                    <h6>Moves (4)</h6>
-                    <div class="config-grid" id="moves-grid"></div>
-                  </div>
-                  <div class="config-group">
-                    <h6>Passive</h6>
-                    <div class="config-grid" id="passive-grid"></div>
-                  </div>
-                  <div class="config-group">
-                    <h6>Stats</h6>
-                    <div class="config-grid" id="stats-grid"></div>
-                  </div>
-                  <div class="warning" id="config-warning"></div>
-                </div>
-              </section>
-            </div>
-            <div class="setup-actions">
-              <span class="hint" id="prematch-hint">Select 3 monsters, configure, then Ready.</span>
-              <button id="ready-btn">Ready</button>
+        <div class="side-panel" id="side-panel">
+          <div class="side-info">
+            <div>Room: <span id="status-room">-</span></div>
+            <div>Player: <span id="status-name">-</span></div>
+            <div>Ping: <span id="status-ping">--</span></div>
+          </div>
+          <div class="participants">
+            <h6>Participants</h6>
+            <div class="participants-list" id="participants-list"></div>
+          </div>
+          <div class="chat">
+            <h6>Room Log</h6>
+            <div class="chat-messages" id="chat-messages"></div>
+            <div class="chat-input">
+              <input id="chat-input" type="text" placeholder="Type message..." disabled />
+              <button id="chat-send" disabled>Send</button>
             </div>
           </div>
         </div>

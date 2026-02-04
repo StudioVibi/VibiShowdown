@@ -6,6 +6,7 @@ import {
   create_initial_state,
   resolve_turn,
   validate_intent,
+  apply_forced_switch,
   clone_state
 } from "./engine.ts";
 import type {
@@ -38,6 +39,8 @@ type RoomState = {
   players: Record<PlayerSlot, PlayerRecord | null>;
   ready: Record<PlayerSlot, boolean>;
   teams: Record<PlayerSlot, TeamSelection | null>;
+  spectators: Set<string>;
+  ready_order: PlayerSlot[];
   state: GameState | null;
   turn: number;
   deadline_at: number;
@@ -51,6 +54,7 @@ const rooms = new Map<RoomId, RoomState>();
 const watchers = new Map<RoomId, Set<WebSocket>>();
 const socket_info = new Map<WebSocket, { room: RoomId; slot: PlayerSlot; token: string }>();
 const token_index = new Map<string, { room: RoomId; slot: PlayerSlot }>();
+const spectator_info = new Map<WebSocket, { room: RoomId; name: string }>();
 
 function now(): number {
   return Math.floor(Date.now());
@@ -75,6 +79,8 @@ function ensure_room(room_id: RoomId): RoomState {
     players: { player1: null, player2: null },
     ready: { player1: false, player2: false },
     teams: { player1: null, player2: null },
+    spectators: new Set<string>(),
+    ready_order: [],
     state: null,
     turn: 0,
     deadline_at: 0,
@@ -167,11 +173,34 @@ function emit_ready_state(room: RoomState): void {
     names: {
       player1: room.players.player1?.name ?? null,
       player2: room.players.player2?.name ?? null
-    }
+    },
+    order: room.ready_order.slice()
   });
 }
 
+function participants_payload(room: RoomState): RoomPost {
+  return {
+    $: "participants",
+    players: {
+      player1: room.players.player1?.ws ? room.players.player1?.name ?? null : null,
+      player2: room.players.player2?.ws ? room.players.player2?.name ?? null : null
+    },
+    spectators: Array.from(room.spectators)
+  };
+}
+
+function emit_participants(room: RoomState): void {
+  emit_post(room.id, participants_payload(room));
+}
+
+function send_participants(ws: WebSocket, room: RoomState): void {
+  send_direct(ws, room.id, participants_payload(room));
+}
+
 function start_turn(room: RoomState): void {
+  if (room.state && (room.state.pendingSwitch.player1 || room.state.pendingSwitch.player2)) {
+    return;
+  }
   room.turn += 1;
   room.deadline_at = now() + TURN_MS;
   room.intents = { player1: null, player2: null };
@@ -213,6 +242,10 @@ function start_match(room: RoomState): void {
   start_turn(room);
 }
 
+function any_pending_switch(state: GameState): boolean {
+  return state.pendingSwitch.player1 || state.pendingSwitch.player2;
+}
+
 function validate_team(team: TeamSelection): string | null {
   if (!team || !Array.isArray(team.monsters)) {
     return "Invalid team";
@@ -250,31 +283,32 @@ function validate_team(team: TeamSelection): string | null {
   return null;
 }
 
-function handle_join(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
+function handle_join(ws: WebSocket, room_id: RoomId, data: RoomPost): "player" | "spectator" | null {
   if (data.$ !== "join") {
-    return;
+    return null;
   }
 
   const room = ensure_room(room_id);
   if (room.ended) {
     send_error(ws, room_id, "Match already ended");
-    return;
+    return null;
   }
 
   if (data.token) {
     const lookup = token_index.get(data.token);
     if (!lookup || lookup.room !== room_id) {
       send_error(ws, room_id, "Invalid token");
-      return;
+      return null;
     }
     const record = room.players[lookup.slot];
     if (!record || record.token !== data.token) {
       send_error(ws, room_id, "Token mismatch");
-      return;
+      return null;
     }
     record.ws = ws;
     socket_info.set(ws, { room: room_id, slot: record.slot, token: record.token });
     send_direct(ws, room_id, { $: "assign", slot: record.slot, token: record.token, name: record.name });
+    emit_participants(room);
     if (room.last_state) {
       send_direct(ws, room_id, { $: "state", turn: room.last_state.turn, state: room.last_state, log: room.last_log });
     }
@@ -292,14 +326,28 @@ function handle_join(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
       names: {
         player1: room.players.player1?.name ?? null,
         player2: room.players.player2?.name ?? null
-      }
+      },
+      order: room.ready_order.slice()
     });
-    return;
+    send_participants(ws, room);
+    return "player";
   }
 
   if (!has_open_slot(room)) {
-    send_error(ws, room_id, "Room is full");
-    return;
+    room.spectators.add(data.name);
+    spectator_info.set(ws, { room: room_id, name: data.name });
+    send_direct(ws, room_id, { $: "spectator", name: data.name });
+    send_direct(ws, room_id, {
+      $: "ready_state",
+      ready: { ...room.ready },
+      names: {
+        player1: room.players.player1?.name ?? null,
+        player2: room.players.player2?.name ?? null
+      },
+      order: room.ready_order.slice()
+    });
+    emit_participants(room);
+    return "spectator";
   }
 
   const slot = assign_slot(room);
@@ -310,6 +358,8 @@ function handle_join(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
   socket_info.set(ws, { room: room_id, slot, token });
   send_direct(ws, room_id, { $: "assign", slot, token, name: data.name });
   emit_ready_state(room);
+  emit_participants(room);
+  return "player";
 }
 
 function handle_ready(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
@@ -332,6 +382,7 @@ function handle_ready(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
 
   if (!data.ready) {
     room.ready[info.slot] = false;
+    room.ready_order = room.ready_order.filter((slot) => slot !== info.slot);
     emit_ready_state(room);
     emit_post(room_id, { $: "ready", ready: false });
     return;
@@ -349,6 +400,9 @@ function handle_ready(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
 
   room.teams[info.slot] = data.team;
   room.ready[info.slot] = true;
+  if (!room.ready_order.includes(info.slot)) {
+    room.ready_order.push(info.slot);
+  }
   emit_post(room_id, { $: "ready", ready: true, team: data.team });
   emit_ready_state(room);
 
@@ -413,6 +467,37 @@ function handle_intent(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
       room.deadline_at = 0;
       return;
     }
+    if (any_pending_switch(state)) {
+      room.deadline_at = 0;
+      return;
+    }
+    start_turn(room);
+  }
+}
+
+function handle_forced_switch(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
+  if (data.$ !== "forced_switch") return;
+
+  const info = socket_info.get(ws);
+  if (!info || info.room !== room_id) {
+    send_error(ws, room_id, "Not assigned to this room");
+    return;
+  }
+  const room = rooms.get(room_id);
+  if (!room || room.ended || !room.state) {
+    send_error(ws, room_id, "Room not found");
+    return;
+  }
+  const result = apply_forced_switch(room.state, info.slot, data.targetIndex);
+  if (result.error) {
+    send_error(ws, room_id, result.error, "invalid_switch");
+    return;
+  }
+  room.state = result.state;
+  room.last_state = clone_state(result.state);
+  room.last_log = result.log;
+  emit_post(room.id, { $: "state", turn: room.turn, state: result.state, log: result.log });
+  if (!any_pending_switch(result.state)) {
     start_turn(room);
   }
 }
@@ -422,7 +507,10 @@ function handle_post_message(ws: WebSocket, message: ClientMessage): void {
   const { room, time: client_time, name, data } = message;
 
   if (data.$ === "join") {
-    handle_join(ws, room, data);
+    const joined = handle_join(ws, room, data);
+    if (!joined) {
+      return;
+    }
     const safe_data: RoomPost = { $: "join", name: data.name };
     emit_post(room, safe_data, name, client_time);
     return;
@@ -430,6 +518,11 @@ function handle_post_message(ws: WebSocket, message: ClientMessage): void {
 
   if (data.$ === "ready") {
     handle_ready(ws, room, data);
+    return;
+  }
+
+  if (data.$ === "forced_switch") {
+    handle_forced_switch(ws, room, data);
     return;
   }
 
@@ -570,9 +663,20 @@ function detach_socket(ws: WebSocket): void {
       const record = room.players[info.slot];
       if (record && record.token === info.token) {
         record.ws = null;
+        emit_participants(room);
       }
     }
     socket_info.delete(ws);
+  }
+
+  const spectator = spectator_info.get(ws);
+  if (spectator) {
+    const room = rooms.get(spectator.room);
+    if (room) {
+      room.spectators.delete(spectator.name);
+      emit_participants(room);
+    }
+    spectator_info.delete(ws);
   }
 
   for (const set of watchers.values()) {

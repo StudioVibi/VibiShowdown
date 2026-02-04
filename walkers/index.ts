@@ -2,7 +2,6 @@ import { gen_name, load, on_sync, ping, post, watch } from "../src/client.ts";
 import type {
   EventLog,
   GameState,
-  PlayerIntent,
   PlayerSlot,
   RoomPost,
   Stats,
@@ -166,8 +165,11 @@ const status_turn = document.getElementById("status-turn")!;
 const status_deadline = document.getElementById("status-deadline")!;
 const status_ready = document.getElementById("status-ready")!;
 const status_opponent = document.getElementById("status-opponent")!;
-const log_list = document.getElementById("log-list")!;
+const log_list = document.getElementById("log-list");
 const chat_messages = document.getElementById("chat-messages")!;
+const chat_input = document.getElementById("chat-input") as HTMLInputElement | null;
+const chat_send = document.getElementById("chat-send") as HTMLButtonElement | null;
+const participants_list = document.getElementById("participants-list")!;
 
 const player_title = document.getElementById("player-name")!;
 const player_meta = document.getElementById("player-meta")!;
@@ -181,7 +183,16 @@ const enemy_sprite = document.getElementById("enemy-sprite") as HTMLImageElement
 const prematch = document.getElementById("prematch")!;
 const prematch_hint = document.getElementById("prematch-hint")!;
 const ready_btn = document.getElementById("ready-btn")!;
-const intent_btn = document.getElementById("intent-btn")!;
+const move_buttons = [
+  document.getElementById("move-btn-0") as HTMLButtonElement,
+  document.getElementById("move-btn-1") as HTMLButtonElement,
+  document.getElementById("move-btn-2") as HTMLButtonElement,
+  document.getElementById("move-btn-3") as HTMLButtonElement
+];
+const switch_btn = document.getElementById("switch-btn") as HTMLButtonElement;
+const switch_modal = document.getElementById("switch-modal") as HTMLDivElement;
+const switch_options = document.getElementById("switch-options") as HTMLDivElement;
+const switch_close = document.getElementById("switch-close") as HTMLButtonElement;
 
 const roster_count = document.getElementById("roster-count")!;
 const slot_active = document.getElementById("slot-active")!;
@@ -192,10 +203,6 @@ const moves_grid = document.getElementById("moves-grid")!;
 const passive_grid = document.getElementById("passive-grid")!;
 const stats_grid = document.getElementById("stats-grid")!;
 const config_warning = document.getElementById("config-warning")!;
-
-const action_select = document.getElementById("action-select") as HTMLSelectElement;
-const move_select = document.getElementById("move-select") as HTMLSelectElement;
-const switch_select = document.getElementById("switch-select") as HTMLSelectElement;
 
 status_room.textContent = room;
 status_name.textContent = player_name;
@@ -210,6 +217,11 @@ let match_started = false;
 let latest_state: GameState | null = null;
 let opponent_ready = false;
 let opponent_name: string | null = null;
+let is_spectator = false;
+let last_ready_snapshot: Record<PlayerSlot, boolean> | null = null;
+let participants: { players: Record<PlayerSlot, string | null>; spectators: string[] } | null = null;
+let ready_order: PlayerSlot[] = [];
+let intent_locked = false;
 
 const selected: string[] = [];
 let active_tab: string | null = null;
@@ -219,6 +231,7 @@ function icon_path(id: string): string {
 }
 
 function append_log(line: string): void {
+  if (!log_list) return;
   const p = document.createElement("p");
   p.textContent = line;
   log_list.appendChild(p);
@@ -230,6 +243,66 @@ function append_chat(line: string): void {
   p.textContent = line;
   chat_messages.appendChild(p);
   chat_messages.scrollTop = chat_messages.scrollHeight;
+}
+
+function send_chat_message(message: string): void {
+  const trimmed = message.trim();
+  if (!trimmed) return;
+  post(room, { $: "chat", message: trimmed.slice(0, 200), from: player_name });
+}
+
+function setup_chat_input(input: HTMLInputElement | null, button: HTMLButtonElement | null): void {
+  if (!input || !button) return;
+  input.disabled = false;
+  button.disabled = false;
+  input.placeholder = "Type message...";
+  const handler = () => {
+    send_chat_message(input.value);
+    input.value = "";
+  };
+  button.addEventListener("click", handler);
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      handler();
+    }
+  });
+}
+
+function render_participants(): void {
+  participants_list.innerHTML = "";
+  if (!participants) {
+    return;
+  }
+  const label_map = new Map<PlayerSlot, string>();
+  if (ready_order[0]) label_map.set(ready_order[0], "P1");
+  if (ready_order[1]) label_map.set(ready_order[1], "P2");
+  const player_order: PlayerSlot[] = ready_order.length
+    ? (ready_order.concat(["player1", "player2"]) as PlayerSlot[]).filter(
+        (value, index, self) => self.indexOf(value) === index
+      )
+    : (["player1", "player2"] as PlayerSlot[]);
+  for (const slot_id of player_order) {
+    const name = participants.players[slot_id];
+    if (!name) continue;
+    const item = document.createElement("div");
+    item.className = "participant";
+    let meta = "waiting";
+    const label = label_map.get(slot_id);
+    if (label === "P1") {
+      meta = `P1 ${ready_order.length >= 2 ? "ready" : "waiting"}`;
+    } else if (label === "P2") {
+      meta = "P2 ready";
+    }
+    item.innerHTML = `<span>${name}</span><span class="participant-meta">${meta}</span>`;
+    participants_list.appendChild(item);
+  }
+  const spectators = participants.spectators.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  for (const name of spectators) {
+    const item = document.createElement("div");
+    item.className = "participant";
+    item.innerHTML = `<span>${name}</span><span class="participant-meta">spec</span>`;
+    participants_list.appendChild(item);
+  }
 }
 
 function update_deadline(): void {
@@ -557,59 +630,119 @@ function render_roster(): void {
 }
 
 function update_action_controls(): void {
-  const action = action_select.value;
   const has_team = selected.length === 3;
-  action_select.disabled = !match_started;
-  move_select.disabled = !match_started || action !== "use_move";
-  switch_select.disabled = !match_started || action !== "switch";
-
-  move_select.innerHTML = "";
-  switch_select.innerHTML = "";
-
+  const pending_switch = has_pending_switch();
+  const controls_disabled = !match_started || !slot || is_spectator || intent_locked || current_turn <= 0 || pending_switch;
   if (!has_team) {
+    move_buttons.forEach((btn, index) => {
+      btn.textContent = `Move ${index + 1}`;
+      btn.disabled = true;
+    });
+    switch_btn.disabled = true;
     return;
   }
 
   const active_id = selected[0];
   const config = get_config(active_id);
   let protect_on_cooldown = false;
+  let active_moves = config.moves;
   if (latest_state && slot) {
     const active_state = latest_state.players[slot].team[latest_state.players[slot].activeIndex];
     protect_on_cooldown = active_state.protectCooldownTurns > 0;
+    active_moves = active_state.chosenMoves;
   }
-  config.moves.forEach((move, index) => {
-    const option = document.createElement("option");
-    option.value = `${index}`;
-    option.textContent = `${index + 1}. ${MOVE_LABELS[move] || move}`;
+  move_buttons.forEach((btn, index) => {
+    const move = active_moves[index] ?? "none";
+    const label = MOVE_LABELS[move] || move;
     if (move === "protect" && protect_on_cooldown) {
-      option.disabled = true;
-      option.textContent = `${index + 1}. Protect (cooldown)`;
+      btn.textContent = `${index + 1}. Protect (cooldown)`;
+      btn.disabled = true;
+    } else {
+      btn.textContent = `${index + 1}. ${label}`;
+      btn.disabled = controls_disabled;
     }
-    move_select.appendChild(option);
   });
+  const switch_disabled = !match_started || !slot || is_spectator || intent_locked || (!pending_switch && current_turn <= 0);
+  switch_btn.disabled = switch_disabled;
+}
 
-  if (protect_on_cooldown && move_select.selectedOptions.length > 0) {
-    const selected_option = move_select.selectedOptions[0];
-    if (selected_option.disabled) {
-      const next_available = Array.from(move_select.options).find((opt) => !opt.disabled);
-      if (next_available) {
-        move_select.value = next_available.value;
-      }
+function has_pending_switch(): boolean {
+  return !!(latest_state && slot && latest_state.pendingSwitch?.[slot]);
+}
+
+function can_send_intent(): boolean {
+  if (current_turn <= 0) {
+    append_log("turn not active yet");
+    return false;
+  }
+  if (!slot) {
+    append_log("slot not assigned");
+    return false;
+  }
+  if (is_spectator) {
+    return false;
+  }
+  if (intent_locked) {
+    append_log("intent already locked");
+    return false;
+  }
+  if (has_pending_switch()) {
+    append_log("pending switch");
+    return false;
+  }
+  return true;
+}
+
+function send_move_intent(moveIndex: number): void {
+  if (!can_send_intent()) return;
+  post(room, { $: "intent", turn: current_turn, intent: { action: "use_move", moveIndex } });
+  intent_locked = true;
+  update_action_controls();
+  append_log("intent sent");
+}
+
+function close_switch_modal(): void {
+  switch_modal.classList.remove("open");
+}
+
+function open_switch_modal(mode: "intent" | "forced" = "intent"): void {
+  if (!latest_state || !slot) return;
+  if (mode === "intent" && !can_send_intent()) return;
+  switch_options.innerHTML = "";
+  const player = latest_state.players[slot];
+  const active_index = player.activeIndex;
+  const options = player.team
+    .map((mon, index) => ({ mon, index }))
+    .filter((entry) => entry.index !== active_index);
+  if (options.length === 0) {
+    const msg = document.createElement("div");
+    msg.textContent = "No available swaps";
+    msg.style.fontSize = "11px";
+    msg.style.color = "#9aa5b1";
+    switch_options.appendChild(msg);
+  } else {
+    for (const entry of options) {
+      const button = document.createElement("button");
+      const is_alive = entry.mon.hp > 0;
+      button.disabled = !is_alive;
+      button.textContent = `${entry.mon.name}${is_alive ? "" : " (fainted)"}`;
+      button.addEventListener("click", () => {
+        if (mode === "intent") {
+          if (!can_send_intent()) return;
+          post(room, { $: "intent", turn: current_turn, intent: { action: "switch", targetIndex: entry.index } });
+          intent_locked = true;
+          update_action_controls();
+          append_log("intent sent");
+          close_switch_modal();
+          return;
+        }
+        post(room, { $: "forced_switch", targetIndex: entry.index });
+        close_switch_modal();
+      });
+      switch_options.appendChild(button);
     }
   }
-
-  if (selected[1]) {
-    const option = document.createElement("option");
-    option.value = "1";
-    option.textContent = roster_by_id.get(selected[1])?.name || selected[1];
-    switch_select.appendChild(option);
-  }
-  if (selected[2]) {
-    const option = document.createElement("option");
-    option.value = "2";
-    option.textContent = roster_by_id.get(selected[2])?.name || selected[2];
-    switch_select.appendChild(option);
-  }
+  switch_modal.classList.add("open");
 }
 
 function build_team_selection(): TeamSelection | null {
@@ -632,7 +765,7 @@ function build_team_selection(): TeamSelection | null {
 }
 
 function send_ready(next_ready: boolean): void {
-  if (match_started) {
+  if (match_started || is_spectator || !slot) {
     return;
   }
   if (next_ready) {
@@ -650,8 +783,13 @@ function update_ready_ui(): void {
   status_ready.textContent = is_ready ? "ready" : "not ready";
   ready_btn.textContent = is_ready ? "Unready" : "Ready";
   status_ready.className = `status-pill ${is_ready ? "ok" : "off"}`;
+  ready_btn.disabled = is_spectator || !slot;
   if (match_started) {
     prematch_hint.textContent = "Match started.";
+    return;
+  }
+  if (is_spectator) {
+    prematch_hint.textContent = "Spectator mode. Waiting for players to ready.";
     return;
   }
   if (is_ready) {
@@ -674,14 +812,16 @@ function update_opponent_ui(opponent_ready: boolean, opponent_name: string | nul
 function handle_turn_start(data: { turn: number; deadline_at: number }): void {
   current_turn = data.turn;
   deadline_at = data.deadline_at;
+  intent_locked = false;
   status_turn.textContent = `${current_turn}`;
   update_deadline();
   append_log(`turn ${current_turn} started`);
+  close_switch_modal();
   if (!match_started) {
     match_started = true;
     prematch.style.display = "none";
-    update_action_controls();
   }
+  update_action_controls();
 }
 
 function log_events(log: EventLog[]): void {
@@ -711,10 +851,14 @@ function update_panels(state: GameState): void {
 function handle_state(data: { state: GameState; log: EventLog[] }): void {
   latest_state = data.state;
   update_panels(data.state);
+  close_switch_modal();
   if (data.log.length) {
     log_events(data.log);
   }
   update_action_controls();
+  if (slot && data.state.pendingSwitch?.[slot] && !switch_modal.classList.contains("open")) {
+    open_switch_modal("forced");
+  }
 }
 
 function handle_post(message: any): void {
@@ -733,17 +877,41 @@ function handle_post(message: any): void {
       append_chat(`${data.name} assigned to ${data.slot}`);
       return;
     case "ready_state": {
-      if (!slot) return;
-      const opponent_slot = slot === "player1" ? "player2" : "player1";
-      const prev_ready = opponent_ready;
-      is_ready = data.ready[slot];
-      opponent_ready = data.ready[opponent_slot];
-      opponent_name = data.names[opponent_slot];
-      update_ready_ui();
-      update_opponent_ui(opponent_ready, opponent_name);
-      if (opponent_name && prev_ready !== opponent_ready) {
-        append_chat(opponent_ready ? `${opponent_name} is ready` : `${opponent_name} is waiting`);
+      const previous = last_ready_snapshot ?? { player1: false, player2: false };
+      last_ready_snapshot = { ...data.ready };
+      if (!participants) {
+        participants = { players: { ...data.names }, spectators: [] };
       }
+      if (Array.isArray(data.order)) {
+        ready_order = data.order.slice();
+      } else {
+        (["player1", "player2"] as PlayerSlot[]).forEach((slot_id) => {
+          const is_ready_now = data.ready[slot_id];
+          const idx = ready_order.indexOf(slot_id);
+          if (is_ready_now && idx === -1) {
+            ready_order.push(slot_id);
+          } else if (!is_ready_now && idx !== -1) {
+            ready_order.splice(idx, 1);
+          }
+        });
+      }
+      (["player1", "player2"] as PlayerSlot[]).forEach((slot_id) => {
+        if (previous[slot_id] !== data.ready[slot_id]) {
+          const name = data.names[slot_id];
+          if (name) {
+            append_chat(data.ready[slot_id] ? `${name} is ready` : `${name} is waiting`);
+          }
+        }
+      });
+      if (slot) {
+        const opponent_slot = slot === "player1" ? "player2" : "player1";
+        is_ready = data.ready[slot];
+        opponent_ready = data.ready[opponent_slot];
+        opponent_name = data.names[opponent_slot];
+        update_opponent_ui(opponent_ready, opponent_name);
+      }
+      update_ready_ui();
+      render_participants();
       return;
     }
     case "turn_start":
@@ -751,6 +919,10 @@ function handle_post(message: any): void {
       return;
     case "intent_locked":
       append_log(`${data.slot} locked intent for turn ${data.turn}`);
+      if (slot && data.slot === slot) {
+        intent_locked = true;
+        update_action_controls();
+      }
       return;
     case "state":
       handle_state(data);
@@ -768,32 +940,42 @@ function handle_post(message: any): void {
       append_log(`join: ${data.name}`);
       append_chat(`${data.name} joined the room`);
       return;
+    case "spectator":
+      is_spectator = true;
+      status_slot.textContent = "spectator";
+      update_ready_ui();
+      return;
+    case "chat":
+      append_chat(`${data.from}: ${data.message}`);
+      return;
+    case "participants":
+      participants = { players: data.players, spectators: data.spectators.slice() };
+      render_participants();
+      return;
     case "intent":
       append_log(`intent received for turn ${data.turn}`);
       return;
   }
 }
 
-intent_btn.addEventListener("click", () => {
-  if (current_turn <= 0) {
-    append_log("turn not active yet");
-    return;
+move_buttons.forEach((btn, index) => {
+  btn.addEventListener("click", () => {
+    send_move_intent(index);
+  });
+});
+
+switch_btn.addEventListener("click", () => {
+  open_switch_modal(has_pending_switch() ? "forced" : "intent");
+});
+
+switch_close.addEventListener("click", () => {
+  close_switch_modal();
+});
+
+switch_modal.addEventListener("click", (event) => {
+  if (event.target === switch_modal) {
+    close_switch_modal();
   }
-  if (!slot) {
-    append_log("slot not assigned");
-    return;
-  }
-  const action = action_select.value;
-  let intent: PlayerIntent;
-  if (action === "switch") {
-    const targetIndex = Number(switch_select.value);
-    intent = { action: "switch", targetIndex };
-  } else {
-    const moveIndex = Number(move_select.value);
-    intent = { action: "use_move", moveIndex };
-  }
-  post(room, { $: "intent", turn: current_turn, intent });
-  append_log("intent sent");
 });
 
 ready_btn.addEventListener("click", () => {
@@ -820,10 +1002,6 @@ slot_bench_b.addEventListener("click", () => {
   set_active_index(2);
 });
 
-action_select.addEventListener("change", () => {
-  update_action_controls();
-});
-
 setInterval(update_deadline, 1000);
 
 setInterval(() => {
@@ -848,4 +1026,5 @@ on_sync(() => {
   watch(room, handle_post);
   load(room, 0);
   post(room, { $: "join", name: player_name, token: stored_token });
+  setup_chat_input(chat_input, chat_send);
 });

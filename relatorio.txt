@@ -1,0 +1,16 @@
+Relatorio baseado em prompt2.txt
+
+Mudancas intencionais em relacao ao prompt2
+- UI nao fica 100% dentro do quadrado: existe um painel lateral fora do quadrado com info, participantes e chat.
+- Removi o log central e coloquei um painel de acoes com 4 botoes de habilidade + 1 botao de Switch (abre modal de troca).
+- Adicionei chat e modo espectador (sala aceita mais de 2 pessoas como espectadores).
+- Rotulo P1/P2 na lista de participantes segue a ordem de quem ficou ready primeiro (deterministico), nao necessariamente o slot original.
+- Formula de dano atual usa attack - defense (atendendo pedido posterior), em vez de dano = Attack.
+- Troca apos morte agora eh escolhida pelo jogador via modal (nao deterministica por slot).
+
+Pendencias / nao implementado (previsto no prompt2)
+- Troca apos morte: prompt2 pede troca forcada no inicio do proximo turno (deterministica). Hoje a troca eh escolhida pelo jogador (nao deterministica).
+- Nao ha tela/visual para mostrar todo o roster do adversario (no-fog). O estado enviado contem os dados, mas a UI nao mostra o time completo do oponente.
+- Event log nao explicita a ordem de fases como um registro separado nem detalha a decisao de iniciativa por estatistica; hoje ha apenas resumos (initiative, damage, faint, protect, heal) sem breakdown completo.
+- Mapeamento de assets: usamos id para /icons/unit_<id>.png e nao ha fallback para placeholder quando o arquivo nao existe.
+- Fases alem de switch/guard/attack_01 ainda nao estao expostas como configuraveis (apenas baseline do prototipo).
