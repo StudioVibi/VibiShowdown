@@ -157,23 +157,19 @@
       }
 
       .arena-top {
-        display: grid;
-        grid-template-columns: 1fr auto;
+        display: flex;
         align-items: center;
-        gap: 12px;
+        justify-content: flex-end;
         font-size: 12px;
         color: var(--muted);
       }
 
-      .status-stack {
-        display: grid;
-        gap: 4px;
-      }
-
-      .turn-info {
+      .status-line {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
         font-family: "Space Mono", monospace;
         color: var(--accent);
-        text-align: right;
       }
 
       .action-pad {
@@ -760,14 +756,9 @@
 
             <section class="arena">
               <div class="arena-top">
-                <div class="status-stack">
-                  <div>Slot: <span id="status-slot">-</span></div>
-                  <div>You: <span id="status-ready" class="status-pill off">not ready</span></div>
-                  <div>Opponent: <span id="status-opponent" class="status-pill off">waiting</span></div>
-                  <div>WS: <span id="status-conn">connecting</span></div>
-                </div>
-                <div class="turn-info">
-                  Turn <span id="status-turn">0</span><br />
+                <div class="status-line">
+                  <span>WS: <span id="status-conn">connecting</span></span>
+                  <span>Turn <span id="status-turn">0</span></span>
                   <span id="status-deadline">--:--</span>
                 </div>
               </div>

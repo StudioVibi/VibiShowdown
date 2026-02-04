@@ -158,13 +158,13 @@ const team_key = `vibi_showdown_team:${room}:${player_name}`;
 
 const status_room = document.getElementById("status-room")!;
 const status_name = document.getElementById("status-name")!;
-const status_slot = document.getElementById("status-slot")!;
+const status_slot = document.getElementById("status-slot");
 const status_conn = document.getElementById("status-conn")!;
 const status_ping = document.getElementById("status-ping")!;
 const status_turn = document.getElementById("status-turn")!;
 const status_deadline = document.getElementById("status-deadline")!;
-const status_ready = document.getElementById("status-ready")!;
-const status_opponent = document.getElementById("status-opponent")!;
+const status_ready = document.getElementById("status-ready");
+const status_opponent = document.getElementById("status-opponent");
 const log_list = document.getElementById("log-list");
 const chat_messages = document.getElementById("chat-messages")!;
 const chat_input = document.getElementById("chat-input") as HTMLInputElement | null;
@@ -662,7 +662,12 @@ function update_action_controls(): void {
       btn.disabled = controls_disabled;
     }
   });
-  const switch_disabled = !match_started || !slot || is_spectator || intent_locked || (!pending_switch && current_turn <= 0);
+  const switch_disabled =
+    !match_started ||
+    !slot ||
+    is_spectator ||
+    (!pending_switch && intent_locked) ||
+    (!pending_switch && current_turn <= 0);
   switch_btn.disabled = switch_disabled;
 }
 
@@ -780,9 +785,11 @@ function send_ready(next_ready: boolean): void {
 }
 
 function update_ready_ui(): void {
-  status_ready.textContent = is_ready ? "ready" : "not ready";
+  if (status_ready) {
+    status_ready.textContent = is_ready ? "ready" : "not ready";
+    status_ready.className = `status-pill ${is_ready ? "ok" : "off"}`;
+  }
   ready_btn.textContent = is_ready ? "Unready" : "Ready";
-  status_ready.className = `status-pill ${is_ready ? "ok" : "off"}`;
   ready_btn.disabled = is_spectator || !slot;
   if (match_started) {
     prematch_hint.textContent = "Match started.";
@@ -805,6 +812,7 @@ function update_ready_ui(): void {
 }
 
 function update_opponent_ui(opponent_ready: boolean, opponent_name: string | null): void {
+  if (!status_opponent) return;
   status_opponent.textContent = opponent_ready ? "ready" : opponent_name ? "waiting" : "offline";
   status_opponent.className = `status-pill ${opponent_ready ? "ok" : opponent_name ? "warn" : "off"}`;
 }
@@ -866,7 +874,7 @@ function handle_post(message: any): void {
   switch (data.$) {
     case "assign":
       slot = data.slot;
-      status_slot.textContent = data.slot;
+      if (status_slot) status_slot.textContent = data.slot;
       status_conn.textContent = "synced";
       player_meta.textContent = `Slot ${data.slot}`;
       if (data.token) {
@@ -942,7 +950,7 @@ function handle_post(message: any): void {
       return;
     case "spectator":
       is_spectator = true;
-      status_slot.textContent = "spectator";
+      if (status_slot) status_slot.textContent = "spectator";
       update_ready_ui();
       return;
     case "chat":
