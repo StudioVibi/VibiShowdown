@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vibi Showdown</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=Space+Mono:wght@400;700&display=swap");
+
+      :root {
+        --bg-1: #0f1014;
+        --bg-2: #1b1f2a;
+        --panel: #1f2431;
+        --panel-2: #151a24;
+        --accent: #ffcf6a;
+        --accent-2: #6ed6ff;
+        --text: #f5f7ff;
+        --muted: #9aa5b1;
+        --danger: #ff6b6b;
+        --ok: #5ef2a0;
+        --shadow: rgba(0, 0, 0, 0.35);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Sora", system-ui, sans-serif;
+        color: var(--text);
+        background: radial-gradient(circle at top, #2a2f3d 0%, #12131a 45%, #0c0d12 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      #app {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+
+      #game {
+        width: min(100vw, 100vh);
+        height: min(100vw, 100vh);
+        max-width: 780px;
+        max-height: 780px;
+        background: linear-gradient(160deg, #1a1f2b 0%, #0f121b 70%);
+        border-radius: 22px;
+        box-shadow: 0 30px 70px var(--shadow);
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      #frame {
+        height: 100%;
+        display: grid;
+        grid-template-rows: 1fr 1.4fr 1fr;
+        gap: 10px;
+        padding: 18px;
+      }
+
+      .panel {
+        background: rgba(31, 36, 49, 0.9);
+        border-radius: 18px;
+        padding: 16px;
+        display: grid;
+        gap: 14px;
+        align-items: center;
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+      }
+
+      .panel.enemy {
+        grid-template-columns: 1fr 120px;
+      }
+
+      .panel.player {
+        grid-template-columns: 120px 1fr;
+      }
+
+      .panel-info {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .panel-name {
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .panel-sub {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .hp-bar {
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+      }
+
+      .hp-bar span {
+        display: block;
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(90deg, #5ef2a0 0%, #ffcf6a 65%, #ff7d7d 100%);
+      }
+
+      .sprite {
+        width: 100%;
+        height: 100%;
+        border-radius: 16px;
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        position: relative;
+      }
+
+      .sprite img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.45));
+      }
+
+      .arena {
+        background: linear-gradient(160deg, #121827 0%, #0e111a 70%);
+        border-radius: 18px;
+        padding: 16px;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.04);
+      }
+
+      .arena-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .status-stack {
+        display: grid;
+        gap: 4px;
+      }
+
+      .turn-info {
+        font-family: "Space Mono", monospace;
+        color: var(--accent);
+        text-align: right;
+      }
+
+      .log {
+        background: rgba(12, 14, 20, 0.6);
+        border-radius: 12px;
+        padding: 10px;
+        overflow: auto;
+        font-family: "Space Mono", monospace;
+        font-size: 12px;
+        color: #c9d2ff;
+      }
+
+      .log p {
+        margin: 0 0 6px 0;
+      }
+
+      .actions {
+        display: grid;
+        gap: 10px;
+      }
+
+      .action-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+
+      .action-grid label {
+        font-size: 11px;
+        color: var(--muted);
+        display: grid;
+        gap: 6px;
+      }
+
+      .action-grid select {
+        width: 100%;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(10, 12, 18, 0.8);
+        color: var(--text);
+        padding: 6px 8px;
+      }
+
+      .actions button {
+        border: none;
+        border-radius: 12px;
+        padding: 10px 8px;
+        background: #222a3a;
+        color: var(--text);
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .actions button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.35);
+      }
+
+      .actions button.primary {
+        background: linear-gradient(140deg, #ffcf6a, #ff8f6a);
+        color: #241a10;
+      }
+
+      #prematch {
+        position: absolute;
+        inset: 0;
+        background: rgba(10, 12, 18, 0.88);
+        backdrop-filter: blur(10px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        animation: fadeIn 0.4s ease;
+      }
+
+      .setup-card {
+        width: 100%;
+        height: 100%;
+        background: rgba(23, 27, 37, 0.95);
+        border-radius: 18px;
+        padding: 18px;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+      }
+
+      .setup-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-weight: 700;
+        font-size: 18px;
+      }
+
+      .setup-grid {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 14px;
+        height: 100%;
+      }
+
+      .roster {
+        background: rgba(15, 18, 26, 0.8);
+        border-radius: 14px;
+        padding: 12px;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 10px;
+      }
+
+      .roster-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .roster-list {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        overflow: auto;
+      }
+
+      .roster-card {
+        background: rgba(255, 255, 255, 0.04);
+        border-radius: 12px;
+        padding: 10px;
+        display: grid;
+        grid-template-columns: 44px 1fr;
+        gap: 10px;
+        align-items: center;
+        border: 1px solid transparent;
+      }
+
+      .roster-card.active {
+        border-color: rgba(255, 207, 106, 0.6);
+        box-shadow: inset 0 0 0 1px rgba(255, 207, 106, 0.4);
+      }
+
+      .roster-card.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .roster-card h4 {
+        margin: 0;
+        font-size: 14px;
+      }
+
+      .roster-card p {
+        margin: 2px 0 0 0;
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 10px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--muted);
+      }
+
+      .build {
+        display: grid;
+        gap: 10px;
+        grid-template-rows: auto auto 1fr;
+      }
+
+      .slots {
+        background: rgba(15, 18, 26, 0.8);
+        border-radius: 14px;
+        padding: 12px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .slot {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(255, 255, 255, 0.04);
+        border-radius: 10px;
+        padding: 8px 10px;
+        font-size: 12px;
+      }
+
+      .config {
+        background: rgba(15, 18, 26, 0.8);
+        border-radius: 14px;
+        padding: 12px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .tab {
+        border: none;
+        border-radius: 999px;
+        padding: 6px 12px;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .tab.active {
+        background: linear-gradient(140deg, rgba(110, 214, 255, 0.9), rgba(94, 242, 160, 0.9));
+        color: #0c1220;
+      }
+
+      .config-group {
+        display: grid;
+        gap: 8px;
+      }
+
+      .config-group h6 {
+        margin: 0;
+        font-size: 11px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .config h5 {
+        margin: 0;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .config-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+
+      .config-grid label {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      .config-grid input,
+      .config-grid select {
+        width: 100%;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(10, 12, 18, 0.8);
+        color: var(--text);
+        padding: 6px 8px;
+      }
+
+      .warning {
+        font-size: 11px;
+        color: var(--danger);
+        min-height: 14px;
+      }
+
+      .setup-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .setup-actions button {
+        border: none;
+        border-radius: 12px;
+        padding: 10px 14px;
+        background: linear-gradient(140deg, #6ed6ff, #5ef2a0);
+        color: #0b1220;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .hint {
+        font-size: 11px;
+        color: var(--muted);
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 680px) {
+        #frame {
+          padding: 14px;
+        }
+
+        .setup-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .action-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .actions {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="game">
+        <div id="frame">
+          <section class="panel enemy">
+            <div class="panel-info">
+              <div class="panel-name" id="enemy-name">Enemy</div>
+              <div class="panel-sub" id="enemy-meta">Lv 10 · HP 40/40</div>
+              <div class="hp-bar"><span id="enemy-hp"></span></div>
+            </div>
+            <div class="sprite">
+              <img id="enemy-sprite" src="/icons/unit_harpy.png" alt="Enemy" />
+            </div>
+          </section>
+
+          <section class="arena">
+            <div class="arena-top">
+              <div class="status-stack">
+                <div>Room: <span id="status-room">-</span></div>
+                <div>Player: <span id="status-name">-</span></div>
+                <div>Slot: <span id="status-slot">-</span></div>
+                <div>You: <span id="status-ready">not ready</span></div>
+                <div>Opponent: <span id="status-opponent">waiting</span></div>
+                <div>Ping: <span id="status-ping">--</span></div>
+                <div>WS: <span id="status-conn">connecting</span></div>
+              </div>
+              <div class="turn-info">
+                Turn <span id="status-turn">0</span><br />
+                <span id="status-deadline">--:--</span>
+              </div>
+            </div>
+            <div class="log" id="log-list"></div>
+            <div class="actions">
+              <div class="action-grid">
+                <label>
+                  Action
+                  <select id="action-select">
+                    <option value="use_move">Use Move</option>
+                    <option value="switch">Switch</option>
+                  </select>
+                </label>
+                <label>
+                  Move
+                  <select id="move-select"></select>
+                </label>
+                <label>
+                  Switch To
+                  <select id="switch-select"></select>
+                </label>
+              </div>
+              <button class="primary" id="intent-btn">Lock Intent</button>
+            </div>
+          </section>
+
+          <section class="panel player">
+            <div class="sprite">
+              <img id="player-sprite" src="/icons/unit_knight.png" alt="Player" />
+            </div>
+            <div class="panel-info">
+              <div class="panel-name" id="player-name">Player</div>
+              <div class="panel-sub" id="player-meta">Lv 10 · HP 40/40</div>
+              <div class="hp-bar"><span id="player-hp"></span></div>
+            </div>
+          </section>
+        </div>
+
+        <div id="prematch">
+          <div class="setup-card">
+            <div class="setup-title">
+              <span>Pre-match Setup</span>
+              <span class="chip">3 Monsters · 4 Moves · 1 Passive</span>
+            </div>
+            <div class="setup-grid">
+              <section class="roster">
+                <div class="roster-header">
+                  <strong>Roster</strong>
+                  <span class="chip" id="roster-count">0/3</span>
+                </div>
+                <div class="roster-list" id="roster-list"></div>
+              </section>
+              <section class="build">
+                <div class="slots">
+                  <strong>Team Slots</strong>
+                  <div class="slot">Active <span class="chip" id="slot-active">empty</span></div>
+                  <div class="slot">Bench A <span class="chip" id="slot-bench-a">empty</span></div>
+                  <div class="slot">Bench B <span class="chip" id="slot-bench-b">empty</span></div>
+                </div>
+                <div class="config">
+                  <h5>Monster Builder</h5>
+                  <div class="tabs" id="monster-tabs"></div>
+                  <div class="config-group">
+                    <h6>Moves (4)</h6>
+                    <div class="config-grid" id="moves-grid"></div>
+                  </div>
+                  <div class="config-group">
+                    <h6>Passive</h6>
+                    <div class="config-grid" id="passive-grid"></div>
+                  </div>
+                  <div class="config-group">
+                    <h6>Stats</h6>
+                    <div class="config-grid" id="stats-grid"></div>
+                  </div>
+                  <div class="warning" id="config-warning"></div>
+                </div>
+              </section>
+            </div>
+            <div class="setup-actions">
+              <span class="hint" id="prematch-hint">Select 3 monsters, configure, then Ready.</span>
+              <button id="ready-btn">Ready</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./dist/index.js"></script>
+  </body>
+</html>

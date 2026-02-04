@@ -2,26 +2,114 @@ export type RoomId = string;
 
 export type PlayerSlot = "player1" | "player2";
 
-export type DummyState = {
-  turn: number;
-  players: Record<PlayerSlot, boolean>;
-  note: string;
+export type MoveId = "basic_attack" | "none" | "protect" | string;
+export type PassiveId = "none" | "regen_5pct" | string;
+
+export type Stats = {
+  level: number;
+  maxHp: number;
+  attack: number;
+  defense: number;
+  speed: number;
 };
+
+export type MonsterConfig = {
+  id: string;
+  moves: MoveId[];
+  passive: PassiveId;
+  stats: Stats;
+};
+
+export type TeamSelection = {
+  monsters: MonsterConfig[];
+  activeIndex: number;
+};
+
+export type MonsterState = {
+  id: string;
+  name: string;
+  hp: number;
+  maxHp: number;
+  level: number;
+  attack: number;
+  defense: number;
+  speed: number;
+  possibleMoves: MoveId[];
+  possiblePassives: PassiveId[];
+  chosenMoves: MoveId[];
+  chosenPassive: PassiveId;
+  protectActiveThisTurn: boolean;
+  protectCooldownTurns: number;
+};
+
+export type PlayerState = {
+  slot: PlayerSlot;
+  name: string;
+  team: MonsterState[];
+  activeIndex: number;
+};
+
+export type GameState = {
+  turn: number;
+  status: "setup" | "running" | "ended";
+  winner?: PlayerSlot;
+  players: Record<PlayerSlot, PlayerState>;
+};
+
+export type PlayerIntent =
+  | { action: "switch"; targetIndex: number }
+  | { action: "use_move"; moveIndex: number };
+
+export type EventLog = {
+  type: string;
+  turn: number;
+  phase?: string;
+  summary: string;
+  data?: Record<string, unknown>;
+};
+
+export type JoinPost = { $: "join"; name: string; token?: string };
+export type AssignPost = { $: "assign"; slot: PlayerSlot; token: string; name: string };
+export type ReadyPost = { $: "ready"; ready: boolean; team?: TeamSelection };
+export type ReadyStatePost = {
+  $: "ready_state";
+  ready: Record<PlayerSlot, boolean>;
+  names: Record<PlayerSlot, string | null>;
+};
+export type IntentPost = { $: "intent"; turn: number; intent: PlayerIntent };
+export type IntentLockedPost = { $: "intent_locked"; slot: PlayerSlot; turn: number };
+export type TurnStartPost = { $: "turn_start"; turn: number; deadline_at: number; intents: Record<PlayerSlot, boolean> };
+export type StatePost = { $: "state"; turn: number; state: GameState; log: EventLog[] };
+export type ForfeitPost = { $: "forfeit"; turn: number; losers: PlayerSlot[]; winner?: PlayerSlot };
+export type ErrorPost = { $: "error"; message: string; code?: string };
+
+export type RoomPost =
+  | JoinPost
+  | AssignPost
+  | ReadyPost
+  | ReadyStatePost
+  | IntentPost
+  | IntentLockedPost
+  | TurnStartPost
+  | StatePost
+  | ForfeitPost
+  | ErrorPost;
 
 export type ClientMessage =
   | { $: "get_time" }
-  | { $: "join"; room?: RoomId; token?: string }
-  | { $: "leave" }
-  | { $: "submit_intent"; intent: unknown; turn?: number }
-  | { $: "ping"; time: number };
+  | { $: "post"; room: RoomId; time: number; name?: string; data: RoomPost }
+  | { $: "load"; room: RoomId; from?: number }
+  | { $: "watch"; room: RoomId }
+  | { $: "unwatch"; room: RoomId };
 
 export type ServerMessage =
   | { $: "info_time"; time: number }
-  | { $: "info_join"; room: RoomId; slot: PlayerSlot; token: string; reconnect?: boolean }
-  | { $: "info_room"; room: RoomId; players: PlayerSlot[] }
-  | { $: "info_turn"; room: RoomId; turn: number; deadline_at: number; intents: Record<PlayerSlot, boolean> }
-  | { $: "info_intent_locked"; room: RoomId; slot: PlayerSlot; turn: number }
-  | { $: "info_state"; room: RoomId; state: DummyState; log: string[] }
-  | { $: "info_forfeit"; room: RoomId; turn: number; losers: PlayerSlot[]; winner?: PlayerSlot }
-  | { $: "info_pong"; time: number }
-  | { $: "info_error"; message: string };
+  | {
+      $: "info_post";
+      room: RoomId;
+      index: number;
+      server_time: number;
+      client_time: number;
+      name?: string;
+      data: RoomPost;
+    };
