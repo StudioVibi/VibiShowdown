@@ -251,7 +251,7 @@ function apply_move(
       return;
     }
     attacker.protectActiveThisTurn = true;
-    attacker.protectCooldownTurns = 1;
+    attacker.protectCooldownTurns = 2;
     log.push({
       type: "protect",
       turn: state.turn,
