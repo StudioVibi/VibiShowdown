@@ -21,6 +21,7 @@ type MoveSpec = {
   id: MoveId;
   name: string;
   phaseId: string;
+  attackMultiplier: number;
 };
 
 type PassiveSpec = {
@@ -37,9 +38,9 @@ const PHASES: Phase[] = [
 ];
 
 const MOVE_SPECS: Record<string, MoveSpec> = {
-  basic_attack: { id: "basic_attack", name: "Basic Attack", phaseId: "attack_01" },
-  protect: { id: "protect", name: "Protect", phaseId: "guard" },
-  none: { id: "none", name: "none", phaseId: "attack_01" }
+  basic_attack: { id: "basic_attack", name: "Basic Attack", phaseId: "attack_01", attackMultiplier: 1.1 },
+  protect: { id: "protect", name: "Protect", phaseId: "guard", attackMultiplier: 1 },
+  none: { id: "none", name: "none", phaseId: "attack_01", attackMultiplier: 1 }
 };
 
 const PASSIVE_SPECS: Record<string, PassiveSpec> = {
@@ -273,7 +274,8 @@ function apply_move(
     return;
   }
 
-  let damage = Math.max(0, attacker.attack - defender.defense);
+  const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
+  let damage = Math.max(0, Math.round((attacker.attack * spec.attackMultiplier) / effective_defense));
   if (defender.protectActiveThisTurn) {
     damage = 0;
     log.push({
