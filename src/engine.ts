@@ -44,7 +44,7 @@ const MOVE_SPECS: Record<string, MoveSpec> = {
 
 const PASSIVE_SPECS: Record<string, PassiveSpec> = {
   none: { id: "none", name: "none" },
-  regen_5pct: { id: "regen_5pct", name: "Regen 5%" }
+  regen_5pct: { id: "regen_5pct", name: "Regen 3%" }
 };
 
 type Action =
@@ -497,6 +497,8 @@ export function resolve_turn(
 
   apply_passives(next, log);
   decrement_cooldowns(next);
+  // Clear protect after the turn resolves (so next turn starts unprotected).
+  reset_protect_flags(next);
 
   return { state: next, log };
 }
