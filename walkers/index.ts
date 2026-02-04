@@ -210,6 +210,7 @@ status_room.textContent = room;
 status_name.textContent = player_name;
 player_title.textContent = player_name;
 enemy_title.textContent = "Opponent";
+document.body.classList.add("prematch-open");
 
 let current_turn = 0;
 let deadline_at = 0;
@@ -226,12 +227,18 @@ let ready_order: PlayerSlot[] = [];
 let intent_locked = false;
 const hp_animation: { player?: number; enemy?: number } = {};
 const animation_timers: number[] = [];
+const sprite_fx_classes = ["jump", "hit", "heal", "shield-on", "shield-hit"];
 
 const selected: string[] = [];
 let active_tab: string | null = null;
 
 function icon_path(id: string): string {
   return `/icons/unit_${id}.png`;
+}
+
+function monster_label(id?: string, fallback: string = "mon"): string {
+  if (!id) return fallback;
+  return roster_by_id.get(id)?.name ?? id;
 }
 
 function append_log(line: string): void {
@@ -412,13 +419,9 @@ function update_roster_count(): void {
 }
 
 function update_slots(): void {
-  const name_for = (id?: string): string => {
-    if (!id) return "empty";
-    return roster_by_id.get(id)?.name ?? id;
-  };
-  slot_active.textContent = name_for(selected[0]);
-  slot_bench_a.textContent = name_for(selected[1]);
-  slot_bench_b.textContent = name_for(selected[2]);
+  slot_active.textContent = monster_label(selected[0], "empty");
+  slot_bench_a.textContent = monster_label(selected[1], "empty");
+  slot_bench_b.textContent = monster_label(selected[2], "empty");
 }
 
 function render_tabs(): void {
@@ -832,12 +835,25 @@ function handle_turn_start(data: { turn: number; deadline_at: number }): void {
   if (!match_started) {
     match_started = true;
     prematch.style.display = "none";
+    document.body.classList.remove("prematch-open");
   }
   update_action_controls();
 }
 
 function log_events(log: EventLog[]): void {
   for (const entry of log) {
+    if (entry.type === "damage") {
+      const data = entry.data as { slot?: PlayerSlot; damage?: number; target?: string } | undefined;
+      const attacker_slot = data?.slot;
+      const damage = data?.damage;
+      if (attacker_slot && typeof damage === "number") {
+        const attacker_id = latest_state?.players[attacker_slot]?.team[latest_state.players[attacker_slot].activeIndex]?.id;
+        const attacker_name = monster_label(attacker_id);
+        const defender_name = monster_label(data?.target);
+        append_chat(`${attacker_name} deu ${damage} de dano em ${defender_name}`);
+        continue;
+      }
+    }
     append_log(entry.summary);
   }
 }
@@ -909,6 +925,7 @@ function clear_animation_timers(): void {
       clearTimeout(id);
     }
   }
+  reset_sprite_fx();
 }
 
 function schedule_animation(fn: () => void, delay: number): void {
@@ -1004,6 +1021,13 @@ function sprite_wrap(side: "player" | "enemy"): HTMLDivElement {
   return side === "player" ? player_sprite_wrap : enemy_sprite_wrap;
 }
 
+function reset_sprite_fx(): void {
+  [player_sprite_wrap, enemy_sprite_wrap].forEach((wrap) => {
+    sprite_fx_classes.forEach((fx) => wrap.classList.remove(fx));
+    wrap.style.transform = "";
+  });
+}
+
 function trigger_class(el: HTMLElement, className: string, duration: number): void {
   el.classList.remove(className);
   void el.offsetWidth;
@@ -1021,6 +1045,11 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
     steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide)
   );
   latest_state = data.state;
+  if (!match_started && data.state.status === "running") {
+    match_started = true;
+    prematch.style.display = "none";
+    document.body.classList.remove("prematch-open");
+  }
   update_panels(data.state, {
     skipMeta: {
       player: hit_sides.has("player"),
