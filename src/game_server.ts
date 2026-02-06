@@ -546,22 +546,30 @@ function parse_message(buffer: WebSocket.RawData): ClientMessage | null {
   }
 }
 
-async function build_walkers(): Promise<void> {
+async function build_vibishowdown(): Promise<void> {
   try {
     const r1 = Bun.spawnSync({
-      cmd: ["bun", "build", "walkers/index.ts", "--outdir", "walkers/dist", "--target=browser", "--format=esm"]
+      cmd: [
+        "bun",
+        "build",
+        "vibishowdown/index.ts",
+        "--outdir",
+        "vibishowdown/dist",
+        "--target=browser",
+        "--format=esm"
+      ]
     });
     if (!r1.success) {
-      console.error("[BUILD] walkers build failed", { r1: r1.success });
+      console.error("[BUILD] vibishowdown build failed", { r1: r1.success });
     } else {
-      console.log("[BUILD] walkers bundle ready");
+      console.log("[BUILD] vibishowdown bundle ready");
     }
   } catch (e) {
-    console.error("[BUILD] error while building walkers:", e);
+    console.error("[BUILD] error while building vibishowdown:", e);
   }
 }
 
-await build_walkers();
+await build_vibishowdown();
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -573,7 +581,7 @@ const server = http.createServer(async (req, res) => {
     if (path.startsWith("/icons/")) {
       filesystem_path = path.slice(1);
     } else {
-      filesystem_path = path.startsWith("/dist/") ? `walkers${path}` : `walkers${path}`;
+      filesystem_path = path.startsWith("/dist/") ? `vibishowdown${path}` : `vibishowdown${path}`;
     }
 
     let ct = "application/octet-stream";
