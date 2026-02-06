@@ -3,10 +3,11 @@
   "type": "module",
   "scripts": {
     "check": "tsc --target esnext --noEmit --skipLibCheck",
-    "dev": "bun run src/server.ts",
-    "server": "bun run src/server.ts"
+    "dev": "bun run src/game_server.ts",
+    "server": "bun run src/game_server.ts"
   },
   "dependencies": {
+    "vibinet": "file:./vibinet",
     "ws": "^8.18.0"
   },
   "devDependencies": {
