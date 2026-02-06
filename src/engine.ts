@@ -22,6 +22,9 @@ type MoveSpec = {
   name: string;
   phaseId: string;
   attackMultiplier: number;
+  attackMultiplierPerLevel?: number;
+  damageType?: "scaled" | "true" | "flat";
+  flatDamage?: number;
 };
 
 type PassiveSpec = {
@@ -39,6 +42,21 @@ const PHASES: Phase[] = [
 
 const MOVE_SPECS: Record<string, MoveSpec> = {
   basic_attack: { id: "basic_attack", name: "Basic Attack", phaseId: "attack_01", attackMultiplier: 1.1 },
+  return: {
+    id: "return",
+    name: "Return",
+    phaseId: "attack_01",
+    attackMultiplier: 0.72,
+    attackMultiplierPerLevel: 0.04
+  },
+  seismic_toss: {
+    id: "seismic_toss",
+    name: "Seismic Toss",
+    phaseId: "attack_01",
+    attackMultiplier: 1,
+    damageType: "flat",
+    flatDamage: 75
+  },
   protect: { id: "protect", name: "Protect", phaseId: "guard", attackMultiplier: 1 },
   none: { id: "none", name: "none", phaseId: "attack_01", attackMultiplier: 1 }
 };
@@ -145,26 +163,31 @@ function first_alive_bench(player: PlayerState): number | null {
   return null;
 }
 
+function for_each_player(state: GameState, fn: (player: PlayerState) => void): void {
+  fn(state.players.player1);
+  fn(state.players.player2);
+}
+
 function reset_protect_flags(state: GameState): void {
-  for (const player of [state.players.player1, state.players.player2]) {
+  for_each_player(state, (player) => {
     for (const monster of player.team) {
       monster.protectActiveThisTurn = false;
     }
-  }
+  });
 }
 
 function decrement_cooldowns(state: GameState): void {
-  for (const player of [state.players.player1, state.players.player2]) {
+  for_each_player(state, (player) => {
     for (const monster of player.team) {
       if (monster.protectCooldownTurns > 0) {
         monster.protectCooldownTurns -= 1;
       }
     }
-  }
+  });
 }
 
 function apply_passives(state: GameState, log: EventLog[]): void {
-  for (const player of [state.players.player1, state.players.player2]) {
+  for_each_player(state, (player) => {
     const active = active_monster(player);
     if (!is_alive(active)) continue;
     const spec = passive_spec(active.chosenPassive);
@@ -184,7 +207,7 @@ function apply_passives(state: GameState, log: EventLog[]): void {
         }
       }
     }
-  }
+  });
 }
 
 function handle_faint(state: GameState, log: EventLog[], slot: PlayerSlot): void {
@@ -274,8 +297,18 @@ function apply_move(
     return;
   }
 
+  const multiplier = spec.attackMultiplier + (spec.attackMultiplierPerLevel ?? 0) * attacker.level;
+  const damage_type = spec.damageType ?? "scaled";
   const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
-  let damage = Math.max(0, Math.round((attacker.attack * spec.attackMultiplier) / effective_defense));
+  let raw_damage = 0;
+  if (damage_type === "flat") {
+    raw_damage = spec.flatDamage ?? 0;
+  } else if (damage_type === "true") {
+    raw_damage = attacker.attack * multiplier;
+  } else {
+    raw_damage = (attacker.attack * multiplier) / effective_defense;
+  }
+  let damage = Math.max(0, Math.round(raw_damage));
   if (defender.protectActiveThisTurn) {
     damage = 0;
     log.push({

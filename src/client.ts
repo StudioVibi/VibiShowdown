@@ -1,4 +1,5 @@
 import { WS_URL } from "./config.ts";
+import { now, random_id } from "./helpers.ts";
 import type { RoomPost } from "./shared.ts";
 
 type TimeSync = {
@@ -22,10 +23,6 @@ const room_watchers = new Map<string, MessageHandler>();
 
 let is_synced = false;
 const sync_listeners: Array<() => void> = [];
-
-function now(): number {
-  return Math.floor(Date.now());
-}
 
 export function server_time(): number {
   if (!isFinite(time_sync.clock_offset)) {
@@ -105,23 +102,9 @@ ws.addEventListener("message", (event) => {
 
 export function gen_name(): string {
   const alphabet = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
-  const bytes = new Uint8Array(8);
   const can_crypto = typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function";
-
-  if (can_crypto) {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < 8; i++) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
-  }
-
-  let out = "";
-  for (let i = 0; i < 8; i++) {
-    out += alphabet[bytes[i] % 64];
-  }
-
-  return out;
+  const source = can_crypto ? { fillBytes: (bytes: Uint8Array) => crypto.getRandomValues(bytes) } : undefined;
+  return random_id(8, alphabet, source);
 }
 
 export function post(room: string, data: RoomPost): string {

@@ -29,11 +29,14 @@ type Profile = {
   monsters: Record<string, MonsterConfig>;
 };
 
-const MOVE_OPTIONS = ["basic_attack", "protect", "none"];
+const PLAYER_SLOTS: PlayerSlot[] = ["player1", "player2"];
+const MOVE_OPTIONS = ["basic_attack", "return", "seismic_toss", "protect", "none"];
 const PASSIVE_OPTIONS = ["none", "regen_5pct"];
 
 const MOVE_LABELS: Record<string, string> = {
   basic_attack: "Basic Attack",
+  return: "Return",
+  seismic_toss: "Seismic Toss",
   protect: "Protect",
   none: "none"
 };
@@ -48,7 +51,7 @@ const roster: MonsterSpec[] = [
     id: "babydragon",
     name: "Baby Dragon",
     role: "Brawler",
-    stats: { level: 10, maxHp: 48, attack: 24, defense: 9, speed: 8 },
+    stats: { level: 10, maxHp: 148, attack: 24, defense: 9, speed: 8 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -58,7 +61,7 @@ const roster: MonsterSpec[] = [
     id: "croni",
     name: "Croni",
     role: "Mystic",
-    stats: { level: 10, maxHp: 36, attack: 25, defense: 8, speed: 14 },
+    stats: { level: 10, maxHp: 136, attack: 25, defense: 8, speed: 14 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "none", "none", "none"],
@@ -68,7 +71,7 @@ const roster: MonsterSpec[] = [
     id: "harpy",
     name: "Harpy",
     role: "Striker",
-    stats: { level: 10, maxHp: 34, attack: 28, defense: 7, speed: 16 },
+    stats: { level: 10, maxHp: 134, attack: 28, defense: 7, speed: 16 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -78,7 +81,7 @@ const roster: MonsterSpec[] = [
     id: "hoof",
     name: "Hoof",
     role: "Tank",
-    stats: { level: 10, maxHp: 60, attack: 24, defense: 10, speed: 6 },
+    stats: { level: 10, maxHp: 160, attack: 24, defense: 10, speed: 6 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -88,7 +91,7 @@ const roster: MonsterSpec[] = [
     id: "knight",
     name: "Knight",
     role: "Guardian",
-    stats: { level: 10, maxHp: 50, attack: 27, defense: 10, speed: 8 },
+    stats: { level: 10, maxHp: 150, attack: 27, defense: 10, speed: 8 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -98,7 +101,7 @@ const roster: MonsterSpec[] = [
     id: "miren",
     name: "Miren",
     role: "Mage",
-    stats: { level: 10, maxHp: 32, attack: 26, defense: 7, speed: 12 },
+    stats: { level: 10, maxHp: 132, attack: 26, defense: 7, speed: 12 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "none", "none", "none"],
@@ -108,7 +111,7 @@ const roster: MonsterSpec[] = [
     id: "panda",
     name: "Panda",
     role: "Bruiser",
-    stats: { level: 10, maxHp: 54, attack: 23, defense: 12, speed: 7 },
+    stats: { level: 10, maxHp: 154, attack: 23, defense: 12, speed: 7 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -118,7 +121,7 @@ const roster: MonsterSpec[] = [
     id: "priestess",
     name: "Priestess",
     role: "Support",
-    stats: { level: 10, maxHp: 38, attack: 25, defense: 10, speed: 11 },
+    stats: { level: 10, maxHp: 138, attack: 25, defense: 10, speed: 11 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "none", "none", "none"],
@@ -128,7 +131,7 @@ const roster: MonsterSpec[] = [
     id: "valkyria",
     name: "Valkyria",
     role: "Vanguard",
-    stats: { level: 10, maxHp: 44, attack: 24, defense: 10, speed: 13 },
+    stats: { level: 10, maxHp: 144, attack: 24, defense: 10, speed: 13 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -138,7 +141,7 @@ const roster: MonsterSpec[] = [
     id: "vulcasa",
     name: "Vulcasa",
     role: "Pyro",
-    stats: { level: 10, maxHp: 40, attack: 25, defense: 8, speed: 10 },
+    stats: { level: 10, maxHp: 140, attack: 25, defense: 8, speed: 10 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -242,18 +245,11 @@ function monster_label(id?: string, fallback: string = "mon"): string {
 }
 
 function append_log(line: string): void {
-  if (!log_list) return;
-  const p = document.createElement("p");
-  p.textContent = line;
-  log_list.appendChild(p);
-  log_list.scrollTop = log_list.scrollHeight;
+  append_line(log_list, line);
 }
 
 function append_chat(line: string): void {
-  const p = document.createElement("p");
-  p.textContent = line;
-  chat_messages.appendChild(p);
-  chat_messages.scrollTop = chat_messages.scrollHeight;
+  append_line(chat_messages, line);
 }
 
 function send_chat_message(message: string): void {
@@ -279,6 +275,14 @@ function setup_chat_input(input: HTMLInputElement | null, button: HTMLButtonElem
   });
 }
 
+function append_line(container: HTMLElement | null, line: string): void {
+  if (!container) return;
+  const p = document.createElement("p");
+  p.textContent = line;
+  container.appendChild(p);
+  container.scrollTop = container.scrollHeight;
+}
+
 function render_participants(): void {
   participants_list.innerHTML = "";
   if (!participants) {
@@ -288,10 +292,10 @@ function render_participants(): void {
   if (ready_order[0]) label_map.set(ready_order[0], "P1");
   if (ready_order[1]) label_map.set(ready_order[1], "P2");
   const player_order: PlayerSlot[] = ready_order.length
-    ? (ready_order.concat(["player1", "player2"]) as PlayerSlot[]).filter(
+    ? ready_order.concat(PLAYER_SLOTS).filter(
         (value, index, self) => self.indexOf(value) === index
       )
-    : (["player1", "player2"] as PlayerSlot[]);
+    : PLAYER_SLOTS;
   for (const slot_id of player_order) {
     const name = participants.players[slot_id];
     if (!name) continue;
@@ -337,54 +341,52 @@ function clear_warning(): void {
   config_warning.textContent = "";
 }
 
-function load_profile(): Profile {
+function load_json<T>(key: string, fallback: T): T {
   try {
-    const raw = localStorage.getItem(profile_key);
-    if (!raw) {
-      return { monsters: {} };
-    }
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && parsed.monsters) {
-      return { monsters: parsed.monsters as Record<string, MonsterConfig> };
-    }
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function save_json<T>(key: string, value: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {}
+}
+
+function load_profile(): Profile {
+  const parsed = load_json<Profile | null>(profile_key, null);
+  if (parsed && typeof parsed === "object" && parsed.monsters) {
+    return { monsters: parsed.monsters as Record<string, MonsterConfig> };
+  }
   return { monsters: {} };
 }
 
 const profile = load_profile();
 
 function save_profile(): void {
-  try {
-    localStorage.setItem(profile_key, JSON.stringify(profile));
-  } catch {}
+  save_json(profile_key, profile);
 }
 
 function load_team_selection(): void {
-  try {
-    const raw = localStorage.getItem(team_key);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (parsed && Array.isArray(parsed.selected)) {
-      selected.splice(0, selected.length, ...parsed.selected.filter((id: string) => roster_by_id.has(id)));
-    }
-  } catch {}
+  const parsed = load_json<{ selected?: string[] } | null>(team_key, null);
+  if (parsed && Array.isArray(parsed.selected)) {
+    selected.splice(0, selected.length, ...parsed.selected.filter((id: string) => roster_by_id.has(id)));
+  }
 }
 
 function save_team_selection(): void {
-  try {
-    localStorage.setItem(team_key, JSON.stringify({ selected: selected.slice() }));
-  } catch {}
-}
-
-function clone_stats(stats: Stats): Stats {
-  return { level: stats.level, maxHp: stats.maxHp, attack: stats.attack, defense: stats.defense, speed: stats.speed };
+  save_json(team_key, { selected: selected.slice() });
 }
 
 function coerce_config(spec: MonsterSpec, value?: MonsterConfig): MonsterConfig {
   const base: MonsterConfig = {
     moves: spec.defaultMoves.slice(0, 4),
     passive: spec.defaultPassive,
-    stats: clone_stats(spec.stats)
+    stats: { ...spec.stats }
   };
 
   if (!value) {
@@ -1137,7 +1139,7 @@ function handle_post(message: any): void {
       if (Array.isArray(data.order)) {
         ready_order = data.order.slice();
       } else {
-        (["player1", "player2"] as PlayerSlot[]).forEach((slot_id) => {
+        PLAYER_SLOTS.forEach((slot_id) => {
           const is_ready_now = data.ready[slot_id];
           const idx = ready_order.indexOf(slot_id);
           if (is_ready_now && idx === -1) {
@@ -1147,7 +1149,7 @@ function handle_post(message: any): void {
           }
         });
       }
-      (["player1", "player2"] as PlayerSlot[]).forEach((slot_id) => {
+      PLAYER_SLOTS.forEach((slot_id) => {
         if (previous[slot_id] !== data.ready[slot_id]) {
           const name = data.names[slot_id];
           if (name) {

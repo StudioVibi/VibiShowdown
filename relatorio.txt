@@ -14,3 +14,33 @@ Pendencias / nao implementado (previsto no prompt2)
 - Event log nao explicita a ordem de fases como um registro separado nem detalha a decisao de iniciativa por estatistica; hoje ha apenas resumos (initiative, damage, faint, protect, heal) sem breakdown completo.
 - Mapeamento de assets: usamos id para /icons/unit_<id>.png e nao ha fallback para placeholder quando o arquivo nao existe.
 - Fases alem de switch/guard/attack_01 ainda nao estao expostas como configuraveis (apenas baseline do prototipo).
+
+
+Return
+Seismic Toss
+Double-Edge
+Focus Punch
+Quick Attack
+
+Leech life
+Pain Split
+Agility
+Screech
+
+Protect
+Endure
+
+Leftovers
+Choice band
+
+===========
+Se quiser, comece com essas 5:
+
+Return
+Double-Edge
+
+Leech life
+
+Protect
+
+Leftovers
