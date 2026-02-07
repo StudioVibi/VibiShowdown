@@ -30,12 +30,13 @@ type Profile = {
 };
 
 const PLAYER_SLOTS: PlayerSlot[] = ["player1", "player2"];
-const MOVE_OPTIONS = ["basic_attack", "return", "seismic_toss", "protect", "none"];
+const MOVE_OPTIONS = ["basic_attack", "return", "double_edge", "seismic_toss", "protect", "none"];
 const PASSIVE_OPTIONS = ["none", "regen_5pct"];
 
 const MOVE_LABELS: Record<string, string> = {
   basic_attack: "Basic Attack",
   return: "Return",
+  double_edge: "Double-Edge",
   seismic_toss: "Seismic Toss",
   protect: "Protect",
   none: "none"
@@ -980,19 +981,19 @@ function build_visual_steps(prev_state: GameState, log: EventLog[], viewer_slot:
       steps.push({ kind: "heal", side });
       continue;
     }
-    if (entry.type !== "damage") continue;
+    if (entry.type !== "damage" && entry.type !== "recoil") continue;
     const payload = entry.data as { slot?: PlayerSlot; damage?: number } | undefined;
     if (!payload || typeof payload.damage !== "number" || payload.damage <= 0 || !payload.slot) {
       continue;
     }
-    const defender_slot = payload.slot === "player1" ? "player2" : "player1";
+    const defender_slot = entry.type === "recoil" ? payload.slot : payload.slot === "player1" ? "player2" : "player1";
     const defender_player = temp.players[defender_slot];
     const defender = defender_player.team[defender_player.activeIndex];
     const from = defender.hp;
     const to = Math.max(0, from - payload.damage);
     defender.hp = to;
     const defenderSide = side_from_slot(viewer_slot, defender_slot);
-    const attackerSide = defenderSide === "player" ? "enemy" : "player";
+    const attackerSide = entry.type === "recoil" ? defenderSide : defenderSide === "player" ? "enemy" : "player";
     steps.push({
       kind: "damage",
       attackerSide,

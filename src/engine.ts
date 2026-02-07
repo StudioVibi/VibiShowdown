@@ -25,6 +25,7 @@ type MoveSpec = {
   attackMultiplierPerLevel?: number;
   damageType?: "scaled" | "true" | "flat";
   flatDamage?: number;
+  recoilRatio?: number;
 };
 
 type PassiveSpec = {
@@ -48,6 +49,13 @@ const MOVE_SPECS: Record<string, MoveSpec> = {
     phaseId: "attack_01",
     attackMultiplier: 0.72,
     attackMultiplierPerLevel: 0.04
+  },
+  double_edge: {
+    id: "double_edge",
+    name: "Double-Edge",
+    phaseId: "attack_01",
+    attackMultiplier: 1.2,
+    recoilRatio: 1 / 3
   },
   seismic_toss: {
     id: "seismic_toss",
@@ -340,7 +348,35 @@ function apply_move(
     });
   }
 
+  const recoil_ratio = spec.recoilRatio ?? 0;
+  if (recoil_ratio > 0 && damage > 0) {
+    const recoil_damage = Math.max(0, Math.round(damage * recoil_ratio));
+    if (recoil_damage > 0) {
+      const attacker_before = attacker.hp;
+      attacker.hp = Math.max(0, attacker.hp - recoil_damage);
+      log.push({
+        type: "recoil",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `${attacker.name} took ${recoil_damage} recoil`,
+        data: { slot: player_slot, damage: recoil_damage, target: attacker.id }
+      });
+      if (attacker_before > 0 && attacker.hp === 0) {
+        log.push({
+          type: "faint",
+          turn: state.turn,
+          phase: spec.phaseId,
+          summary: `${attacker.name} fainted`,
+          data: { slot: player_slot, target: attacker.id }
+        });
+      }
+    }
+  }
+
   handle_faint(state, log, other_slot(player_slot));
+  if (recoil_ratio > 0) {
+    handle_faint(state, log, player_slot);
+  }
 }
 
 function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot, targetIndex: number): void {
