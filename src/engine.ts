@@ -21,11 +21,12 @@ type MoveSpec = {
   id: MoveId;
   name: string;
   phaseId: string;
-  attackMultiplier: number;
-  attackMultiplierPerLevel?: number;
+  attackMultiplier100: number;
+  attackMultiplierPerLevel100?: number;
   damageType?: "scaled" | "true" | "flat";
   flatDamage?: number;
-  recoilRatio?: number;
+  recoilNumerator?: number;
+  recoilDenominator?: number;
 };
 
 type PassiveSpec = {
@@ -42,31 +43,32 @@ const PHASES: Phase[] = [
 ];
 
 const MOVE_SPECS: Record<string, MoveSpec> = {
-  basic_attack: { id: "basic_attack", name: "Basic Attack", phaseId: "attack_01", attackMultiplier: 1.1 },
+  basic_attack: { id: "basic_attack", name: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 110 },
   return: {
     id: "return",
     name: "Return",
     phaseId: "attack_01",
-    attackMultiplier: 0.72,
-    attackMultiplierPerLevel: 0.04
+    attackMultiplier100: 72,
+    attackMultiplierPerLevel100: 4
   },
   double_edge: {
     id: "double_edge",
     name: "Double-Edge",
     phaseId: "attack_01",
-    attackMultiplier: 1.2,
-    recoilRatio: 1 / 3
+    attackMultiplier100: 120,
+    recoilNumerator: 1,
+    recoilDenominator: 3
   },
   seismic_toss: {
     id: "seismic_toss",
     name: "Seismic Toss",
     phaseId: "attack_01",
-    attackMultiplier: 1,
+    attackMultiplier100: 100,
     damageType: "flat",
     flatDamage: 75
   },
-  protect: { id: "protect", name: "Protect", phaseId: "guard", attackMultiplier: 1 },
-  none: { id: "none", name: "none", phaseId: "attack_01", attackMultiplier: 1 }
+  protect: { id: "protect", name: "Protect", phaseId: "guard", attackMultiplier100: 100 },
+  none: { id: "none", name: "none", phaseId: "attack_01", attackMultiplier100: 100 }
 };
 
 const PASSIVE_SPECS: Record<string, PassiveSpec> = {
@@ -197,7 +199,7 @@ function decrement_cooldowns(state: GameState): void {
 function apply_passives(state: GameState, log: EventLog[]): void {
   for_each_player(state, (player) => {
     const active = active_monster(player);
-    if (!is_alive(active)) continue;
+    if (!is_alive(active)) return;
     const spec = passive_spec(active.chosenPassive);
     if (spec.id === "regen_5pct") {
       const heal = Math.floor(active.maxHp * 0.05);
@@ -305,18 +307,18 @@ function apply_move(
     return;
   }
 
-  const multiplier = spec.attackMultiplier + (spec.attackMultiplierPerLevel ?? 0) * attacker.level;
+  const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
   let raw_damage = 0;
   if (damage_type === "flat") {
     raw_damage = spec.flatDamage ?? 0;
   } else if (damage_type === "true") {
-    raw_damage = attacker.attack * multiplier;
+    raw_damage = Math.round((attacker.attack * multiplier100) / 100);
   } else {
-    raw_damage = (attacker.attack * multiplier) / effective_defense;
+    raw_damage = Math.round((attacker.attack * multiplier100) / (effective_defense * 100));
   }
-  let damage = Math.max(0, Math.round(raw_damage));
+  let damage = Math.max(0, raw_damage);
   if (defender.protectActiveThisTurn) {
     damage = 0;
     log.push({
@@ -348,9 +350,10 @@ function apply_move(
     });
   }
 
-  const recoil_ratio = spec.recoilRatio ?? 0;
-  if (recoil_ratio > 0 && damage > 0) {
-    const recoil_damage = Math.max(0, Math.round(damage * recoil_ratio));
+  const recoil_num = spec.recoilNumerator ?? 0;
+  const recoil_den = spec.recoilDenominator ?? 1;
+  if (recoil_num > 0 && recoil_den > 0 && damage > 0) {
+    const recoil_damage = Math.max(0, Math.round((damage * recoil_num) / recoil_den));
     if (recoil_damage > 0) {
       const attacker_before = attacker.hp;
       attacker.hp = Math.max(0, attacker.hp - recoil_damage);
@@ -374,7 +377,7 @@ function apply_move(
   }
 
   handle_faint(state, log, other_slot(player_slot));
-  if (recoil_ratio > 0) {
+  if (recoil_num > 0 && recoil_den > 0) {
     handle_faint(state, log, player_slot);
   }
 }

@@ -24,8 +24,6 @@ import type {
 declare const Bun: any;
 
 const PORT = 8080;
-const TURN_MS = 50 * 60 * 1000;
-const DEADLINE_CHECK_MS = 1000;
 
 type PlayerRecord = {
   slot: PlayerSlot;
@@ -202,7 +200,7 @@ function start_turn(room: RoomState): void {
     return;
   }
   room.turn += 1;
-  room.deadline_at = now() + TURN_MS;
+  room.deadline_at = 0;
   room.intents = { player1: null, player2: null };
   if (room.state) {
     room.state.turn = room.turn;
@@ -312,7 +310,7 @@ function handle_join(ws: WebSocket, room_id: RoomId, data: RoomPost): "player" |
     if (room.last_state) {
       send_direct(ws, room_id, { $: "state", turn: room.last_state.turn, state: room.last_state, log: room.last_log });
     }
-    if (room.deadline_at > 0) {
+    if (room.turn > 0) {
       send_direct(ws, room_id, {
         $: "turn_start",
         turn: room.turn,
@@ -426,16 +424,6 @@ function handle_intent(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
     return;
   }
 
-  if (room.deadline_at === 0) {
-    send_error(ws, room_id, "Turn not active");
-    return;
-  }
-
-  if (now() >= room.deadline_at) {
-    send_error(ws, room_id, "Turn deadline passed");
-    return;
-  }
-
   if (data.turn !== room.turn) {
     send_error(ws, room_id, `Wrong turn ${data.turn}`);
     return;
@@ -464,11 +452,9 @@ function handle_intent(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
     emit_post(room.id, { $: "state", turn: room.turn, state, log });
     if (state.status === "ended") {
       room.ended = true;
-      room.deadline_at = 0;
       return;
     }
     if (any_pending_switch(state)) {
-      room.deadline_at = 0;
       return;
     }
     start_turn(room);
@@ -502,6 +488,38 @@ function handle_forced_switch(ws: WebSocket, room_id: RoomId, data: RoomPost): v
   }
 }
 
+function handle_surrender(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
+  if (data.$ !== "surrender") return;
+
+  const info = socket_info.get(ws);
+  if (!info || info.room !== room_id) {
+    send_error(ws, room_id, "Not assigned to this room");
+    return;
+  }
+  const room = rooms.get(room_id);
+  if (!room || room.ended || !room.state) {
+    send_error(ws, room_id, "Room not found");
+    return;
+  }
+  const loser = info.slot;
+  const winner = loser === "player1" ? "player2" : "player1";
+  room.ended = true;
+  room.state.status = "ended";
+  room.state.winner = winner;
+  const log: EventLog[] = [
+    {
+      type: "match_end",
+      turn: room.turn,
+      summary: `${winner} wins (surrender)`,
+      data: { winner }
+    }
+  ];
+  room.last_state = clone_state(room.state);
+  room.last_log = log;
+  emit_post(room.id, { $: "state", turn: room.turn, state: room.state, log });
+  emit_post(room.id, { $: "surrender", turn: room.turn, loser, winner });
+}
+
 function handle_post_message(ws: WebSocket, message: ClientMessage): void {
   if (message.$ !== "post") return;
   const { room, time: client_time, name, data } = message;
@@ -523,6 +541,11 @@ function handle_post_message(ws: WebSocket, message: ClientMessage): void {
 
   if (data.$ === "forced_switch") {
     handle_forced_switch(ws, room, data);
+    return;
+  }
+
+  if (data.$ === "surrender") {
+    handle_surrender(ws, room, data);
     return;
   }
 
@@ -548,9 +571,10 @@ function parse_message(buffer: WebSocket.RawData): ClientMessage | null {
 
 async function build_vibishowdown(): Promise<void> {
   try {
+    const bun_path = process.execPath || "bun";
     const r1 = Bun.spawnSync({
       cmd: [
-        "bun",
+        bun_path,
         "build",
         "vibishowdown/index.ts",
         "--outdir",
@@ -710,39 +734,6 @@ function handle_load(ws: WebSocket, room: RoomId, from: number): void {
     send(ws, { $: "info_post", room, index, server_time, client_time, name, data });
   }
 }
-
-setInterval(() => {
-  const t = now();
-  for (const room of rooms.values()) {
-    if (room.ended || room.deadline_at === 0) {
-      continue;
-    }
-    if (t < room.deadline_at) {
-      continue;
-    }
-    const losers: PlayerSlot[] = [];
-    if (room.players.player1 && room.intents.player1 === null) {
-      losers.push("player1");
-    }
-    if (room.players.player2 && room.intents.player2 === null) {
-      losers.push("player2");
-    }
-    if (losers.length > 0) {
-      room.ended = true;
-      room.deadline_at = 0;
-      let winner: PlayerSlot | undefined;
-      if (losers.length === 1) {
-        winner = losers[0] === "player1" ? "player2" : "player1";
-      }
-      if (room.state) {
-        room.state.status = "ended";
-        room.state.winner = winner;
-        room.last_state = clone_state(room.state);
-      }
-      emit_post(room.id, { $: "forfeit", turn: room.turn, losers, winner });
-    }
-  }
-}, DEADLINE_CHECK_MS);
 
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT} (HTTP + WebSocket)`);

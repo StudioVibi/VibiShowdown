@@ -90,7 +90,7 @@ export type ForcedSwitchPost = { $: "forced_switch"; targetIndex: number };
 export type IntentLockedPost = { $: "intent_locked"; slot: PlayerSlot; turn: number };
 export type TurnStartPost = { $: "turn_start"; turn: number; deadline_at: number; intents: Record<PlayerSlot, boolean> };
 export type StatePost = { $: "state"; turn: number; state: GameState; log: EventLog[] };
-export type ForfeitPost = { $: "forfeit"; turn: number; losers: PlayerSlot[]; winner?: PlayerSlot };
+export type SurrenderPost = { $: "surrender"; turn: number; loser: PlayerSlot; winner: PlayerSlot };
 export type ErrorPost = { $: "error"; message: string; code?: string };
 
 export type RoomPost =
@@ -106,7 +106,7 @@ export type RoomPost =
   | IntentLockedPost
   | TurnStartPost
   | StatePost
-  | ForfeitPost
+  | SurrenderPost
   | ErrorPost;
 
 export type ClientMessage =

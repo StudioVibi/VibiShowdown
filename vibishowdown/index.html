@@ -284,6 +284,13 @@
         font-weight: 700;
       }
 
+      .action-pad .action-btn.danger {
+        grid-column: span 2;
+        background: linear-gradient(140deg, #ff5d5d, #ff8a5c);
+        color: #1b0b0b;
+        font-weight: 700;
+      }
+
       .chat {
         background: rgba(8, 10, 14, 0.8);
         border-radius: 12px;
@@ -525,6 +532,52 @@
         justify-content: center;
         padding: 12px;
         animation: fadeIn 0.4s ease;
+      }
+
+      #match-end {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(6, 10, 18, 0.85);
+        z-index: 40;
+      }
+
+      #match-end.open {
+        display: flex;
+      }
+
+      .match-end-card {
+        background: rgba(15, 20, 35, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        padding: 24px;
+        width: min(420px, 90vw);
+        text-align: center;
+        color: var(--text);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+      }
+
+      .match-end-title {
+        font-size: 22px;
+        font-weight: 700;
+        margin-bottom: 8px;
+      }
+
+      .match-end-sub {
+        opacity: 0.8;
+        margin-bottom: 18px;
+      }
+
+      .match-end-card button {
+        border: none;
+        border-radius: 12px;
+        padding: 10px 16px;
+        background: linear-gradient(140deg, #6ed6ff, #5ef2a0);
+        color: #0b1220;
+        font-weight: 700;
+        cursor: pointer;
       }
 
       .setup-card {
@@ -913,6 +966,7 @@
                 <button class="action-btn" id="move-btn-2">Move 3</button>
                 <button class="action-btn" id="move-btn-3">Move 4</button>
                 <button class="action-btn switch-btn" id="switch-btn">Switch</button>
+                <button class="action-btn danger" id="surrender-btn">Surrender</button>
               </div>
               <div class="switch-modal" id="switch-modal">
                 <div class="switch-panel">
@@ -980,6 +1034,14 @@
                 <span class="hint" id="prematch-hint">Select 3 monsters, configure, then Ready.</span>
                 <button id="ready-btn">Ready</button>
               </div>
+            </div>
+          </div>
+
+          <div id="match-end">
+            <div class="match-end-card">
+              <div class="match-end-title" id="match-end-title">Victory</div>
+              <div class="match-end-sub" id="match-end-sub">Match ended.</div>
+              <button id="match-end-btn">Back to Setup</button>
             </div>
           </div>
         </div>

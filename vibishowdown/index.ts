@@ -196,6 +196,7 @@ const move_buttons = [
   document.getElementById("move-btn-3") as HTMLButtonElement
 ];
 const switch_btn = document.getElementById("switch-btn") as HTMLButtonElement;
+const surrender_btn = document.getElementById("surrender-btn") as HTMLButtonElement;
 const switch_modal = document.getElementById("switch-modal") as HTMLDivElement;
 const switch_options = document.getElementById("switch-options") as HTMLDivElement;
 const switch_close = document.getElementById("switch-close") as HTMLButtonElement;
@@ -209,6 +210,11 @@ const moves_grid = document.getElementById("moves-grid")!;
 const passive_grid = document.getElementById("passive-grid")!;
 const stats_grid = document.getElementById("stats-grid")!;
 const config_warning = document.getElementById("config-warning")!;
+
+const match_end = document.getElementById("match-end") as HTMLDivElement;
+const match_end_title = document.getElementById("match-end-title") as HTMLDivElement;
+const match_end_sub = document.getElementById("match-end-sub") as HTMLDivElement;
+const match_end_btn = document.getElementById("match-end-btn") as HTMLButtonElement;
 
 status_room.textContent = room;
 status_name.textContent = player_name;
@@ -679,6 +685,7 @@ function update_action_controls(): void {
     (!pending_switch && intent_locked) ||
     (!pending_switch && current_turn <= 0);
   switch_btn.disabled = switch_disabled;
+  surrender_btn.disabled = !match_started || !slot || is_spectator;
 }
 
 function has_pending_switch(): boolean {
@@ -714,6 +721,11 @@ function send_move_intent(moveIndex: number): void {
   intent_locked = true;
   update_action_controls();
   append_log("intent sent");
+}
+
+function send_surrender(): void {
+  if (!match_started || is_spectator || !slot) return;
+  post(room, { $: "surrender" });
 }
 
 function close_switch_modal(): void {
@@ -825,6 +837,17 @@ function update_opponent_ui(opponent_ready: boolean, opponent_name: string | nul
   if (!status_opponent) return;
   status_opponent.textContent = opponent_ready ? "ready" : opponent_name ? "waiting" : "offline";
   status_opponent.className = `status-pill ${opponent_ready ? "ok" : opponent_name ? "warn" : "off"}`;
+}
+
+function show_match_end(winner?: PlayerSlot): void {
+  if (!match_end) return;
+  const is_winner = winner && slot === winner;
+  match_end_title.textContent = is_winner ? "Victory" : "Defeat";
+  if (!winner) {
+    match_end_title.textContent = "Match ended";
+  }
+  match_end_sub.textContent = winner ? `${winner} wins the match.` : "Match finished.";
+  match_end.classList.add("open");
 }
 
 function handle_turn_start(data: { turn: number; deadline_at: number }): void {
@@ -1111,6 +1134,9 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
     log_events(data.log);
   }
   update_action_controls();
+  if (data.state.status === "ended") {
+    show_match_end(data.state.winner);
+  }
   if (slot && data.state.pendingSwitch?.[slot] && !switch_modal.classList.contains("open")) {
     open_switch_modal("forced");
   }
@@ -1182,9 +1208,9 @@ function handle_post(message: any): void {
     case "state":
       handle_state(data);
       return;
-    case "forfeit":
-      append_log(`forfeit: ${data.losers.join(", ")}`);
-      append_chat(`forfeit: ${data.losers.join(", ")}`);
+    case "surrender":
+      append_log(`surrender: ${data.loser}`);
+      append_chat(`${data.loser} surrendered`);
       return;
     case "error":
       append_log(`error: ${data.message}`);
@@ -1223,6 +1249,10 @@ switch_btn.addEventListener("click", () => {
   open_switch_modal(has_pending_switch() ? "forced" : "intent");
 });
 
+surrender_btn.addEventListener("click", () => {
+  send_surrender();
+});
+
 switch_close.addEventListener("click", () => {
   close_switch_modal();
 });
@@ -1242,6 +1272,10 @@ ready_btn.addEventListener("click", () => {
   } else {
     send_ready(true);
   }
+});
+
+match_end_btn.addEventListener("click", () => {
+  window.location.reload();
 });
 
 slot_active.addEventListener("click", () => {
