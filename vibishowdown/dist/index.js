@@ -86,6 +86,8 @@ var time_sync = {
 };
 var ws = new WebSocket(WS_URL);
 var room_watchers = new Map;
+var is_open = false;
+var open_listeners = [];
 var is_synced = false;
 var sync_listeners = [];
 function server_time() {
@@ -113,6 +115,11 @@ function register_handler(room, handler) {
   room_watchers.set(room, handler);
 }
 ws.addEventListener("open", () => {
+  is_open = true;
+  for (const cb of open_listeners) {
+    cb();
+  }
+  open_listeners.length = 0;
   console.log(`[WS] Connected to ${WS_URL}`);
   time_sync.request_sent_at = now();
   ws.send(JSON.stringify({ $: "get_time" }));
@@ -159,7 +166,8 @@ function gen_name() {
 }
 function post(room, data) {
   const name = gen_name();
-  send({ $: "post", room, time: server_time(), name, data });
+  const time = isFinite(time_sync.clock_offset) ? server_time() : now();
+  send({ $: "post", room, time, name, data });
   return name;
 }
 function load(room, from = 0, handler) {
@@ -177,23 +185,38 @@ function on_sync(callback) {
   }
   sync_listeners.push(callback);
 }
+function on_open(callback) {
+  if (is_open) {
+    callback();
+    return;
+  }
+  open_listeners.push(callback);
+}
 function ping() {
   return time_sync.last_ping;
 }
 
 // vibishowdown/index.ts
 var PLAYER_SLOTS = ["player1", "player2"];
+var MOVE_OPTIONS = ["basic_attack", "quick_attack", "agility", "return", "double_edge", "seismic_toss", "screech", "endure", "protect", "none"];
+var PASSIVE_OPTIONS = ["none", "leftovers", "choice_band"];
 var MOVE_LABELS = {
   basic_attack: "Basic Attack",
+  quick_attack: "Quick Attack",
+  agility: "Agility",
   return: "Return",
   double_edge: "Double-Edge",
   seismic_toss: "Seismic Toss",
+  screech: "Screech",
+  endure: "Endure",
   protect: "Protect",
   none: "none"
 };
 var PASSIVE_LABELS = {
   none: "none",
-  regen_5pct: "Regen 3%"
+  leftovers: "Leftovers",
+  choice_band: "Choice Band",
+  regen_5pct: "Leftovers"
 };
 var roster = [
   {
@@ -201,8 +224,8 @@ var roster = [
     name: "Baby Dragon TR",
     role: "Return Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: ["return", "none"],
-    possiblePassives: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["return", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -211,8 +234,8 @@ var roster = [
     name: "Croni DR",
     role: "Return Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: ["none"],
-    possiblePassives: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -221,8 +244,8 @@ var roster = [
     name: "Harpy TD",
     role: "Double-Edge Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: ["double_edge", "none"],
-    possiblePassives: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["double_edge", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -231,8 +254,8 @@ var roster = [
     name: "Hoof DD",
     role: "Double-Edge Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: ["none"],
-    possiblePassives: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -241,8 +264,8 @@ var roster = [
     name: "Knight TR",
     role: "Return Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: ["return", "none"],
-    possiblePassives: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["return", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -251,8 +274,8 @@ var roster = [
     name: "Miren DS",
     role: "Seismic Toss Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: ["none"],
-    possiblePassives: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -261,8 +284,8 @@ var roster = [
     name: "Panda TS",
     role: "Seismic Toss Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: ["seismic_toss", "none"],
-    possiblePassives: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["seismic_toss", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -271,8 +294,8 @@ var roster = [
     name: "Valkyria DR",
     role: "Return Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: ["none"],
-    possiblePassives: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
   }
@@ -385,7 +408,7 @@ var sprite_fx_classes = ["jump", "hit", "heal", "shield-on", "shield-hit"];
 var selected = [];
 var active_tab = null;
 function icon_path(id) {
-  return `../icons/unit_${id}.png`;
+  return `./icons/unit_${id}.png`;
 }
 function monster_label(id, fallback = "mon") {
   if (!id)
@@ -503,6 +526,9 @@ function load_team_selection() {
 function save_team_selection() {
   save_json(team_key, { selected: selected.slice() });
 }
+function normalize_passive_id(passive) {
+  return passive === "regen_5pct" ? "leftovers" : passive;
+}
 function coerce_config(spec, value) {
   const base = {
     moves: spec.defaultMoves.slice(0, 4),
@@ -522,9 +548,15 @@ function coerce_config(spec, value) {
       moves[i] = "none";
     }
   }
+  const allowed_passives = new Set(spec.possiblePassives.map(normalize_passive_id));
+  let passive = normalize_passive_id(value.passive || base.passive);
+  const fallback_passive = normalize_passive_id(base.passive);
+  if (!allowed_passives.has(passive)) {
+    passive = allowed_passives.has(fallback_passive) ? fallback_passive : "none";
+  }
   return {
     moves,
-    passive: value.passive || base.passive,
+    passive,
     stats: { ...base.stats, ...value.stats || {} }
   };
 }
@@ -802,20 +834,29 @@ function update_action_controls() {
   const active_id = selected[0];
   const config = get_config(active_id);
   let protect_on_cooldown = false;
+  let choice_band_locked_move = null;
   let active_moves = config.moves;
   if (latest_state && slot) {
     const active_state = latest_state.players[slot].team[latest_state.players[slot].activeIndex];
     protect_on_cooldown = active_state.protectCooldownTurns > 0;
     active_moves = active_state.chosenMoves;
+    if (active_state.chosenPassive === "choice_band") {
+      choice_band_locked_move = typeof active_state.choiceBandLockedMoveIndex === "number" ? active_state.choiceBandLockedMoveIndex : null;
+    }
   }
   move_buttons.forEach((btn, index) => {
     const move = active_moves[index] ?? "none";
     const label = MOVE_LABELS[move] || move;
-    if (move === "protect" && protect_on_cooldown) {
-      btn.textContent = `${index + 1}. Protect (cooldown)`;
+    const locked_by_choice_band = choice_band_locked_move !== null && index !== choice_band_locked_move;
+    const is_locked_slot = choice_band_locked_move !== null && index === choice_band_locked_move;
+    if (locked_by_choice_band) {
+      btn.textContent = `${index + 1}. ${label} (Choice Band lock)`;
+      btn.disabled = true;
+    } else if (move === "protect" && protect_on_cooldown) {
+      btn.textContent = is_locked_slot ? `${index + 1}. Protect (cooldown, locked)` : `${index + 1}. Protect (cooldown)`;
       btn.disabled = true;
     } else {
-      btn.textContent = `${index + 1}. ${label}`;
+      btn.textContent = is_locked_slot ? `${index + 1}. ${label} (locked)` : `${index + 1}. ${label}`;
       btn.disabled = controls_disabled;
     }
   });
@@ -1343,8 +1384,12 @@ function handle_post(message) {
       handle_state(data);
       return;
     case "surrender":
-      append_log(`surrender: ${data.loser}`);
-      append_chat(`${data.loser} surrendered`);
+      if ("loser" in data) {
+        append_log(`surrender: ${data.loser}`);
+        append_chat(`${data.loser} surrendered`);
+      } else {
+        append_log("surrender");
+      }
       return;
     case "error":
       append_log(`error: ${data.message}`);
@@ -1440,11 +1485,15 @@ render_config();
 update_roster_count();
 update_slots();
 update_action_controls();
-on_sync(() => {
+on_open(() => {
   if (status_conn)
-    status_conn.textContent = "synced";
+    status_conn.textContent = "connected";
   watch(room, handle_post);
   load(room, 0);
   post(room, { $: "join", name: player_name, token: stored_token });
   setup_chat_input(chat_input, chat_send);
+});
+on_sync(() => {
+  if (status_conn)
+    status_conn.textContent = "synced";
 });

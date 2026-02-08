@@ -21,6 +21,8 @@ const ws = new WebSocket(WS_URL);
 type MessageHandler = (message: any) => void;
 const room_watchers = new Map<string, MessageHandler>();
 
+let is_open = false;
+const open_listeners: Array<() => void> = [];
 let is_synced = false;
 const sync_listeners: Array<() => void> = [];
 
@@ -55,6 +57,11 @@ function register_handler(room: string, handler?: MessageHandler): void {
 }
 
 ws.addEventListener("open", () => {
+  is_open = true;
+  for (const cb of open_listeners) {
+    cb();
+  }
+  open_listeners.length = 0;
   console.log(`[WS] Connected to ${WS_URL}`);
   time_sync.request_sent_at = now();
   ws.send(JSON.stringify({ $: "get_time" }));
@@ -109,7 +116,8 @@ export function gen_name(): string {
 
 export function post(room: string, data: RoomPost): string {
   const name = gen_name();
-  send({ $: "post", room, time: server_time(), name, data });
+  const time = isFinite(time_sync.clock_offset) ? server_time() : now();
+  send({ $: "post", room, time, name, data });
   return name;
 }
 
@@ -138,6 +146,14 @@ export function on_sync(callback: () => void): void {
     return;
   }
   sync_listeners.push(callback);
+}
+
+export function on_open(callback: () => void): void {
+  if (is_open) {
+    callback();
+    return;
+  }
+  open_listeners.push(callback);
 }
 
 export function ping(): number {

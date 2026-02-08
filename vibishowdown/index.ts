@@ -1,4 +1,4 @@
-import { gen_name, load, on_sync, ping, post, watch } from "../src/client.ts";
+import { gen_name, load, on_open, on_sync, ping, post, watch } from "../src/client.ts";
 import type {
   EventLog,
   GameState,
@@ -257,7 +257,7 @@ const selected: string[] = [];
 let active_tab: string | null = null;
 
 function icon_path(id: string): string {
-  return `../icons/unit_${id}.png`;
+  return `./icons/unit_${id}.png`;
 }
 
 function monster_label(id?: string, fallback: string = "mon"): string {
@@ -1435,10 +1435,14 @@ update_roster_count();
 update_slots();
 update_action_controls();
 
-on_sync(() => {
-  if (status_conn) status_conn.textContent = "synced";
+on_open(() => {
+  if (status_conn) status_conn.textContent = "connected";
   watch(room, handle_post);
   load(room, 0);
   post(room, { $: "join", name: player_name, token: stored_token });
   setup_chat_input(chat_input, chat_send);
+});
+
+on_sync(() => {
+  if (status_conn) status_conn.textContent = "synced";
 });

@@ -653,12 +653,7 @@ const server = http.createServer(async (req, res) => {
     let path = url.pathname;
     if (path === "/") path = "/index.html";
 
-    let filesystem_path: string;
-    if (path.startsWith("/icons/")) {
-      filesystem_path = path.slice(1);
-    } else {
-      filesystem_path = path.startsWith("/dist/") ? `vibishowdown${path}` : `vibishowdown${path}`;
-    }
+    const filesystem_path = `vibishowdown${path}`;
 
     let ct = "application/octet-stream";
     if (path.endsWith(".html")) {
