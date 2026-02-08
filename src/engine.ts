@@ -97,7 +97,10 @@ const MOVE_SPECS: Record<string, MoveSpec> = {
 
 const PASSIVE_SPECS: Record<string, PassiveSpec> = {
   none: { id: "none", name: "none" },
-  regen_5pct: { id: "regen_5pct", name: "Regen 3%" }
+  leftovers: { id: "leftovers", name: "Leftovers" },
+  choice_band: { id: "choice_band", name: "Choice Band" },
+  // Legacy alias to keep compatibility with older saved profiles.
+  regen_5pct: { id: "leftovers", name: "Leftovers" }
 };
 
 type Action =
@@ -145,6 +148,7 @@ function clone_monster(monster: MonsterState): MonsterState {
     chosenPassive: monster.chosenPassive,
     protectActiveThisTurn: monster.protectActiveThisTurn,
     endureActiveThisTurn: monster.endureActiveThisTurn,
+    choiceBandLockedMoveIndex: monster.choiceBandLockedMoveIndex,
     protectCooldownTurns: monster.protectCooldownTurns
   };
 }
@@ -252,8 +256,8 @@ function apply_passives(state: GameState, log: EventLog[], hp_changed: WeakSet<M
     const active = active_monster(player);
     if (!is_alive(active)) return;
     const spec = passive_spec(active.chosenPassive);
-    if (spec.id === "regen_5pct") {
-      const heal = Math.floor(active.maxHp * 0.05);
+    if (spec.id === "leftovers") {
+      const heal = Math.floor(active.maxHp * 0.06);
       if (heal > 0) {
         const before = active.hp;
         active.hp = Math.min(active.maxHp, active.hp + heal);
@@ -263,7 +267,7 @@ function apply_passives(state: GameState, log: EventLog[], hp_changed: WeakSet<M
           log.push({
             type: "passive_heal",
             turn: state.turn,
-            summary: `${player.slot} regen +${gained} HP`,
+            summary: `${player.slot} Leftovers +${gained} HP`,
             data: { slot: player.slot, amount: gained, passive: spec.id }
           });
         }
@@ -379,6 +383,20 @@ function apply_move(
   }
 
   const spec = move_spec(move_id);
+  const passive = passive_spec(attacker.chosenPassive);
+  const choice_band_active = passive.id === "choice_band";
+
+  if (choice_band_active && attacker.choiceBandLockedMoveIndex === null && spec.id !== "none") {
+    attacker.choiceBandLockedMoveIndex = move_index;
+    const locked_move_id = attacker.chosenMoves[move_index] ?? "none";
+    log.push({
+      type: "choice_band_lock",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${attacker.name} is locked into ${locked_move_id} (slot ${move_index + 1})`,
+      data: { slot: player_slot, moveIndex: move_index, move: locked_move_id, passive: passive.id }
+    });
+  }
 
   if (spec.id === "none") {
     log.push({
@@ -484,6 +502,7 @@ function apply_move(
     return;
   }
 
+  const effective_attack = choice_band_active ? Math.max(0, Math.round(attacker.attack * 1.5)) : attacker.attack;
   const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
@@ -491,9 +510,9 @@ function apply_move(
   if (damage_type === "flat") {
     raw_damage = spec.flatDamage ?? 0;
   } else if (damage_type === "true") {
-    raw_damage = Math.round((attacker.attack * multiplier100) / 100);
+    raw_damage = Math.round((effective_attack * multiplier100) / 100);
   } else {
-    raw_damage = Math.round((attacker.attack * multiplier100) / (effective_defense * 100));
+    raw_damage = Math.round((effective_attack * multiplier100) / (effective_defense * 100));
   }
   let damage = Math.max(0, raw_damage);
   const was_blocked = defender.protectActiveThisTurn;
@@ -574,10 +593,15 @@ function apply_move(
     }
   }
 
+  const choice_band_detail =
+    choice_band_active && damage_type !== "flat"
+      ? `; Choice Band ATK boost: ${attacker.attack} -> ${effective_attack}`
+      : "";
+
   if (spec.id === "return") {
-    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def*100)) = round(${attacker.attack} * ${multiplier100} / (${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
+    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def*100)) = round(${effective_attack} * ${multiplier100} / (${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
-    }`;
+    }${choice_band_detail}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -586,9 +610,9 @@ function apply_move(
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "double_edge") {
-    const detail = `Double-Edge: dmg = round(atk*120/(def*100)) = round(${attacker.attack}*120/(${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
+    const detail = `Double-Edge: dmg = round(atk*120/(def*100)) = round(${effective_attack}*120/(${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
-    }; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})`;
+    }; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -608,9 +632,9 @@ function apply_move(
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "quick_attack") {
-    const detail = `Quick Attack: dmg = round(atk*66/(def*100)) = round(${attacker.attack}*66/(${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
+    const detail = `Quick Attack: dmg = round(atk*66/(def*100)) = round(${effective_attack}*66/(${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
-    }; speed check ignored`;
+    }; speed check ignored${choice_band_detail}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -710,6 +734,7 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
     });
     return;
   }
+  player.team[activeIndex].choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   log.push({
     type: "switch",
@@ -764,6 +789,7 @@ export function create_initial_state(
       chosenPassive: monster.passive,
       protectActiveThisTurn: false,
       endureActiveThisTurn: false,
+      choiceBandLockedMoveIndex: null,
       protectCooldownTurns: 0
     }));
     return {
@@ -898,6 +924,7 @@ export function apply_forced_switch(
     return { state: next, log, error: "target fainted" };
   }
   const from = player.activeIndex;
+  player.team[from].choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   next.pendingSwitch[slot] = false;
   log.push({
@@ -933,6 +960,15 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
 
   if (intent.moveIndex < 0 || intent.moveIndex >= active.chosenMoves.length) {
     return "invalid move index";
+  }
+
+  const passive = passive_spec(active.chosenPassive);
+  if (
+    passive.id === "choice_band" &&
+    active.choiceBandLockedMoveIndex !== null &&
+    intent.moveIndex !== active.choiceBandLockedMoveIndex
+  ) {
+    return "choice band locked";
   }
 
   const moveId = active.chosenMoves[intent.moveIndex];

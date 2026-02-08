@@ -32,7 +32,7 @@ type Profile = {
 
 const PLAYER_SLOTS: PlayerSlot[] = ["player1", "player2"];
 const MOVE_OPTIONS = ["basic_attack", "quick_attack", "agility", "return", "double_edge", "seismic_toss", "screech", "endure", "protect", "none"];
-const PASSIVE_OPTIONS = ["none", "regen_5pct"];
+const PASSIVE_OPTIONS = ["none", "leftovers", "choice_band"];
 
 const MOVE_LABELS: Record<string, string> = {
   basic_attack: "Basic Attack",
@@ -49,7 +49,10 @@ const MOVE_LABELS: Record<string, string> = {
 
 const PASSIVE_LABELS: Record<string, string> = {
   none: "none",
-  regen_5pct: "Regen 3%"
+  leftovers: "Leftovers",
+  choice_band: "Choice Band",
+  // Legacy alias for older saved configs.
+  regen_5pct: "Leftovers"
 };
 
 const roster: MonsterSpec[] = [
@@ -59,7 +62,7 @@ const roster: MonsterSpec[] = [
     role: "Return Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
     possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: ["none"],
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["return", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -69,7 +72,7 @@ const roster: MonsterSpec[] = [
     role: "Return Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
     possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: ["none"],
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -79,7 +82,7 @@ const roster: MonsterSpec[] = [
     role: "Double-Edge Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
     possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: ["none"],
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["double_edge", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -89,7 +92,7 @@ const roster: MonsterSpec[] = [
     role: "Double-Edge Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
     possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: ["none"],
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -99,7 +102,7 @@ const roster: MonsterSpec[] = [
     role: "Return Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
     possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: ["none"],
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["return", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -109,7 +112,7 @@ const roster: MonsterSpec[] = [
     role: "Seismic Toss Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
     possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: ["none"],
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -119,7 +122,7 @@ const roster: MonsterSpec[] = [
     role: "Seismic Toss Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
     possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: ["none"],
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["seismic_toss", "none", "none", "none"],
     defaultPassive: "none"
   },
@@ -129,7 +132,7 @@ const roster: MonsterSpec[] = [
     role: "Return Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
     possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: ["none"],
+    possiblePassives: PASSIVE_OPTIONS.slice(),
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
   }
@@ -386,6 +389,10 @@ function save_team_selection(): void {
   save_json(team_key, { selected: selected.slice() });
 }
 
+function normalize_passive_id(passive: string): string {
+  return passive === "regen_5pct" ? "leftovers" : passive;
+}
+
 function coerce_config(spec: MonsterSpec, value?: MonsterConfig): MonsterConfig {
   const base: MonsterConfig = {
     moves: spec.defaultMoves.slice(0, 4),
@@ -407,10 +414,16 @@ function coerce_config(spec: MonsterSpec, value?: MonsterConfig): MonsterConfig 
       moves[i] = "none";
     }
   }
+  const allowed_passives = new Set(spec.possiblePassives.map(normalize_passive_id));
+  let passive = normalize_passive_id(value.passive || base.passive);
+  const fallback_passive = normalize_passive_id(base.passive);
+  if (!allowed_passives.has(passive)) {
+    passive = allowed_passives.has(fallback_passive) ? fallback_passive : "none";
+  }
 
   return {
     moves,
-    passive: value.passive || base.passive,
+    passive,
     stats: { ...base.stats, ...(value.stats || {}) }
   };
 }
@@ -719,20 +732,30 @@ function update_action_controls(): void {
   const active_id = selected[0];
   const config = get_config(active_id);
   let protect_on_cooldown = false;
+  let choice_band_locked_move: number | null = null;
   let active_moves = config.moves;
   if (latest_state && slot) {
     const active_state = latest_state.players[slot].team[latest_state.players[slot].activeIndex];
     protect_on_cooldown = active_state.protectCooldownTurns > 0;
     active_moves = active_state.chosenMoves;
+    if (active_state.chosenPassive === "choice_band") {
+      choice_band_locked_move =
+        typeof active_state.choiceBandLockedMoveIndex === "number" ? active_state.choiceBandLockedMoveIndex : null;
+    }
   }
   move_buttons.forEach((btn, index) => {
     const move = active_moves[index] ?? "none";
     const label = MOVE_LABELS[move] || move;
-    if (move === "protect" && protect_on_cooldown) {
-      btn.textContent = `${index + 1}. Protect (cooldown)`;
+    const locked_by_choice_band = choice_band_locked_move !== null && index !== choice_band_locked_move;
+    const is_locked_slot = choice_band_locked_move !== null && index === choice_band_locked_move;
+    if (locked_by_choice_band) {
+      btn.textContent = `${index + 1}. ${label} (Choice Band lock)`;
+      btn.disabled = true;
+    } else if (move === "protect" && protect_on_cooldown) {
+      btn.textContent = is_locked_slot ? `${index + 1}. Protect (cooldown, locked)` : `${index + 1}. Protect (cooldown)`;
       btn.disabled = true;
     } else {
-      btn.textContent = `${index + 1}. ${label}`;
+      btn.textContent = is_locked_slot ? `${index + 1}. ${label} (locked)` : `${index + 1}. ${label}`;
       btn.disabled = controls_disabled;
     }
   });

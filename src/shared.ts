@@ -3,7 +3,7 @@ export type RoomId = string;
 export type PlayerSlot = "player1" | "player2";
 
 export type MoveId = "basic_attack" | "none" | "protect" | string;
-export type PassiveId = "none" | "regen_5pct" | string;
+export type PassiveId = "none" | "leftovers" | "choice_band" | "regen_5pct" | string;
 
 export type Stats = {
   level: number;
@@ -40,6 +40,7 @@ export type MonsterState = {
   chosenPassive: PassiveId;
   protectActiveThisTurn: boolean;
   endureActiveThisTurn: boolean;
+  choiceBandLockedMoveIndex: number | null;
   protectCooldownTurns: number;
 };
 
