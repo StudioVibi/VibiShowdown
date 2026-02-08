@@ -1,0 +1,56 @@
+TESTE DAS 3 HABILIDADES (Return / Double-Edge / Seismic Toss)
+
+ROSTER DE TESTE (3 PARES)
+1) Return
+   - Return Tester (babydragon icon)
+     Stats: Lv 7, HP 100, ATK 100, DEF 10, SPD 20
+     Moves: Return (Move 1), resto = none
+   - Return Dummy (croni icon)
+     Stats: Lv 7, HP 100, ATK 10, DEF 10, SPD 10
+     Moves: none
+
+2) Double-Edge
+   - Double-Edge Tester (harpy icon)
+     Stats: Lv 7, HP 100, ATK 100, DEF 10, SPD 20
+     Moves: Double-Edge (Move 1), resto = none
+   - Double-Edge Dummy (hoof icon)
+     Stats: Lv 7, HP 100, ATK 10, DEF 10, SPD 10
+     Moves: none
+
+3) Seismic Toss
+   - Seismic Toss Tester (panda icon)
+     Stats: Lv 7, HP 100, ATK 100, DEF 10, SPD 20
+     Moves: Seismic Toss (Move 1), resto = none
+   - Seismic Toss Dummy (miren icon)
+     Stats: Lv 7, HP 100, ATK 10, DEF 10, SPD 10
+     Moves: none
+
+COMO TESTAR
+1) Abra duas abas na mesma room.
+2) Player1 seleciona os 3 TESTERS: Return Tester, Double-Edge Tester, Seismic Toss Tester.
+3) Player2 seleciona os 3 DUMMIES: Return Dummy, Double-Edge Dummy, Seismic Toss Dummy.
+4) Em cada teste, o attacker usa o Move 1, o dummy usa none.
+   (Os testers tem SPD 20 e os dummies SPD 10, entao o tester age primeiro.)
+
+RESULTADOS ESPERADOS
+A) Return
+   Formula: dmg = round(atk * (72 + 4*lvl) / (def*100))
+   Com Lv 7: (72 + 4*7) = 100
+   Dano esperado: round(100 * 100 / (10*100)) = 10
+   HP do Dummy: 100 -> 90
+
+B) Double-Edge
+   Formula: dmg = round(atk*120/(def*100))
+   Dano esperado: round(100*120/(10*100)) = 12
+   Recoil: round(dmg/3) = round(12/3) = 4
+   HP do Dummy: 100 -> 88
+   HP do Attacker: 100 -> 96
+
+C) Seismic Toss
+   Dano flat: 75 (ignora defesa)
+   HP do Dummy: 100 -> 25
+
+OBSERVACAO
+- Se algum mon usar Protect, o dano final vira 0.
+- As mensagens detalhadas de cada habilidade agora aparecem no terminal do servidor
+  (linha com prefixo do room) e tambem no log do jogo.

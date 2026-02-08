@@ -319,7 +319,8 @@ function apply_move(
     raw_damage = Math.round((attacker.attack * multiplier100) / (effective_defense * 100));
   }
   let damage = Math.max(0, raw_damage);
-  if (defender.protectActiveThisTurn) {
+  const was_blocked = defender.protectActiveThisTurn;
+  if (was_blocked) {
     damage = 0;
     log.push({
       type: "damage_blocked",
@@ -352,8 +353,9 @@ function apply_move(
 
   const recoil_num = spec.recoilNumerator ?? 0;
   const recoil_den = spec.recoilDenominator ?? 1;
+  let recoil_damage = 0;
   if (recoil_num > 0 && recoil_den > 0 && damage > 0) {
-    const recoil_damage = Math.max(0, Math.round((damage * recoil_num) / recoil_den));
+    recoil_damage = Math.max(0, Math.round((damage * recoil_num) / recoil_den));
     if (recoil_damage > 0) {
       const attacker_before = attacker.hp;
       attacker.hp = Math.max(0, attacker.hp - recoil_damage);
@@ -374,6 +376,41 @@ function apply_move(
         });
       }
     }
+  }
+
+  if (spec.id === "return") {
+    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def*100)) = round(${attacker.attack} * ${multiplier100} / (${effective_defense}*100)) = ${raw_damage}; final=${damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: detail,
+      data: { move: spec.id, damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "double_edge") {
+    const detail = `Double-Edge: dmg = round(atk*120/(def*100)) = round(${attacker.attack}*120/(${effective_defense}*100)) = ${raw_damage}; final=${damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }; recoil = round(final/3) = ${recoil_damage}`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: detail,
+      data: { move: spec.id, damage, recoil: recoil_damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "seismic_toss") {
+    const detail = `Seismic Toss: dmg = flat ${spec.flatDamage ?? 0} (ignores defense); final=${damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: detail,
+      data: { move: spec.id, damage, blocked: was_blocked }
+    });
   }
 
   handle_faint(state, log, other_slot(player_slot));

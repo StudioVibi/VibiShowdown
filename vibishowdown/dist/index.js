@@ -198,102 +198,62 @@ var PASSIVE_LABELS = {
 var roster = [
   {
     id: "babydragon",
-    name: "Baby Dragon",
-    role: "Brawler",
-    stats: { level: 10, maxHp: 148, attack: 24, defense: 9, speed: 8 },
-    possibleMoves: MOVE_OPTIONS,
-    possiblePassives: PASSIVE_OPTIONS,
-    defaultMoves: ["basic_attack", "protect", "none", "none"],
+    name: "Return Tester",
+    role: "Return Attacker",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    possibleMoves: ["return", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "none", "none", "none"],
     defaultPassive: "none"
   },
   {
     id: "croni",
-    name: "Croni",
-    role: "Mystic",
-    stats: { level: 10, maxHp: 136, attack: 25, defense: 8, speed: 14 },
-    possibleMoves: MOVE_OPTIONS,
-    possiblePassives: PASSIVE_OPTIONS,
-    defaultMoves: ["basic_attack", "none", "none", "none"],
-    defaultPassive: "regen_5pct"
+    name: "Return Dummy",
+    role: "Return Defender",
+    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    possibleMoves: ["none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["none", "none", "none", "none"],
+    defaultPassive: "none"
   },
   {
     id: "harpy",
-    name: "Harpy",
-    role: "Striker",
-    stats: { level: 10, maxHp: 134, attack: 28, defense: 7, speed: 16 },
-    possibleMoves: MOVE_OPTIONS,
-    possiblePassives: PASSIVE_OPTIONS,
-    defaultMoves: ["basic_attack", "protect", "none", "none"],
+    name: "Double-Edge Tester",
+    role: "Double-Edge Attacker",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    possibleMoves: ["double_edge", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["double_edge", "none", "none", "none"],
     defaultPassive: "none"
   },
   {
     id: "hoof",
-    name: "Hoof",
-    role: "Tank",
-    stats: { level: 10, maxHp: 160, attack: 24, defense: 10, speed: 6 },
-    possibleMoves: MOVE_OPTIONS,
-    possiblePassives: PASSIVE_OPTIONS,
-    defaultMoves: ["basic_attack", "protect", "none", "none"],
-    defaultPassive: "regen_5pct"
+    name: "Double-Edge Dummy",
+    role: "Double-Edge Defender",
+    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    possibleMoves: ["none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["none", "none", "none", "none"],
+    defaultPassive: "none"
   },
   {
-    id: "knight",
-    name: "Knight",
-    role: "Guardian",
-    stats: { level: 10, maxHp: 150, attack: 27, defense: 10, speed: 8 },
-    possibleMoves: MOVE_OPTIONS,
-    possiblePassives: PASSIVE_OPTIONS,
-    defaultMoves: ["basic_attack", "protect", "none", "none"],
+    id: "panda",
+    name: "Seismic Toss Tester",
+    role: "Seismic Toss Attacker",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    possibleMoves: ["seismic_toss", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["seismic_toss", "none", "none", "none"],
     defaultPassive: "none"
   },
   {
     id: "miren",
-    name: "Miren",
-    role: "Mage",
-    stats: { level: 10, maxHp: 132, attack: 26, defense: 7, speed: 12 },
-    possibleMoves: MOVE_OPTIONS,
-    possiblePassives: PASSIVE_OPTIONS,
-    defaultMoves: ["basic_attack", "none", "none", "none"],
-    defaultPassive: "regen_5pct"
-  },
-  {
-    id: "panda",
-    name: "Panda",
-    role: "Bruiser",
-    stats: { level: 10, maxHp: 154, attack: 23, defense: 12, speed: 7 },
-    possibleMoves: MOVE_OPTIONS,
-    possiblePassives: PASSIVE_OPTIONS,
-    defaultMoves: ["basic_attack", "protect", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "priestess",
-    name: "Priestess",
-    role: "Support",
-    stats: { level: 10, maxHp: 138, attack: 25, defense: 10, speed: 11 },
-    possibleMoves: MOVE_OPTIONS,
-    possiblePassives: PASSIVE_OPTIONS,
-    defaultMoves: ["basic_attack", "none", "none", "none"],
-    defaultPassive: "regen_5pct"
-  },
-  {
-    id: "valkyria",
-    name: "Valkyria",
-    role: "Vanguard",
-    stats: { level: 10, maxHp: 144, attack: 24, defense: 10, speed: 13 },
-    possibleMoves: MOVE_OPTIONS,
-    possiblePassives: PASSIVE_OPTIONS,
-    defaultMoves: ["basic_attack", "protect", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "vulcasa",
-    name: "Vulcasa",
-    role: "Pyro",
-    stats: { level: 10, maxHp: 140, attack: 25, defense: 8, speed: 10 },
-    possibleMoves: MOVE_OPTIONS,
-    possiblePassives: PASSIVE_OPTIONS,
-    defaultMoves: ["basic_attack", "protect", "none", "none"],
+    name: "Seismic Toss Dummy",
+    role: "Seismic Toss Defender",
+    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    possibleMoves: ["none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
   }
 ];
@@ -522,10 +482,16 @@ function coerce_config(spec, value) {
   while (moves.length < 4) {
     moves.push("none");
   }
+  const allowed = new Set(spec.possibleMoves);
+  for (let i = 0; i < moves.length; i++) {
+    if (!allowed.has(moves[i])) {
+      moves[i] = "none";
+    }
+  }
   return {
     moves,
     passive: value.passive || base.passive,
-    stats: { ...base.stats, ...value.stats || {} }
+    stats: { ...base.stats }
   };
 }
 function get_config(monster_id) {
