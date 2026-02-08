@@ -170,7 +170,7 @@ const enemy_sprite_wrap = document.getElementById("enemy-sprite-wrap") as HTMLDi
 
 const prematch = document.getElementById("prematch")!;
 const prematch_hint = document.getElementById("prematch-hint")!;
-const ready_btn = document.getElementById("ready-btn")!;
+const ready_btn = document.getElementById("ready-btn") as HTMLButtonElement;
 const move_buttons = [
   document.getElementById("move-btn-0") as HTMLButtonElement,
   document.getElementById("move-btn-1") as HTMLButtonElement,
@@ -1297,8 +1297,12 @@ function handle_post(message: any): void {
       handle_state(data);
       return;
     case "surrender":
-      append_log(`surrender: ${data.loser}`);
-      append_chat(`${data.loser} surrendered`);
+      if ("loser" in data) {
+        append_log(`surrender: ${data.loser}`);
+        append_chat(`${data.loser} surrendered`);
+      } else {
+        append_log("surrender");
+      }
       return;
     case "error":
       append_log(`error: ${data.message}`);
