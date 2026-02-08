@@ -1,0 +1,53 @@
+RESUMO DO APP (FOCO EM GAME DESIGN)
+
+O que e
+- Um jogo de batalha 1v1 por turnos com 3 monstros por jogador.
+- A partida acontece em uma unica sala (room). Dois jogadores lutam, o restante assiste.
+- O jogo e deterministico: mesmas entradas geram o mesmo resultado.
+
+Fluxo da partida
+1) Pre-match
+   - Cada jogador escolhe 3 monstros do roster e configura seus moves/atributos permitidos.
+   - A ordem dos 3 define o mon inicial (slot da esquerda e o starter).
+   - Quando os dois clicam Ready, a partida comeca.
+
+2) Turnos
+   - Cada turno espera os dois jogadores enviarem suas intencoes.
+   - As intencoes podem ser:
+     - usar um move (por indice do move)
+     - trocar para um mon do bench
+   - O turno e resolvido em fases com prioridade e desempate por iniciativa:
+     - switch
+     - guard
+     - attack
+
+3) Condicao de vitoria
+   - Vence quem derrubar todos os 3 monstros do oponente.
+   - Ha botao de surrender: se um jogador desistir, o outro vence imediatamente.
+
+Moves atuais (principais)
+- Return
+  - Dano escalado por nivel.
+  - Formula: round(ATK * (72 + 4*LVL) / (DEF * 100)).
+- Double-Edge
+  - Dano alto (1.2x) e recoil.
+  - Dano: round(ATK * 120 / (DEF * 100)).
+  - Recoil: round(dano / 3).
+- Seismic Toss
+  - Dano fixo, ignora defesa.
+  - Dano: 75.
+- Protect
+  - Bloqueia dano do turno e entra em cooldown curto.
+
+Passivos
+- Apenas passivos simples (ex: regen) existem, mas podem ser expandidos.
+
+Regras importantes
+- O jogo sempre resolve turnos apenas quando ambos enviam a intencao.
+- Troca forcada ocorre se o mon ativo cair e ainda houver bench vivo.
+- Espectadores veem a partida do ponto de vista do jogador 1.
+
+Objetivo do design
+- Combate curto, com calculo simples e previsivel.
+- Facil de validar com testes manuais de dano.
+- Estrutura pronta para adicionar novos moves e passivos mantendo determinismo.

@@ -218,14 +218,6 @@ function send_participants(ws: WebSocket, room: RoomState): void {
   send_direct(ws, room.id, participants_payload(room));
 }
 
-function log_move_details(room_id: RoomId, log: EventLog[]): void {
-  for (const entry of log) {
-    if (entry.type === "move_detail") {
-      console.log(`[${room_id}] ${entry.summary}`);
-    }
-  }
-}
-
 function start_turn(room: RoomState): void {
   if (room.state && (room.state.pendingSwitch.player1 || room.state.pendingSwitch.player2)) {
     return;
@@ -510,7 +502,6 @@ function handle_intent(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
     room.last_state = clone_state(state);
     room.last_log = log;
     emit_post(room.id, { $: "state", turn: room.turn, state, log });
-    log_move_details(room.id, log);
     if (state.status === "ended") {
       room.ended = true;
       return;
