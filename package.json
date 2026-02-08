@@ -3,8 +3,8 @@
   "type": "module",
   "scripts": {
     "check": "tsc --target esnext --noEmit --skipLibCheck",
-    "dev": "bun run src/game_server.ts",
-    "server": "bun run src/game_server.ts"
+    "dev": "node -e \"console.error('Local server disabled. This project is locked to official VibiNet: wss://net.studiovibi.com'); process.exit(1)\"",
+    "server": "node -e \"console.error('Local server disabled. This project is locked to official VibiNet: wss://net.studiovibi.com'); process.exit(1)\""
   },
   "dependencies": {
     "vibinet": "0.1.1",
