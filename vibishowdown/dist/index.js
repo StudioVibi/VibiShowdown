@@ -46,7 +46,9 @@ function detect_url() {
   if (has_window()) {
     try {
       const origin = window.location.origin;
-      if (origin && origin !== "null") {
+      const host = window.location.hostname.toLowerCase();
+      const is_local_host = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
+      if (is_local_host && origin && origin !== "null") {
         return normalize(origin);
       }
     } catch {}
