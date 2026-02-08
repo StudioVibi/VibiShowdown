@@ -31,7 +31,7 @@ type Profile = {
 };
 
 const PLAYER_SLOTS: PlayerSlot[] = ["player1", "player2"];
-const MOVE_OPTIONS = ["basic_attack", "quick_attack", "return", "double_edge", "seismic_toss", "protect", "none"];
+const MOVE_OPTIONS = ["basic_attack", "quick_attack", "return", "double_edge", "seismic_toss", "screech", "protect", "none"];
 const PASSIVE_OPTIONS = ["none", "regen_5pct"];
 
 const MOVE_LABELS: Record<string, string> = {
@@ -40,6 +40,7 @@ const MOVE_LABELS: Record<string, string> = {
   return: "Return",
   double_edge: "Double-Edge",
   seismic_toss: "Seismic Toss",
+  screech: "Screech",
   protect: "Protect",
   none: "none"
 };

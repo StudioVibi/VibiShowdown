@@ -73,6 +73,12 @@ const MOVE_SPECS: Record<string, MoveSpec> = {
     damageType: "flat",
     flatDamage: 75
   },
+  screech: {
+    id: "screech",
+    name: "Screech",
+    phaseId: "attack_01",
+    attackMultiplier100: 0
+  },
   protect: { id: "protect", name: "Protect", phaseId: "guard", attackMultiplier100: 100 },
   none: { id: "none", name: "none", phaseId: "attack_01", attackMultiplier100: 100 }
 };
@@ -329,6 +335,34 @@ function apply_move(
       phase: spec.phaseId,
       summary: `${player_slot} has no target`,
       data: { slot: player_slot }
+    });
+    return;
+  }
+
+  if (spec.id === "screech") {
+    const before_defense = defender.defense;
+    const after_defense = Math.max(1, Math.floor(before_defense * 0.5));
+    defender.defense = after_defense;
+    log.push({
+      type: "stat_mod",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} used Screech on ${defender.name} (DEF ${before_defense} -> ${after_defense})`,
+      data: {
+        slot: player_slot,
+        target: defender.id,
+        stat: "defense",
+        multiplier: 0.5,
+        before: before_defense,
+        after: after_defense
+      }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Screech: target DEF x0.5 (${before_defense} -> ${after_defense})`,
+      data: { move: spec.id, target: defender.id, before: before_defense, after: after_defense }
     });
     return;
   }
