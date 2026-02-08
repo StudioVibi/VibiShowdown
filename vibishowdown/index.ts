@@ -257,7 +257,7 @@ const selected: string[] = [];
 let active_tab: string | null = null;
 
 function icon_path(id: string): string {
-  return `/icons/unit_${id}.png`;
+  return `../icons/unit_${id}.png`;
 }
 
 function monster_label(id?: string, fallback: string = "mon"): string {

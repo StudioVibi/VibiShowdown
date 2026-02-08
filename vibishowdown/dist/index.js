@@ -383,7 +383,7 @@ var sprite_fx_classes = ["jump", "hit", "heal", "shield-on", "shield-hit"];
 var selected = [];
 var active_tab = null;
 function icon_path(id) {
-  return `/icons/unit_${id}.png`;
+  return `../icons/unit_${id}.png`;
 }
 function monster_label(id, fallback = "mon") {
   if (!id)
