@@ -196,8 +196,8 @@ var PASSIVE_LABELS = {
 var roster = [
   {
     id: "babydragon",
-    name: "Return Tester",
-    role: "Return Attacker",
+    name: "Baby Dragon TR",
+    role: "Return Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
     possibleMoves: ["return", "none"],
     possiblePassives: ["none"],
@@ -206,8 +206,8 @@ var roster = [
   },
   {
     id: "croni",
-    name: "Return Dummy",
-    role: "Return Defender",
+    name: "Croni DR",
+    role: "Return Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
     possibleMoves: ["none"],
     possiblePassives: ["none"],
@@ -216,8 +216,8 @@ var roster = [
   },
   {
     id: "harpy",
-    name: "Double-Edge Tester",
-    role: "Double-Edge Attacker",
+    name: "Harpy TD",
+    role: "Double-Edge Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
     possibleMoves: ["double_edge", "none"],
     possiblePassives: ["none"],
@@ -226,8 +226,28 @@ var roster = [
   },
   {
     id: "hoof",
-    name: "Double-Edge Dummy",
-    role: "Double-Edge Defender",
+    name: "Hoof DD",
+    role: "Double-Edge Dummy",
+    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    possibleMoves: ["none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["none", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "knight",
+    name: "Knight TR",
+    role: "Return Tester",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    possibleMoves: ["return", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "miren",
+    name: "Miren DS",
+    role: "Seismic Toss Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
     possibleMoves: ["none"],
     possiblePassives: ["none"],
@@ -236,8 +256,8 @@ var roster = [
   },
   {
     id: "panda",
-    name: "Seismic Toss Tester",
-    role: "Seismic Toss Attacker",
+    name: "Panda TS",
+    role: "Seismic Toss Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
     possibleMoves: ["seismic_toss", "none"],
     possiblePassives: ["none"],
@@ -245,9 +265,9 @@ var roster = [
     defaultPassive: "none"
   },
   {
-    id: "miren",
-    name: "Seismic Toss Dummy",
-    role: "Seismic Toss Defender",
+    id: "valkyria",
+    name: "Valkyria DR",
+    role: "Return Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
     possibleMoves: ["none"],
     possiblePassives: ["none"],
@@ -315,6 +335,26 @@ var moves_grid = document.getElementById("moves-grid");
 var passive_grid = document.getElementById("passive-grid");
 var stats_grid = document.getElementById("stats-grid");
 var config_warning = document.getElementById("config-warning");
+var player_bench_slots = [
+  {
+    btn: document.getElementById("player-bench-0"),
+    img: document.getElementById("player-bench-0-img")
+  },
+  {
+    btn: document.getElementById("player-bench-1"),
+    img: document.getElementById("player-bench-1-img")
+  }
+];
+var enemy_bench_slots = [
+  {
+    btn: document.getElementById("enemy-bench-0"),
+    img: document.getElementById("enemy-bench-0-img")
+  },
+  {
+    btn: document.getElementById("enemy-bench-1"),
+    img: document.getElementById("enemy-bench-1-img")
+  }
+];
 var match_end = document.getElementById("match-end");
 var match_end_title = document.getElementById("match-end-title");
 var match_end_sub = document.getElementById("match-end-sub");
@@ -708,6 +748,42 @@ function render_roster() {
     list.appendChild(card);
   }
 }
+function set_bench_slot(slot2, mon, index, enabled) {
+  if (!mon || index === null || index < 0) {
+    slot2.btn.classList.add("empty");
+    slot2.btn.disabled = true;
+    slot2.btn.removeAttribute("data-index");
+    slot2.btn.title = "";
+    slot2.img.removeAttribute("src");
+    slot2.img.alt = "";
+    slot2.img.style.display = "none";
+    return;
+  }
+  slot2.btn.classList.remove("empty");
+  slot2.btn.dataset.index = `${index}`;
+  slot2.btn.title = monster_label(mon.id);
+  slot2.btn.disabled = !enabled || mon.hp <= 0;
+  slot2.img.src = icon_path(mon.id);
+  slot2.img.alt = monster_label(mon.id);
+  slot2.img.style.display = "";
+}
+function update_bench(state, viewer_slot) {
+  const me = state.players[viewer_slot];
+  const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
+  const my_bench = me.team.map((_, idx) => idx).filter((idx) => idx !== me.activeIndex);
+  const opp_bench = opp.team.map((_, idx) => idx).filter((idx) => idx !== opp.activeIndex);
+  const can_switch = !!slot && slot === viewer_slot && match_started && !is_spectator && (!!has_pending_switch() || !intent_locked && current_turn > 0);
+  player_bench_slots.forEach((slot_el, i) => {
+    const idx = my_bench[i] ?? null;
+    const mon = idx !== null ? me.team[idx] : null;
+    set_bench_slot(slot_el, mon, idx, can_switch);
+  });
+  enemy_bench_slots.forEach((slot_el, i) => {
+    const idx = opp_bench[i] ?? null;
+    const mon = idx !== null ? opp.team[idx] : null;
+    set_bench_slot(slot_el, mon, idx, false);
+  });
+}
 function update_action_controls() {
   const has_team = selected.length === 3;
   const pending_switch = has_pending_switch();
@@ -717,7 +793,8 @@ function update_action_controls() {
       btn.textContent = `Move ${index + 1}`;
       btn.disabled = true;
     });
-    switch_btn.disabled = true;
+    if (switch_btn)
+      switch_btn.disabled = true;
     return;
   }
   const active_id = selected[0];
@@ -740,9 +817,19 @@ function update_action_controls() {
       btn.disabled = controls_disabled;
     }
   });
-  const switch_disabled = !match_started || !slot || is_spectator || !pending_switch && intent_locked || !pending_switch && current_turn <= 0;
-  switch_btn.disabled = switch_disabled;
-  surrender_btn.disabled = !match_started || !slot || is_spectator;
+  if (switch_btn) {
+    const switch_disabled = !match_started || !slot || is_spectator || !pending_switch && intent_locked || !pending_switch && current_turn <= 0;
+    switch_btn.disabled = switch_disabled;
+  }
+  const show_surrender = match_started && !!slot && !is_spectator;
+  surrender_btn.classList.toggle("hidden", !show_surrender);
+  surrender_btn.disabled = !show_surrender;
+  if (latest_state) {
+    const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+    if (viewer_slot) {
+      update_bench(latest_state, viewer_slot);
+    }
+  }
 }
 function has_pending_switch() {
   return !!(latest_state && slot && latest_state.pendingSwitch?.[slot]);
@@ -773,6 +860,19 @@ function send_move_intent(moveIndex) {
   if (!can_send_intent())
     return;
   post(room, { $: "intent", turn: current_turn, intent: { action: "use_move", moveIndex } });
+  intent_locked = true;
+  update_action_controls();
+  append_log("intent sent");
+}
+function send_switch_intent(targetIndex) {
+  if (has_pending_switch()) {
+    post(room, { $: "forced_switch", targetIndex });
+    close_switch_modal();
+    return;
+  }
+  if (!can_send_intent())
+    return;
+  post(room, { $: "intent", turn: current_turn, intent: { action: "switch", targetIndex } });
   intent_locked = true;
   update_action_controls();
   append_log("intent sent");
@@ -932,10 +1032,11 @@ function log_events(log) {
   }
 }
 function update_panels(state, opts) {
-  if (!slot)
+  const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+  if (!viewer_slot)
     return;
-  const me = state.players[slot];
-  const opp = state.players[slot === "player1" ? "player2" : "player1"];
+  const me = state.players[viewer_slot];
+  const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
   const my_active = me.team[me.activeIndex];
   const opp_active = opp.team[opp.activeIndex];
   player_title.textContent = me.name || player_name;
@@ -946,6 +1047,8 @@ function update_panels(state, opts) {
     player_hp.style.width = `${Math.max(0, Math.min(1, my_active.hp / my_active.maxHp)) * 100}%`;
   }
   player_sprite.src = icon_path(my_active.id);
+  player_sprite.alt = monster_label(my_active.id);
+  player_sprite.title = monster_label(my_active.id);
   enemy_title.textContent = opp.name || "Opponent";
   if (!opts?.skipMeta?.enemy) {
     enemy_meta.textContent = `Lv ${opp_active.level} · HP ${opp_active.hp}/${opp_active.maxHp}`;
@@ -954,6 +1057,9 @@ function update_panels(state, opts) {
     enemy_hp.style.width = `${Math.max(0, Math.min(1, opp_active.hp / opp_active.maxHp)) * 100}%`;
   }
   enemy_sprite.src = icon_path(opp_active.id);
+  enemy_sprite.alt = monster_label(opp_active.id);
+  enemy_sprite.title = monster_label(opp_active.id);
+  update_bench(state, viewer_slot);
 }
 function animate_hp_text(side, level, from, to, maxHp, delay = 180) {
   const target = side === "player" ? player_meta : enemy_meta;
@@ -1091,7 +1197,8 @@ function trigger_class(el, className, duration) {
 function handle_state(data) {
   const prev_state = latest_state;
   clear_animation_timers();
-  const steps = prev_state ? build_visual_steps(prev_state, data.log, slot) : [];
+  const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+  const steps = prev_state ? build_visual_steps(prev_state, data.log, viewer_slot) : [];
   const hit_sides = new Set(steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide));
   latest_state = data.state;
   if (!match_started && data.state.status === "running") {
@@ -1171,7 +1278,8 @@ function handle_post(message) {
       is_spectator = false;
       if (status_slot)
         status_slot.textContent = data.slot;
-      status_conn.textContent = "synced";
+      if (status_conn)
+        status_conn.textContent = "synced";
       player_meta.textContent = `Slot ${data.slot}`;
       if (data.token) {
         localStorage.setItem(token_key, data.token);
@@ -1268,9 +1376,11 @@ move_buttons.forEach((btn, index) => {
     send_move_intent(index);
   });
 });
-switch_btn.addEventListener("click", () => {
-  open_switch_modal(has_pending_switch() ? "forced" : "intent");
-});
+if (switch_btn) {
+  switch_btn.addEventListener("click", () => {
+    open_switch_modal(has_pending_switch() ? "forced" : "intent");
+  });
+}
 surrender_btn.addEventListener("click", () => {
   send_surrender();
 });
@@ -1304,6 +1414,14 @@ slot_bench_a.addEventListener("click", () => {
 slot_bench_b.addEventListener("click", () => {
   set_edit_target(2);
 });
+player_bench_slots.forEach((slot_el) => {
+  slot_el.btn.addEventListener("click", () => {
+    const index = Number(slot_el.btn.dataset.index);
+    if (!Number.isFinite(index))
+      return;
+    send_switch_intent(index);
+  });
+});
 setInterval(update_deadline, 1000);
 setInterval(() => {
   const rtt = ping();
@@ -1321,7 +1439,8 @@ update_roster_count();
 update_slots();
 update_action_controls();
 on_sync(() => {
-  status_conn.textContent = "synced";
+  if (status_conn)
+    status_conn.textContent = "synced";
   watch(room, handle_post);
   load(room, 0);
   post(room, { $: "join", name: player_name, token: stored_token });

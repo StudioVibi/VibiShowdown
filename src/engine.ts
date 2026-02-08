@@ -354,10 +354,10 @@ function apply_move(
   const recoil_num = spec.recoilNumerator ?? 0;
   const recoil_den = spec.recoilDenominator ?? 1;
   let recoil_damage = 0;
+  let recoil_before = attacker.hp;
   if (recoil_num > 0 && recoil_den > 0 && damage > 0) {
     recoil_damage = Math.max(0, Math.round((damage * recoil_num) / recoil_den));
     if (recoil_damage > 0) {
-      const attacker_before = attacker.hp;
       attacker.hp = Math.max(0, attacker.hp - recoil_damage);
       log.push({
         type: "recoil",
@@ -366,7 +366,7 @@ function apply_move(
         summary: `${attacker.name} took ${recoil_damage} recoil`,
         data: { slot: player_slot, damage: recoil_damage, target: attacker.id }
       });
-      if (attacker_before > 0 && attacker.hp === 0) {
+      if (recoil_before > 0 && attacker.hp === 0) {
         log.push({
           type: "faint",
           turn: state.turn,
@@ -392,7 +392,7 @@ function apply_move(
   } else if (spec.id === "double_edge") {
     const detail = `Double-Edge: dmg = round(atk*120/(def*100)) = round(${attacker.attack}*120/(${effective_defense}*100)) = ${raw_damage}; final=${damage}${
       was_blocked ? " (blocked by Protect)" : ""
-    }; recoil = round(final/3) = ${recoil_damage}`;
+    }; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})`;
     log.push({
       type: "move_detail",
       turn: state.turn,

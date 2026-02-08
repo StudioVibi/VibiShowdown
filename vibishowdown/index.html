@@ -91,6 +91,7 @@
         gap: 10px;
         align-items: center;
         box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+        --sprite-col: 120px;
       }
 
       .panel.enemy {
@@ -99,6 +100,51 @@
 
       .panel.player {
         grid-template-columns: 120px 1fr;
+      }
+
+      .panel.enemy .panel-info {
+        text-align: right;
+        align-items: stretch;
+      }
+
+      .bench {
+        display: flex;
+        gap: 6px;
+        margin-top: 6px;
+        justify-content: flex-start;
+      }
+
+      .panel.enemy .bench {
+        justify-content: flex-end;
+      }
+
+      .bench-slot {
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(10, 12, 18, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4px;
+        cursor: pointer;
+      }
+
+      .bench-slot img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
+
+      .bench-slot.empty {
+        opacity: 0.35;
+        cursor: default;
+      }
+
+      .bench-slot:disabled {
+        cursor: default;
+        opacity: 0.5;
       }
 
       .panel-info {
@@ -289,6 +335,36 @@
         background: linear-gradient(140deg, #ff5d5d, #ff8a5c);
         color: #1b0b0b;
         font-weight: 700;
+      }
+
+      .bench-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .panel.enemy .bench-row {
+        justify-content: space-between;
+        flex-direction: row-reverse;
+      }
+
+      .panel.player .bench-row {
+        justify-content: space-between;
+      }
+
+      .surrender-btn {
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 10px;
+        padding: 6px 10px;
+        background: rgba(255, 255, 255, 0.06);
+        color: #f0d7d7;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .surrender-btn.hidden {
+        display: none;
       }
 
       .chat {
@@ -661,14 +737,14 @@
 
       .roster-card h4 {
         margin: 0;
-        font-size: 11px;
-        line-height: 1;
+        font-size: 13px;
+        line-height: 1.1;
       }
 
       .roster-card p {
         margin: 0;
-        font-size: 9px;
-        line-height: 1;
+        font-size: 11px;
+        line-height: 1.1;
         color: var(--muted);
       }
 
@@ -739,7 +815,7 @@
       }
 
       .slot-name {
-        font-size: 11px;
+        font-size: 12px;
         font-weight: 600;
         line-height: 1.1;
         text-align: center;
@@ -776,7 +852,7 @@
       }
 
       .slot-card.empty .slot-image {
-        opacity: 0;
+        display: none;
       }
 
       .config {
@@ -1038,6 +1114,16 @@
                 <div class="panel-name" id="enemy-name">Enemy</div>
                 <div class="panel-sub" id="enemy-meta">Lv 10 · HP 40/40</div>
                 <div class="hp-bar"><span id="enemy-hp"></span></div>
+                <div class="bench-row">
+                  <div class="bench" id="enemy-bench">
+                    <button class="bench-slot empty" id="enemy-bench-0" type="button" disabled>
+                      <img id="enemy-bench-0-img" alt="" />
+                    </button>
+                    <button class="bench-slot empty" id="enemy-bench-1" type="button" disabled>
+                      <img id="enemy-bench-1-img" alt="" />
+                    </button>
+                  </div>
+                </div>
               </div>
             <div class="sprite" id="enemy-sprite-wrap">
               <div class="shield"></div>
@@ -1048,7 +1134,6 @@
             <section class="arena">
               <div class="arena-top">
                 <div class="status-line">
-                  <span>WS: <span id="status-conn">connecting</span></span>
                   <span>Turn <span id="status-turn">0</span></span>
                   <span id="status-deadline">--:--</span>
                 </div>
@@ -1058,8 +1143,6 @@
                 <button class="action-btn" id="move-btn-1">Move 2</button>
                 <button class="action-btn" id="move-btn-2">Move 3</button>
                 <button class="action-btn" id="move-btn-3">Move 4</button>
-                <button class="action-btn switch-btn" id="switch-btn">Switch</button>
-                <button class="action-btn danger" id="surrender-btn">Surrender</button>
               </div>
               <div class="switch-modal" id="switch-modal">
                 <div class="switch-panel">
@@ -1079,6 +1162,17 @@
                 <div class="panel-name" id="player-name">Player</div>
                 <div class="panel-sub" id="player-meta">Lv 10 · HP 40/40</div>
                 <div class="hp-bar"><span id="player-hp"></span></div>
+                <div class="bench-row">
+                  <div class="bench" id="player-bench">
+                    <button class="bench-slot empty" id="player-bench-0" type="button">
+                      <img id="player-bench-0-img" alt="" />
+                    </button>
+                    <button class="bench-slot empty" id="player-bench-1" type="button">
+                      <img id="player-bench-1-img" alt="" />
+                    </button>
+                  </div>
+                  <button class="surrender-btn hidden" id="surrender-btn" type="button">Surrender</button>
+                </div>
               </div>
             </section>
           </div>

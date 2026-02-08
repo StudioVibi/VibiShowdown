@@ -1,34 +1,51 @@
 TESTE DAS 3 HABILIDADES (Return / Double-Edge / Seismic Toss)
 
-ROSTER DE TESTE (3 PARES)
-1) Return
-   - Return Tester (babydragon icon)
+ROSTER DE TESTE (8 MONS, COM SIGLAS)
+- TR = Tester Return
+- DR = Dummy Return
+- TD = Tester Double-Edge
+- DD = Dummy Double-Edge
+- TS = Tester Seismic Toss
+- DS = Dummy Seismic Toss
+
+PARES PRINCIPAIS
+1) Return (par 1)
+   - Baby Dragon TR (babydragon icon)
      Stats: Lv 7, HP 100, ATK 100, DEF 10, SPD 20
      Moves: Return (Move 1), resto = none
-   - Return Dummy (croni icon)
+   - Croni DR (croni icon)
      Stats: Lv 7, HP 100, ATK 10, DEF 10, SPD 10
      Moves: none
 
 2) Double-Edge
-   - Double-Edge Tester (harpy icon)
+   - Harpy TD (harpy icon)
      Stats: Lv 7, HP 100, ATK 100, DEF 10, SPD 20
      Moves: Double-Edge (Move 1), resto = none
-   - Double-Edge Dummy (hoof icon)
+   - Hoof DD (hoof icon)
      Stats: Lv 7, HP 100, ATK 10, DEF 10, SPD 10
      Moves: none
 
 3) Seismic Toss
-   - Seismic Toss Tester (panda icon)
+   - Panda TS (panda icon)
      Stats: Lv 7, HP 100, ATK 100, DEF 10, SPD 20
      Moves: Seismic Toss (Move 1), resto = none
-   - Seismic Toss Dummy (miren icon)
+   - Miren DS (miren icon)
      Stats: Lv 7, HP 100, ATK 10, DEF 10, SPD 10
      Moves: none
 
-COMO TESTAR
+PAR EXTRA (RETURN)
+- Knight TR (knight icon)
+  Stats: Lv 7, HP 100, ATK 100, DEF 10, SPD 20
+  Moves: Return (Move 1), resto = none
+- Valkyria DR (valkyria icon)
+  Stats: Lv 7, HP 100, ATK 10, DEF 10, SPD 10
+  Moves: none
+
+COMO TESTAR (MESMO DE ANTES)
 1) Abra duas abas na mesma room.
-2) Player1 seleciona os 3 TESTERS: Return Tester, Double-Edge Tester, Seismic Toss Tester.
-3) Player2 seleciona os 3 DUMMIES: Return Dummy, Double-Edge Dummy, Seismic Toss Dummy.
+2) Player1 seleciona 3 TESTERS: Baby Dragon TR, Harpy TD, Panda TS.
+3) Player2 seleciona 3 DUMMIES: Croni DR, Hoof DD, Miren DS.
+   (Opcional: use Knight TR + Valkyria DR para repetir o teste de Return.)
 4) Em cada teste, o attacker usa o Move 1, o dummy usa none.
    (Os testers tem SPD 20 e os dummies SPD 10, entao o tester age primeiro.)
 

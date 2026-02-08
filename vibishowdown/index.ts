@@ -2,6 +2,7 @@ import { gen_name, load, on_sync, ping, post, watch } from "../src/client.ts";
 import type {
   EventLog,
   GameState,
+  MonsterState,
   PlayerSlot,
   RoomPost,
   Stats,
@@ -50,8 +51,8 @@ const PASSIVE_LABELS: Record<string, string> = {
 const roster: MonsterSpec[] = [
   {
     id: "babydragon",
-    name: "Return Tester",
-    role: "Return Attacker",
+    name: "Baby Dragon TR",
+    role: "Return Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
     possibleMoves: ["return", "none"],
     possiblePassives: ["none"],
@@ -60,8 +61,8 @@ const roster: MonsterSpec[] = [
   },
   {
     id: "croni",
-    name: "Return Dummy",
-    role: "Return Defender",
+    name: "Croni DR",
+    role: "Return Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
     possibleMoves: ["none"],
     possiblePassives: ["none"],
@@ -70,8 +71,8 @@ const roster: MonsterSpec[] = [
   },
   {
     id: "harpy",
-    name: "Double-Edge Tester",
-    role: "Double-Edge Attacker",
+    name: "Harpy TD",
+    role: "Double-Edge Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
     possibleMoves: ["double_edge", "none"],
     possiblePassives: ["none"],
@@ -80,8 +81,28 @@ const roster: MonsterSpec[] = [
   },
   {
     id: "hoof",
-    name: "Double-Edge Dummy",
-    role: "Double-Edge Defender",
+    name: "Hoof DD",
+    role: "Double-Edge Dummy",
+    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    possibleMoves: ["none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["none", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "knight",
+    name: "Knight TR",
+    role: "Return Tester",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    possibleMoves: ["return", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "miren",
+    name: "Miren DS",
+    role: "Seismic Toss Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
     possibleMoves: ["none"],
     possiblePassives: ["none"],
@@ -90,8 +111,8 @@ const roster: MonsterSpec[] = [
   },
   {
     id: "panda",
-    name: "Seismic Toss Tester",
-    role: "Seismic Toss Attacker",
+    name: "Panda TS",
+    role: "Seismic Toss Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
     possibleMoves: ["seismic_toss", "none"],
     possiblePassives: ["none"],
@@ -99,9 +120,9 @@ const roster: MonsterSpec[] = [
     defaultPassive: "none"
   },
   {
-    id: "miren",
-    name: "Seismic Toss Dummy",
-    role: "Seismic Toss Defender",
+    id: "valkyria",
+    name: "Valkyria DR",
+    role: "Return Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
     possibleMoves: ["none"],
     possiblePassives: ["none"],
@@ -123,7 +144,7 @@ const team_key = `vibi_showdown_team:${room}:${player_name}`;
 const status_room = document.getElementById("status-room")!;
 const status_name = document.getElementById("status-name")!;
 const status_slot = document.getElementById("status-slot");
-const status_conn = document.getElementById("status-conn")!;
+const status_conn = document.getElementById("status-conn");
 const status_ping = document.getElementById("status-ping")!;
 const status_turn = document.getElementById("status-turn")!;
 const status_deadline = document.getElementById("status-deadline")!;
@@ -155,7 +176,7 @@ const move_buttons = [
   document.getElementById("move-btn-2") as HTMLButtonElement,
   document.getElementById("move-btn-3") as HTMLButtonElement
 ];
-const switch_btn = document.getElementById("switch-btn") as HTMLButtonElement;
+const switch_btn = document.getElementById("switch-btn") as HTMLButtonElement | null;
 const surrender_btn = document.getElementById("surrender-btn") as HTMLButtonElement;
 const switch_modal = document.getElementById("switch-modal") as HTMLDivElement;
 const switch_options = document.getElementById("switch-options") as HTMLDivElement;
@@ -176,6 +197,26 @@ const moves_grid = document.getElementById("moves-grid")!;
 const passive_grid = document.getElementById("passive-grid")!;
 const stats_grid = document.getElementById("stats-grid")!;
 const config_warning = document.getElementById("config-warning")!;
+const player_bench_slots = [
+  {
+    btn: document.getElementById("player-bench-0") as HTMLButtonElement,
+    img: document.getElementById("player-bench-0-img") as HTMLImageElement
+  },
+  {
+    btn: document.getElementById("player-bench-1") as HTMLButtonElement,
+    img: document.getElementById("player-bench-1-img") as HTMLImageElement
+  }
+];
+const enemy_bench_slots = [
+  {
+    btn: document.getElementById("enemy-bench-0") as HTMLButtonElement,
+    img: document.getElementById("enemy-bench-0-img") as HTMLImageElement
+  },
+  {
+    btn: document.getElementById("enemy-bench-1") as HTMLButtonElement,
+    img: document.getElementById("enemy-bench-1-img") as HTMLImageElement
+  }
+];
 
 const match_end = document.getElementById("match-end") as HTMLDivElement;
 const match_end_title = document.getElementById("match-end-title") as HTMLDivElement;
@@ -612,6 +653,52 @@ function render_roster(): void {
   }
 }
 
+type BenchSlotEl = { btn: HTMLButtonElement; img: HTMLImageElement };
+
+function set_bench_slot(slot: BenchSlotEl, mon: MonsterState | null, index: number | null, enabled: boolean): void {
+  if (!mon || index === null || index < 0) {
+    slot.btn.classList.add("empty");
+    slot.btn.disabled = true;
+    slot.btn.removeAttribute("data-index");
+    slot.btn.title = "";
+    slot.img.removeAttribute("src");
+    slot.img.alt = "";
+    slot.img.style.display = "none";
+    return;
+  }
+  slot.btn.classList.remove("empty");
+  slot.btn.dataset.index = `${index}`;
+  slot.btn.title = monster_label(mon.id);
+  slot.btn.disabled = !enabled || mon.hp <= 0;
+  slot.img.src = icon_path(mon.id);
+  slot.img.alt = monster_label(mon.id);
+  slot.img.style.display = "";
+}
+
+function update_bench(state: GameState, viewer_slot: PlayerSlot): void {
+  const me = state.players[viewer_slot];
+  const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
+  const my_bench = me.team.map((_, idx) => idx).filter((idx) => idx !== me.activeIndex);
+  const opp_bench = opp.team.map((_, idx) => idx).filter((idx) => idx !== opp.activeIndex);
+  const can_switch =
+    !!slot &&
+    slot === viewer_slot &&
+    match_started &&
+    !is_spectator &&
+    (!!has_pending_switch() || (!intent_locked && current_turn > 0));
+
+  player_bench_slots.forEach((slot_el, i) => {
+    const idx = my_bench[i] ?? null;
+    const mon = idx !== null ? me.team[idx] : null;
+    set_bench_slot(slot_el, mon, idx, can_switch);
+  });
+  enemy_bench_slots.forEach((slot_el, i) => {
+    const idx = opp_bench[i] ?? null;
+    const mon = idx !== null ? opp.team[idx] : null;
+    set_bench_slot(slot_el, mon, idx, false);
+  });
+}
+
 function update_action_controls(): void {
   const has_team = selected.length === 3;
   const pending_switch = has_pending_switch();
@@ -621,7 +708,7 @@ function update_action_controls(): void {
       btn.textContent = `Move ${index + 1}`;
       btn.disabled = true;
     });
-    switch_btn.disabled = true;
+    if (switch_btn) switch_btn.disabled = true;
     return;
   }
 
@@ -645,14 +732,24 @@ function update_action_controls(): void {
       btn.disabled = controls_disabled;
     }
   });
-  const switch_disabled =
-    !match_started ||
-    !slot ||
-    is_spectator ||
-    (!pending_switch && intent_locked) ||
-    (!pending_switch && current_turn <= 0);
-  switch_btn.disabled = switch_disabled;
-  surrender_btn.disabled = !match_started || !slot || is_spectator;
+  if (switch_btn) {
+    const switch_disabled =
+      !match_started ||
+      !slot ||
+      is_spectator ||
+      (!pending_switch && intent_locked) ||
+      (!pending_switch && current_turn <= 0);
+    switch_btn.disabled = switch_disabled;
+  }
+  const show_surrender = match_started && !!slot && !is_spectator;
+  surrender_btn.classList.toggle("hidden", !show_surrender);
+  surrender_btn.disabled = !show_surrender;
+  if (latest_state) {
+    const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+    if (viewer_slot) {
+      update_bench(latest_state, viewer_slot);
+    }
+  }
 }
 
 function has_pending_switch(): boolean {
@@ -685,6 +782,19 @@ function can_send_intent(): boolean {
 function send_move_intent(moveIndex: number): void {
   if (!can_send_intent()) return;
   post(room, { $: "intent", turn: current_turn, intent: { action: "use_move", moveIndex } });
+  intent_locked = true;
+  update_action_controls();
+  append_log("intent sent");
+}
+
+function send_switch_intent(targetIndex: number): void {
+  if (has_pending_switch()) {
+    post(room, { $: "forced_switch", targetIndex });
+    close_switch_modal();
+    return;
+  }
+  if (!can_send_intent()) return;
+  post(room, { $: "intent", turn: current_turn, intent: { action: "switch", targetIndex } });
   intent_locked = true;
   update_action_controls();
   append_log("intent sent");
@@ -856,9 +966,10 @@ function update_panels(
   state: GameState,
   opts?: { skipMeta?: { player?: boolean; enemy?: boolean }; skipBar?: { player?: boolean; enemy?: boolean } }
 ): void {
-  if (!slot) return;
-  const me = state.players[slot];
-  const opp = state.players[slot === "player1" ? "player2" : "player1"];
+  const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+  if (!viewer_slot) return;
+  const me = state.players[viewer_slot];
+  const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
   const my_active = me.team[me.activeIndex];
   const opp_active = opp.team[opp.activeIndex];
 
@@ -870,6 +981,8 @@ function update_panels(
     player_hp.style.width = `${Math.max(0, Math.min(1, my_active.hp / my_active.maxHp)) * 100}%`;
   }
   player_sprite.src = icon_path(my_active.id);
+  player_sprite.alt = monster_label(my_active.id);
+  player_sprite.title = monster_label(my_active.id);
 
   enemy_title.textContent = opp.name || "Opponent";
   if (!opts?.skipMeta?.enemy) {
@@ -879,6 +992,9 @@ function update_panels(
     enemy_hp.style.width = `${Math.max(0, Math.min(1, opp_active.hp / opp_active.maxHp)) * 100}%`;
   }
   enemy_sprite.src = icon_path(opp_active.id);
+  enemy_sprite.alt = monster_label(opp_active.id);
+  enemy_sprite.title = monster_label(opp_active.id);
+  update_bench(state, viewer_slot);
 }
 
 function animate_hp_text(
@@ -1034,7 +1150,8 @@ function trigger_class(el: HTMLElement, className: string, duration: number): vo
 function handle_state(data: { state: GameState; log: EventLog[] }): void {
   const prev_state = latest_state;
   clear_animation_timers();
-  const steps = prev_state ? build_visual_steps(prev_state, data.log, slot) : [];
+  const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+  const steps = prev_state ? build_visual_steps(prev_state, data.log, viewer_slot) : [];
   const hit_sides = new Set<"player" | "enemy">(
     steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide)
   );
@@ -1117,7 +1234,7 @@ function handle_post(message: any): void {
       slot = data.slot;
       is_spectator = false;
       if (status_slot) status_slot.textContent = data.slot;
-      status_conn.textContent = "synced";
+      if (status_conn) status_conn.textContent = "synced";
       player_meta.textContent = `Slot ${data.slot}`;
       if (data.token) {
         localStorage.setItem(token_key, data.token);
@@ -1215,9 +1332,11 @@ move_buttons.forEach((btn, index) => {
   });
 });
 
-switch_btn.addEventListener("click", () => {
-  open_switch_modal(has_pending_switch() ? "forced" : "intent");
-});
+if (switch_btn) {
+  switch_btn.addEventListener("click", () => {
+    open_switch_modal(has_pending_switch() ? "forced" : "intent");
+  });
+}
 
 surrender_btn.addEventListener("click", () => {
   send_surrender();
@@ -1258,6 +1377,14 @@ slot_bench_b.addEventListener("click", () => {
   set_edit_target(2);
 });
 
+player_bench_slots.forEach((slot_el) => {
+  slot_el.btn.addEventListener("click", () => {
+    const index = Number(slot_el.btn.dataset.index);
+    if (!Number.isFinite(index)) return;
+    send_switch_intent(index);
+  });
+});
+
 setInterval(update_deadline, 1000);
 
 setInterval(() => {
@@ -1278,7 +1405,7 @@ update_slots();
 update_action_controls();
 
 on_sync(() => {
-  status_conn.textContent = "synced";
+  if (status_conn) status_conn.textContent = "synced";
   watch(room, handle_post);
   load(room, 0);
   post(room, { $: "join", name: player_name, token: stored_token });
