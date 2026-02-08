@@ -92,12 +92,35 @@ function ensure_room(room_id: RoomId): RoomState {
 }
 
 function has_open_slot(room: RoomState): boolean {
-  return room.players.player1 === null || room.players.player2 === null;
+  return (
+    room.players.player1 === null ||
+    room.players.player1?.ws === null ||
+    room.players.player2 === null ||
+    room.players.player2?.ws === null
+  );
 }
 
 function assign_slot(room: RoomState): PlayerSlot {
-  if (!room.players.player1) return "player1";
-  if (!room.players.player2) return "player2";
+  if (!room.players.player1 || room.players.player1.ws === null) {
+    if (room.players.player1) {
+      token_index.delete(room.players.player1.token);
+    }
+    room.players.player1 = null;
+    room.ready.player1 = false;
+    room.teams.player1 = null;
+    room.ready_order = room.ready_order.filter((slot) => slot !== "player1");
+    return "player1";
+  }
+  if (!room.players.player2 || room.players.player2.ws === null) {
+    if (room.players.player2) {
+      token_index.delete(room.players.player2.token);
+    }
+    room.players.player2 = null;
+    room.ready.player2 = false;
+    room.teams.player2 = null;
+    room.ready_order = room.ready_order.filter((slot) => slot !== "player2");
+    return "player2";
+  }
   throw new Error("Room full");
 }
 
@@ -345,6 +368,7 @@ function handle_join(ws: WebSocket, room_id: RoomId, data: RoomPost): "player" |
       order: room.ready_order.slice()
     });
     emit_participants(room);
+    send_participants(ws, room);
     return "spectator";
   }
 
@@ -357,6 +381,7 @@ function handle_join(ws: WebSocket, room_id: RoomId, data: RoomPost): "player" |
   send_direct(ws, room_id, { $: "assign", slot, token, name: data.name });
   emit_ready_state(room);
   emit_participants(room);
+  send_participants(ws, room);
   return "player";
 }
 

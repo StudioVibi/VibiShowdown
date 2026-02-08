@@ -48,6 +48,16 @@ function detect_url(): string {
   if (manual) {
     return manual;
   }
+  if (has_window()) {
+    try {
+      const origin = window.location.origin;
+      if (origin && origin !== "null") {
+        return normalize(origin);
+      }
+    } catch {
+      // ignore malformed URLs
+    }
+  }
   return REMOTE_WSS;
 }
 

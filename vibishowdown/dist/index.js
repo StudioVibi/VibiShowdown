@@ -43,9 +43,37 @@ function detect_url() {
   if (manual) {
     return manual;
   }
+  if (has_window()) {
+    try {
+      const origin = window.location.origin;
+      if (origin && origin !== "null") {
+        return normalize(origin);
+      }
+    } catch {}
+  }
   return REMOTE_WSS;
 }
 var WS_URL = detect_url();
+
+// src/helpers.ts
+function now() {
+  return Math.floor(Date.now());
+}
+function random_id(length, alphabet, source) {
+  const bytes = new Uint8Array(length);
+  if (source) {
+    source.fillBytes(bytes);
+  } else {
+    for (let i = 0;i < length; i++) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  let out = "";
+  for (let i = 0;i < length; i++) {
+    out += alphabet[bytes[i] % alphabet.length];
+  }
+  return out;
+}
 
 // src/client.ts
 var time_sync = {
@@ -58,9 +86,6 @@ var ws = new WebSocket(WS_URL);
 var room_watchers = new Map;
 var is_synced = false;
 var sync_listeners = [];
-function now() {
-  return Math.floor(Date.now());
-}
 function server_time() {
   if (!isFinite(time_sync.clock_offset)) {
     throw new Error("server_time() called before initial sync");
@@ -126,20 +151,9 @@ ws.addEventListener("message", (event) => {
 });
 function gen_name() {
   const alphabet = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
-  const bytes = new Uint8Array(8);
   const can_crypto = typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function";
-  if (can_crypto) {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0;i < 8; i++) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
-  }
-  let out = "";
-  for (let i = 0;i < 8; i++) {
-    out += alphabet[bytes[i] % 64];
-  }
-  return out;
+  const source = can_crypto ? { fillBytes: (bytes) => crypto.getRandomValues(bytes) } : undefined;
+  return random_id(8, alphabet, source);
 }
 function post(room, data) {
   const name = gen_name();
@@ -165,11 +179,15 @@ function ping() {
   return time_sync.last_ping;
 }
 
-// walkers/index.ts
-var MOVE_OPTIONS = ["basic_attack", "protect", "none"];
+// vibishowdown/index.ts
+var PLAYER_SLOTS = ["player1", "player2"];
+var MOVE_OPTIONS = ["basic_attack", "return", "double_edge", "seismic_toss", "protect", "none"];
 var PASSIVE_OPTIONS = ["none", "regen_5pct"];
 var MOVE_LABELS = {
   basic_attack: "Basic Attack",
+  return: "Return",
+  double_edge: "Double-Edge",
+  seismic_toss: "Seismic Toss",
   protect: "Protect",
   none: "none"
 };
@@ -182,7 +200,7 @@ var roster = [
     id: "babydragon",
     name: "Baby Dragon",
     role: "Brawler",
-    stats: { level: 10, maxHp: 48, attack: 24, defense: 9, speed: 8 },
+    stats: { level: 10, maxHp: 148, attack: 24, defense: 9, speed: 8 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -192,7 +210,7 @@ var roster = [
     id: "croni",
     name: "Croni",
     role: "Mystic",
-    stats: { level: 10, maxHp: 36, attack: 25, defense: 8, speed: 14 },
+    stats: { level: 10, maxHp: 136, attack: 25, defense: 8, speed: 14 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "none", "none", "none"],
@@ -202,7 +220,7 @@ var roster = [
     id: "harpy",
     name: "Harpy",
     role: "Striker",
-    stats: { level: 10, maxHp: 34, attack: 28, defense: 7, speed: 16 },
+    stats: { level: 10, maxHp: 134, attack: 28, defense: 7, speed: 16 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -212,7 +230,7 @@ var roster = [
     id: "hoof",
     name: "Hoof",
     role: "Tank",
-    stats: { level: 10, maxHp: 60, attack: 24, defense: 10, speed: 6 },
+    stats: { level: 10, maxHp: 160, attack: 24, defense: 10, speed: 6 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -222,7 +240,7 @@ var roster = [
     id: "knight",
     name: "Knight",
     role: "Guardian",
-    stats: { level: 10, maxHp: 50, attack: 27, defense: 10, speed: 8 },
+    stats: { level: 10, maxHp: 150, attack: 27, defense: 10, speed: 8 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -232,7 +250,7 @@ var roster = [
     id: "miren",
     name: "Miren",
     role: "Mage",
-    stats: { level: 10, maxHp: 32, attack: 26, defense: 7, speed: 12 },
+    stats: { level: 10, maxHp: 132, attack: 26, defense: 7, speed: 12 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "none", "none", "none"],
@@ -242,7 +260,7 @@ var roster = [
     id: "panda",
     name: "Panda",
     role: "Bruiser",
-    stats: { level: 10, maxHp: 54, attack: 23, defense: 12, speed: 7 },
+    stats: { level: 10, maxHp: 154, attack: 23, defense: 12, speed: 7 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -252,7 +270,7 @@ var roster = [
     id: "priestess",
     name: "Priestess",
     role: "Support",
-    stats: { level: 10, maxHp: 38, attack: 25, defense: 10, speed: 11 },
+    stats: { level: 10, maxHp: 138, attack: 25, defense: 10, speed: 11 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "none", "none", "none"],
@@ -262,7 +280,7 @@ var roster = [
     id: "valkyria",
     name: "Valkyria",
     role: "Vanguard",
-    stats: { level: 10, maxHp: 44, attack: 24, defense: 10, speed: 13 },
+    stats: { level: 10, maxHp: 144, attack: 24, defense: 10, speed: 13 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -272,7 +290,7 @@ var roster = [
     id: "vulcasa",
     name: "Vulcasa",
     role: "Pyro",
-    stats: { level: 10, maxHp: 40, attack: 25, defense: 8, speed: 10 },
+    stats: { level: 10, maxHp: 140, attack: 25, defense: 8, speed: 10 },
     possibleMoves: MOVE_OPTIONS,
     possiblePassives: PASSIVE_OPTIONS,
     defaultMoves: ["basic_attack", "protect", "none", "none"],
@@ -320,6 +338,7 @@ var move_buttons = [
   document.getElementById("move-btn-3")
 ];
 var switch_btn = document.getElementById("switch-btn");
+var surrender_btn = document.getElementById("surrender-btn");
 var switch_modal = document.getElementById("switch-modal");
 var switch_options = document.getElementById("switch-options");
 var switch_close = document.getElementById("switch-close");
@@ -332,6 +351,10 @@ var moves_grid = document.getElementById("moves-grid");
 var passive_grid = document.getElementById("passive-grid");
 var stats_grid = document.getElementById("stats-grid");
 var config_warning = document.getElementById("config-warning");
+var match_end = document.getElementById("match-end");
+var match_end_title = document.getElementById("match-end-title");
+var match_end_sub = document.getElementById("match-end-sub");
+var match_end_btn = document.getElementById("match-end-btn");
 status_room.textContent = room;
 status_name.textContent = player_name;
 player_title.textContent = player_name;
@@ -364,18 +387,10 @@ function monster_label(id, fallback = "mon") {
   return roster_by_id.get(id)?.name ?? id;
 }
 function append_log(line) {
-  if (!log_list)
-    return;
-  const p = document.createElement("p");
-  p.textContent = line;
-  log_list.appendChild(p);
-  log_list.scrollTop = log_list.scrollHeight;
+  append_line(log_list, line);
 }
 function append_chat(line) {
-  const p = document.createElement("p");
-  p.textContent = line;
-  chat_messages.appendChild(p);
-  chat_messages.scrollTop = chat_messages.scrollHeight;
+  append_line(chat_messages, line);
 }
 function send_chat_message(message) {
   const trimmed = message.trim();
@@ -400,6 +415,14 @@ function setup_chat_input(input, button) {
     }
   });
 }
+function append_line(container, line) {
+  if (!container)
+    return;
+  const p = document.createElement("p");
+  p.textContent = line;
+  container.appendChild(p);
+  container.scrollTop = container.scrollHeight;
+}
 function render_participants() {
   participants_list.innerHTML = "";
   if (!participants) {
@@ -410,7 +433,7 @@ function render_participants() {
     label_map.set(ready_order[0], "P1");
   if (ready_order[1])
     label_map.set(ready_order[1], "P2");
-  const player_order = ready_order.length ? ready_order.concat(["player1", "player2"]).filter((value, index, self) => self.indexOf(value) === index) : ["player1", "player2"];
+  const player_order = ready_order.length ? ready_order.concat(PLAYER_SLOTS).filter((value, index, self) => self.indexOf(value) === index) : PLAYER_SLOTS;
   for (const slot_id of player_order) {
     const name = participants.players[slot_id];
     if (!name)
@@ -451,49 +474,46 @@ function show_warning(message) {
 function clear_warning() {
   config_warning.textContent = "";
 }
-function load_profile() {
+function load_json(key, fallback) {
   try {
-    const raw = localStorage.getItem(profile_key);
-    if (!raw) {
-      return { monsters: {} };
-    }
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && parsed.monsters) {
-      return { monsters: parsed.monsters };
-    }
+    const raw = localStorage.getItem(key);
+    if (!raw)
+      return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+function save_json(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
   } catch {}
+}
+function load_profile() {
+  const parsed = load_json(profile_key, null);
+  if (parsed && typeof parsed === "object" && parsed.monsters) {
+    return { monsters: parsed.monsters };
+  }
   return { monsters: {} };
 }
 var profile = load_profile();
 function save_profile() {
-  try {
-    localStorage.setItem(profile_key, JSON.stringify(profile));
-  } catch {}
+  save_json(profile_key, profile);
 }
 function load_team_selection() {
-  try {
-    const raw = localStorage.getItem(team_key);
-    if (!raw)
-      return;
-    const parsed = JSON.parse(raw);
-    if (parsed && Array.isArray(parsed.selected)) {
-      selected.splice(0, selected.length, ...parsed.selected.filter((id) => roster_by_id.has(id)));
-    }
-  } catch {}
+  const parsed = load_json(team_key, null);
+  if (parsed && Array.isArray(parsed.selected)) {
+    selected.splice(0, selected.length, ...parsed.selected.filter((id) => roster_by_id.has(id)));
+  }
 }
 function save_team_selection() {
-  try {
-    localStorage.setItem(team_key, JSON.stringify({ selected: selected.slice() }));
-  } catch {}
-}
-function clone_stats(stats) {
-  return { level: stats.level, maxHp: stats.maxHp, attack: stats.attack, defense: stats.defense, speed: stats.speed };
+  save_json(team_key, { selected: selected.slice() });
 }
 function coerce_config(spec, value) {
   const base = {
     moves: spec.defaultMoves.slice(0, 4),
     passive: spec.defaultPassive,
-    stats: clone_stats(spec.stats)
+    stats: { ...spec.stats }
   };
   if (!value) {
     return base;
@@ -760,6 +780,7 @@ function update_action_controls() {
   });
   const switch_disabled = !match_started || !slot || is_spectator || !pending_switch && intent_locked || !pending_switch && current_turn <= 0;
   switch_btn.disabled = switch_disabled;
+  surrender_btn.disabled = !match_started || !slot || is_spectator;
 }
 function has_pending_switch() {
   return !!(latest_state && slot && latest_state.pendingSwitch?.[slot]);
@@ -793,6 +814,11 @@ function send_move_intent(moveIndex) {
   intent_locked = true;
   update_action_controls();
   append_log("intent sent");
+}
+function send_surrender() {
+  if (!match_started || is_spectator || !slot)
+    return;
+  post(room, { $: "surrender" });
 }
 function close_switch_modal() {
   switch_modal.classList.remove("open");
@@ -898,6 +924,17 @@ function update_opponent_ui(opponent_ready2, opponent_name2) {
     return;
   status_opponent.textContent = opponent_ready2 ? "ready" : opponent_name2 ? "waiting" : "offline";
   status_opponent.className = `status-pill ${opponent_ready2 ? "ok" : opponent_name2 ? "warn" : "off"}`;
+}
+function show_match_end(winner) {
+  if (!match_end)
+    return;
+  const is_winner = winner && slot === winner;
+  match_end_title.textContent = is_winner ? "Victory" : "Defeat";
+  if (!winner) {
+    match_end_title.textContent = "Match ended";
+  }
+  match_end_sub.textContent = winner ? `${winner} wins the match.` : "Match finished.";
+  match_end.classList.add("open");
 }
 function handle_turn_start(data) {
   current_turn = data.turn;
@@ -1033,20 +1070,20 @@ function build_visual_steps(prev_state, log, viewer_slot) {
       steps.push({ kind: "heal", side });
       continue;
     }
-    if (entry.type !== "damage")
+    if (entry.type !== "damage" && entry.type !== "recoil")
       continue;
     const payload = entry.data;
     if (!payload || typeof payload.damage !== "number" || payload.damage <= 0 || !payload.slot) {
       continue;
     }
-    const defender_slot = payload.slot === "player1" ? "player2" : "player1";
+    const defender_slot = entry.type === "recoil" ? payload.slot : payload.slot === "player1" ? "player2" : "player1";
     const defender_player = temp.players[defender_slot];
     const defender = defender_player.team[defender_player.activeIndex];
     const from = defender.hp;
     const to = Math.max(0, from - payload.damage);
     defender.hp = to;
     const defenderSide = side_from_slot(viewer_slot, defender_slot);
-    const attackerSide = defenderSide === "player" ? "enemy" : "player";
+    const attackerSide = entry.type === "recoil" ? defenderSide : defenderSide === "player" ? "enemy" : "player";
     steps.push({
       kind: "damage",
       attackerSide,
@@ -1156,6 +1193,9 @@ function handle_state(data) {
     log_events(data.log);
   }
   update_action_controls();
+  if (data.state.status === "ended") {
+    show_match_end(data.state.winner);
+  }
   if (slot && data.state.pendingSwitch?.[slot] && !switch_modal.classList.contains("open")) {
     open_switch_modal("forced");
   }
@@ -1179,13 +1219,14 @@ function handle_post(message) {
     case "ready_state": {
       const previous = last_ready_snapshot ?? { player1: false, player2: false };
       last_ready_snapshot = { ...data.ready };
-      if (!participants) {
-        participants = { players: { ...data.names }, spectators: [] };
-      }
+      participants = {
+        players: { ...data.names },
+        spectators: participants ? participants.spectators.slice() : []
+      };
       if (Array.isArray(data.order)) {
         ready_order = data.order.slice();
       } else {
-        ["player1", "player2"].forEach((slot_id) => {
+        PLAYER_SLOTS.forEach((slot_id) => {
           const is_ready_now = data.ready[slot_id];
           const idx = ready_order.indexOf(slot_id);
           if (is_ready_now && idx === -1) {
@@ -1195,7 +1236,7 @@ function handle_post(message) {
           }
         });
       }
-      ["player1", "player2"].forEach((slot_id) => {
+      PLAYER_SLOTS.forEach((slot_id) => {
         if (previous[slot_id] !== data.ready[slot_id]) {
           const name = data.names[slot_id];
           if (name) {
@@ -1227,9 +1268,9 @@ function handle_post(message) {
     case "state":
       handle_state(data);
       return;
-    case "forfeit":
-      append_log(`forfeit: ${data.losers.join(", ")}`);
-      append_chat(`forfeit: ${data.losers.join(", ")}`);
+    case "surrender":
+      append_log(`surrender: ${data.loser}`);
+      append_chat(`${data.loser} surrendered`);
       return;
     case "error":
       append_log(`error: ${data.message}`);
@@ -1266,6 +1307,9 @@ move_buttons.forEach((btn, index) => {
 switch_btn.addEventListener("click", () => {
   open_switch_modal(has_pending_switch() ? "forced" : "intent");
 });
+surrender_btn.addEventListener("click", () => {
+  send_surrender();
+});
 switch_close.addEventListener("click", () => {
   close_switch_modal();
 });
@@ -1283,6 +1327,9 @@ ready_btn.addEventListener("click", () => {
   } else {
     send_ready(true);
   }
+});
+match_end_btn.addEventListener("click", () => {
+  window.location.reload();
 });
 slot_active.addEventListener("click", () => {
   if (is_ready && !match_started)

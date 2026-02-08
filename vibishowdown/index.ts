@@ -1160,9 +1160,10 @@ function handle_post(message: any): void {
     case "ready_state": {
       const previous = last_ready_snapshot ?? { player1: false, player2: false };
       last_ready_snapshot = { ...data.ready };
-      if (!participants) {
-        participants = { players: { ...data.names }, spectators: [] };
-      }
+      participants = {
+        players: { ...data.names },
+        spectators: participants ? participants.spectators.slice() : []
+      };
       if (Array.isArray(data.order)) {
         ready_order = data.order.slice();
       } else {
