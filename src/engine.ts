@@ -85,6 +85,12 @@ const MOVE_SPECS: Record<string, MoveSpec> = {
     phaseId: "attack_01",
     attackMultiplier100: 0
   },
+  endure: {
+    id: "endure",
+    name: "Endure",
+    phaseId: "guard",
+    attackMultiplier100: 0
+  },
   protect: { id: "protect", name: "Protect", phaseId: "guard", attackMultiplier100: 100 },
   none: { id: "none", name: "none", phaseId: "attack_01", attackMultiplier100: 100 }
 };
@@ -138,6 +144,7 @@ function clone_monster(monster: MonsterState): MonsterState {
     chosenMoves: monster.chosenMoves.slice(),
     chosenPassive: monster.chosenPassive,
     protectActiveThisTurn: monster.protectActiveThisTurn,
+    endureActiveThisTurn: monster.endureActiveThisTurn,
     protectCooldownTurns: monster.protectCooldownTurns
   };
 }
@@ -225,6 +232,7 @@ function reset_protect_flags(state: GameState): void {
   for_each_player(state, (player) => {
     for (const monster of player.team) {
       monster.protectActiveThisTurn = false;
+      monster.endureActiveThisTurn = false;
     }
   });
 }
@@ -280,6 +288,70 @@ function handle_faint(state: GameState, log: EventLog[], slot: PlayerSlot): void
     summary: `${slot} must choose a replacement`,
     data: { slot }
   });
+}
+
+function minimum_endure_hp(monster: MonsterState): number {
+  return Math.max(1, Math.ceil(monster.maxHp * 0.01));
+}
+
+function apply_damage_with_endure(
+  state: GameState,
+  log: EventLog[],
+  phase: string,
+  slot: PlayerSlot,
+  monster: MonsterState,
+  attempted_damage: number,
+  hp_changed: WeakSet<MonsterState>
+): { before: number; after: number; applied: number } {
+  const before = monster.hp;
+  if (before <= 0 || attempted_damage <= 0) {
+    return { before, after: before, applied: 0 };
+  }
+
+  let after = Math.max(0, before - attempted_damage);
+  if (after === 0 && monster.endureActiveThisTurn) {
+    const survive_hp = Math.min(before, minimum_endure_hp(monster));
+    after = survive_hp;
+    monster.endureActiveThisTurn = false;
+
+    const speed_before = monster.speed;
+    monster.speed = Math.max(1, Math.round(speed_before * 1.5));
+    log.push({
+      type: "endure_trigger",
+      turn: state.turn,
+      phase,
+      summary: `${monster.name} endured the hit (${before} -> ${after})`,
+      data: { slot, target: monster.id, before, after }
+    });
+    log.push({
+      type: "stat_mod",
+      turn: state.turn,
+      phase,
+      summary: `${monster.name} gained speed from Endure (${speed_before} -> ${monster.speed})`,
+      data: { slot, target: monster.id, stat: "speed", multiplier: 1.5, before: speed_before, after: monster.speed }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase,
+      summary: `Endure: immortal trigger (HP floor 1% => ${after}); SPE x1.5 (${speed_before} -> ${monster.speed})`,
+      data: {
+        move: "endure",
+        slot,
+        target: monster.id,
+        hpBefore: before,
+        hpAfter: after,
+        speedBefore: speed_before,
+        speedAfter: monster.speed
+      }
+    });
+  }
+
+  monster.hp = after;
+  if (after !== before) {
+    hp_changed.add(monster);
+  }
+  return { before, after, applied: before - after };
 }
 
 function apply_move(
@@ -338,6 +410,25 @@ function apply_move(
       phase: spec.phaseId,
       summary: `${player_slot} used Protect`,
       data: { slot: player_slot }
+    });
+    return;
+  }
+
+  if (spec.id === "endure") {
+    attacker.endureActiveThisTurn = true;
+    log.push({
+      type: "endure",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} used Endure`,
+      data: { slot: player_slot, target: attacker.id }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: "Endure: cannot be reduced below 1% HP this turn; on trigger gain SPE x1.5",
+      data: { move: spec.id, slot: player_slot, target: attacker.id }
     });
     return;
   }
@@ -417,20 +508,25 @@ function apply_move(
     });
   }
 
-  const before = defender.hp;
-  defender.hp = Math.max(0, defender.hp - damage);
-  if (defender.hp !== before) {
-    hp_changed.add(defender);
-  }
+  const defender_result = apply_damage_with_endure(
+    state,
+    log,
+    spec.phaseId,
+    other_slot(player_slot),
+    defender,
+    damage,
+    hp_changed
+  );
+  const final_damage = defender_result.applied;
   log.push({
     type: "damage",
     turn: state.turn,
     phase: spec.phaseId,
-    summary: `${player_slot} dealt ${damage} to ${defender.name}`,
-    data: { slot: player_slot, damage, target: defender.id }
+    summary: `${player_slot} dealt ${final_damage} to ${defender.name}`,
+    data: { slot: player_slot, damage: final_damage, target: defender.id }
   });
 
-  if (before > 0 && defender.hp === 0) {
+  if (defender_result.before > 0 && defender_result.after === 0) {
     log.push({
       type: "faint",
       turn: state.turn,
@@ -444,13 +540,21 @@ function apply_move(
   const recoil_den = spec.recoilDenominator ?? 1;
   let recoil_damage = 0;
   let recoil_before = attacker.hp;
-  if (recoil_num > 0 && recoil_den > 0 && damage > 0) {
-    recoil_damage = Math.max(0, Math.round((damage * recoil_num) / recoil_den));
+  if (recoil_num > 0 && recoil_den > 0 && final_damage > 0) {
+    const recoil_attempt = Math.max(0, Math.round((final_damage * recoil_num) / recoil_den));
+    recoil_damage = recoil_attempt;
     if (recoil_damage > 0) {
-      attacker.hp = Math.max(0, attacker.hp - recoil_damage);
-      if (attacker.hp !== recoil_before) {
-        hp_changed.add(attacker);
-      }
+      const recoil_result = apply_damage_with_endure(
+        state,
+        log,
+        spec.phaseId,
+        player_slot,
+        attacker,
+        recoil_damage,
+        hp_changed
+      );
+      recoil_before = recoil_result.before;
+      recoil_damage = recoil_result.applied;
       log.push({
         type: "recoil",
         turn: state.turn,
@@ -458,7 +562,7 @@ function apply_move(
         summary: `${attacker.name} took ${recoil_damage} recoil`,
         data: { slot: player_slot, damage: recoil_damage, target: attacker.id }
       });
-      if (recoil_before > 0 && attacker.hp === 0) {
+      if (recoil_result.before > 0 && recoil_result.after === 0) {
         log.push({
           type: "faint",
           turn: state.turn,
@@ -471,7 +575,7 @@ function apply_move(
   }
 
   if (spec.id === "return") {
-    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def*100)) = round(${attacker.attack} * ${multiplier100} / (${effective_defense}*100)) = ${raw_damage}; final=${damage}${
+    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def*100)) = round(${attacker.attack} * ${multiplier100} / (${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }`;
     log.push({
@@ -479,10 +583,10 @@ function apply_move(
       turn: state.turn,
       phase: spec.phaseId,
       summary: detail,
-      data: { move: spec.id, damage, blocked: was_blocked }
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "double_edge") {
-    const detail = `Double-Edge: dmg = round(atk*120/(def*100)) = round(${attacker.attack}*120/(${effective_defense}*100)) = ${raw_damage}; final=${damage}${
+    const detail = `Double-Edge: dmg = round(atk*120/(def*100)) = round(${attacker.attack}*120/(${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})`;
     log.push({
@@ -490,10 +594,10 @@ function apply_move(
       turn: state.turn,
       phase: spec.phaseId,
       summary: detail,
-      data: { move: spec.id, damage, recoil: recoil_damage, blocked: was_blocked }
+      data: { move: spec.id, damage: final_damage, recoil: recoil_damage, blocked: was_blocked }
     });
   } else if (spec.id === "seismic_toss") {
-    const detail = `Seismic Toss: dmg = flat ${spec.flatDamage ?? 0} (ignores defense); final=${damage}${
+    const detail = `Seismic Toss: dmg = flat ${spec.flatDamage ?? 0} (ignores defense); final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }`;
     log.push({
@@ -501,10 +605,10 @@ function apply_move(
       turn: state.turn,
       phase: spec.phaseId,
       summary: detail,
-      data: { move: spec.id, damage, blocked: was_blocked }
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "quick_attack") {
-    const detail = `Quick Attack: dmg = round(atk*66/(def*100)) = round(${attacker.attack}*66/(${effective_defense}*100)) = ${raw_damage}; final=${damage}${
+    const detail = `Quick Attack: dmg = round(atk*66/(def*100)) = round(${attacker.attack}*66/(${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }; speed check ignored`;
     log.push({
@@ -512,7 +616,7 @@ function apply_move(
       turn: state.turn,
       phase: spec.phaseId,
       summary: detail,
-      data: { move: spec.id, damage, blocked: was_blocked }
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   }
 
@@ -659,6 +763,7 @@ export function create_initial_state(
       chosenMoves: monster.moves.slice(0, 4),
       chosenPassive: monster.passive,
       protectActiveThisTurn: false,
+      endureActiveThisTurn: false,
       protectCooldownTurns: 0
     }));
     return {
