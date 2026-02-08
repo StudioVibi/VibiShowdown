@@ -44,6 +44,12 @@ const PHASES: Phase[] = [
 
 const MOVE_SPECS: Record<string, MoveSpec> = {
   basic_attack: { id: "basic_attack", name: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 110 },
+  quick_attack: {
+    id: "quick_attack",
+    name: "Quick Attack",
+    phaseId: "attack_01",
+    attackMultiplier100: 66
+  },
   return: {
     id: "return",
     name: "Return",
@@ -79,6 +85,26 @@ const PASSIVE_SPECS: Record<string, PassiveSpec> = {
 type Action =
   | { player: PlayerSlot; type: "switch"; phase: string; targetIndex: number }
   | { player: PlayerSlot; type: "move"; phase: string; moveId: MoveId; moveIndex: number };
+
+const INITIATIVE_WITHOUT_SPEED: Phase["initiative"] = ["attack", "hp", "defense"];
+
+function compare_action_initiative(state: GameState, phase: Phase, a: Action, b: Action): number {
+  const a_active = active_monster(state.players[a.player]);
+  const b_active = active_monster(state.players[b.player]);
+
+  if (a.type === "move" && b.type === "move") {
+    const a_quick = a.moveId === "quick_attack";
+    const b_quick = b.moveId === "quick_attack";
+    if (a_quick !== b_quick) {
+      return a_quick ? 1 : -1;
+    }
+    if (a_quick && b_quick) {
+      return compare_initiative(a_active, b_active, INITIATIVE_WITHOUT_SPEED);
+    }
+  }
+
+  return compare_initiative(a_active, b_active, phase.initiative);
+}
 
 function clone_monster(monster: MonsterState): MonsterState {
   return {
@@ -411,6 +437,17 @@ function apply_move(
       summary: detail,
       data: { move: spec.id, damage, blocked: was_blocked }
     });
+  } else if (spec.id === "quick_attack") {
+    const detail = `Quick Attack: dmg = round(atk*66/(def*100)) = round(${attacker.attack}*66/(${effective_defense}*100)) = ${raw_damage}; final=${damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }; speed check ignored`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: detail,
+      data: { move: spec.id, damage, blocked: was_blocked }
+    });
   }
 
   handle_faint(state, log, other_slot(player_slot));
@@ -551,9 +588,7 @@ export function resolve_turn(
     if (phase_actions.length === 2) {
       const a = phase_actions[0];
       const b = phase_actions[1];
-      const a_active = active_monster(next.players[a.player]);
-      const b_active = active_monster(next.players[b.player]);
-      const cmp = compare_initiative(a_active, b_active, phase.initiative);
+      const cmp = compare_action_initiative(next, phase, a, b);
       let first = a;
       let second = b;
       if (cmp < 0 || (cmp === 0 && a.player === "player2")) {

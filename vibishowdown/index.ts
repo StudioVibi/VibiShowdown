@@ -31,11 +31,12 @@ type Profile = {
 };
 
 const PLAYER_SLOTS: PlayerSlot[] = ["player1", "player2"];
-const MOVE_OPTIONS = ["basic_attack", "return", "double_edge", "seismic_toss", "protect", "none"];
+const MOVE_OPTIONS = ["basic_attack", "quick_attack", "return", "double_edge", "seismic_toss", "protect", "none"];
 const PASSIVE_OPTIONS = ["none", "regen_5pct"];
 
 const MOVE_LABELS: Record<string, string> = {
   basic_attack: "Basic Attack",
+  quick_attack: "Quick Attack",
   return: "Return",
   double_edge: "Double-Edge",
   seismic_toss: "Seismic Toss",
@@ -54,7 +55,7 @@ const roster: MonsterSpec[] = [
     name: "Baby Dragon TR",
     role: "Return Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: ["return", "none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "none", "none", "none"],
     defaultPassive: "none"
@@ -64,7 +65,7 @@ const roster: MonsterSpec[] = [
     name: "Croni DR",
     role: "Return Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
     possiblePassives: ["none"],
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
@@ -74,7 +75,7 @@ const roster: MonsterSpec[] = [
     name: "Harpy TD",
     role: "Double-Edge Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: ["double_edge", "none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
     possiblePassives: ["none"],
     defaultMoves: ["double_edge", "none", "none", "none"],
     defaultPassive: "none"
@@ -84,7 +85,7 @@ const roster: MonsterSpec[] = [
     name: "Hoof DD",
     role: "Double-Edge Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
     possiblePassives: ["none"],
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
@@ -94,7 +95,7 @@ const roster: MonsterSpec[] = [
     name: "Knight TR",
     role: "Return Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: ["return", "none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "none", "none", "none"],
     defaultPassive: "none"
@@ -104,7 +105,7 @@ const roster: MonsterSpec[] = [
     name: "Miren DS",
     role: "Seismic Toss Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
     possiblePassives: ["none"],
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
@@ -114,7 +115,7 @@ const roster: MonsterSpec[] = [
     name: "Panda TS",
     role: "Seismic Toss Tester",
     stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: ["seismic_toss", "none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
     possiblePassives: ["none"],
     defaultMoves: ["seismic_toss", "none", "none", "none"],
     defaultPassive: "none"
@@ -124,7 +125,7 @@ const roster: MonsterSpec[] = [
     name: "Valkyria DR",
     role: "Return Dummy",
     stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: ["none"],
+    possibleMoves: MOVE_OPTIONS.slice(),
     possiblePassives: ["none"],
     defaultMoves: ["none", "none", "none", "none"],
     defaultPassive: "none"
