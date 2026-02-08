@@ -362,45 +362,26 @@ function handle_join(ws: WebSocket, room_id: RoomId, data: RoomPost): "player" |
     return "player";
   }
 
-  if (!has_open_slot(room)) {
-    room.spectators.add(data.name);
-    spectator_info.set(ws, { room: room_id, name: data.name });
-    send_direct(ws, room_id, { $: "spectator", name: data.name });
-    send_direct(ws, room_id, {
-      $: "ready_state",
-      ready: { ...room.ready },
-      names: {
-        player1: room.players.player1?.name ?? null,
-        player2: room.players.player2?.name ?? null
-      },
-      order: room.ready_order.slice()
-    });
-    emit_participants(room);
-    send_participants(ws, room);
-    return "spectator";
-  }
-
-  const slot = assign_slot(room);
-  const token = gen_token();
-  const record: PlayerRecord = { slot, token, name: data.name, ws };
-  room.players[slot] = record;
-  token_index.set(token, { room: room_id, slot });
-  socket_info.set(ws, { room: room_id, slot, token });
-  send_direct(ws, room_id, { $: "assign", slot, token, name: data.name });
-  emit_ready_state(room);
+  room.spectators.add(data.name);
+  spectator_info.set(ws, { room: room_id, name: data.name });
+  send_direct(ws, room_id, { $: "spectator", name: data.name });
+  send_direct(ws, room_id, {
+    $: "ready_state",
+    ready: { ...room.ready },
+    names: {
+      player1: room.players.player1?.name ?? null,
+      player2: room.players.player2?.name ?? null
+    },
+    order: room.ready_order.slice()
+  });
   emit_participants(room);
   send_participants(ws, room);
-  return "player";
+  return "spectator";
 }
 
 function handle_ready(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
   if (data.$ !== "ready") return;
 
-  const info = socket_info.get(ws);
-  if (!info || info.room !== room_id) {
-    send_error(ws, room_id, "Not assigned to this room");
-    return;
-  }
   const room = rooms.get(room_id);
   if (!room || room.ended) {
     send_error(ws, room_id, "Room not found");
@@ -408,6 +389,52 @@ function handle_ready(ws: WebSocket, room_id: RoomId, data: RoomPost): void {
   }
   if (room.turn > 0) {
     send_error(ws, room_id, "Match already started");
+    return;
+  }
+
+  const info = socket_info.get(ws);
+  if (!info || info.room !== room_id) {
+    const spectator = spectator_info.get(ws);
+    if (!spectator || spectator.room !== room_id) {
+      send_error(ws, room_id, "Not assigned to this room");
+      return;
+    }
+    if (!data.ready) {
+      return;
+    }
+    if (!data.team) {
+      send_error(ws, room_id, "Missing team");
+      return;
+    }
+    const validation = validate_team(data.team);
+    if (validation) {
+      send_error(ws, room_id, validation, "invalid_team");
+      return;
+    }
+    if (!has_open_slot(room)) {
+      send_error(ws, room_id, "Room full");
+      return;
+    }
+    const slot = assign_slot(room);
+    const token = gen_token();
+    const record: PlayerRecord = { slot, token, name: spectator.name, ws };
+    room.players[slot] = record;
+    token_index.set(token, { room: room_id, slot });
+    socket_info.set(ws, { room: room_id, slot, token });
+    room.spectators.delete(spectator.name);
+    spectator_info.delete(ws);
+    send_direct(ws, room_id, { $: "assign", slot, token, name: record.name });
+    room.ready[slot] = true;
+    room.teams[slot] = data.team;
+    room.ready_order = room.ready_order.filter((value) => value !== slot);
+    room.ready_order.push(slot);
+    emit_ready_state(room);
+    emit_post(room_id, { $: "ready", ready: true, team: data.team });
+    emit_participants(room);
+    send_participants(ws, room);
+    if (room.ready.player1 && room.ready.player2) {
+      start_match(room);
+    }
     return;
   }
 

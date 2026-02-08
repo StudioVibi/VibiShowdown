@@ -181,8 +181,6 @@ function ping() {
 
 // vibishowdown/index.ts
 var PLAYER_SLOTS = ["player1", "player2"];
-var MOVE_OPTIONS = ["basic_attack", "return", "double_edge", "seismic_toss", "protect", "none"];
-var PASSIVE_OPTIONS = ["none", "regen_5pct"];
 var MOVE_LABELS = {
   basic_attack: "Basic Attack",
   return: "Return",
@@ -306,6 +304,12 @@ var roster_count = document.getElementById("roster-count");
 var slot_active = document.getElementById("slot-active");
 var slot_bench_a = document.getElementById("slot-bench-a");
 var slot_bench_b = document.getElementById("slot-bench-b");
+var slot_active_name = document.getElementById("slot-active-name");
+var slot_bench_a_name = document.getElementById("slot-bench-a-name");
+var slot_bench_b_name = document.getElementById("slot-bench-b-name");
+var slot_active_img = document.getElementById("slot-active-img");
+var slot_bench_a_img = document.getElementById("slot-bench-a-img");
+var slot_bench_b_img = document.getElementById("slot-bench-b-img");
 var monster_tabs = document.getElementById("monster-tabs");
 var moves_grid = document.getElementById("moves-grid");
 var passive_grid = document.getElementById("passive-grid");
@@ -388,25 +392,13 @@ function render_participants() {
   if (!participants) {
     return;
   }
-  const label_map = new Map;
-  if (ready_order[0])
-    label_map.set(ready_order[0], "P1");
-  if (ready_order[1])
-    label_map.set(ready_order[1], "P2");
-  const player_order = ready_order.length ? ready_order.concat(PLAYER_SLOTS).filter((value, index, self) => self.indexOf(value) === index) : PLAYER_SLOTS;
-  for (const slot_id of player_order) {
+  for (const slot_id of PLAYER_SLOTS) {
     const name = participants.players[slot_id];
     if (!name)
       continue;
     const item = document.createElement("div");
     item.className = "participant";
-    let meta = "waiting";
-    const label = label_map.get(slot_id);
-    if (label === "P1") {
-      meta = `P1 ${ready_order.length >= 2 ? "ready" : "waiting"}`;
-    } else if (label === "P2") {
-      meta = "P2 ready";
-    }
+    const meta = slot_id === "player1" ? "P1" : "P2";
     item.innerHTML = `<span>${name}</span><span class="participant-meta">${meta}</span>`;
     participants_list.appendChild(item);
   }
@@ -483,7 +475,7 @@ function coerce_config(spec, value) {
     moves.push("none");
   }
   const allowed = new Set(spec.possibleMoves);
-  for (let i = 0; i < moves.length; i++) {
+  for (let i = 0;i < moves.length; i++) {
     if (!allowed.has(moves[i])) {
       moves[i] = "none";
     }
@@ -491,7 +483,7 @@ function coerce_config(spec, value) {
   return {
     moves,
     passive: value.passive || base.passive,
-    stats: { ...base.stats }
+    stats: { ...base.stats, ...value.stats || {} }
   };
 }
 function get_config(monster_id) {
@@ -507,13 +499,34 @@ function get_config(monster_id) {
 function update_roster_count() {
   roster_count.textContent = `${selected.length}/3`;
 }
+function set_slot_card(index, card, img, name_el) {
+  const id = selected[index];
+  card.classList.toggle("show-badge", index === 0);
+  if (!id) {
+    card.classList.add("empty");
+    card.classList.remove("active");
+    img.classList.add("hidden");
+    img.removeAttribute("src");
+    img.alt = "";
+    name_el.textContent = "empty";
+    return;
+  }
+  card.classList.remove("empty");
+  card.classList.toggle("active", id === active_tab);
+  img.classList.remove("hidden");
+  img.src = icon_path(id);
+  img.alt = monster_label(id);
+  name_el.textContent = monster_label(id);
+}
 function update_slots() {
-  slot_active.textContent = monster_label(selected[0], "empty");
-  slot_bench_a.textContent = monster_label(selected[1], "empty");
-  slot_bench_b.textContent = monster_label(selected[2], "empty");
+  set_slot_card(0, slot_active, slot_active_img, slot_active_name);
+  set_slot_card(1, slot_bench_a, slot_bench_a_img, slot_bench_a_name);
+  set_slot_card(2, slot_bench_b, slot_bench_b_img, slot_bench_b_name);
 }
 function render_tabs() {
-  monster_tabs.innerHTML = "";
+  if (monster_tabs) {
+    monster_tabs.innerHTML = "";
+  }
   if (selected.length === 0) {
     active_tab = null;
     render_config();
@@ -522,24 +535,7 @@ function render_tabs() {
   if (!active_tab || !selected.includes(active_tab)) {
     active_tab = selected[0];
   }
-  for (const id of selected) {
-    const spec = roster_by_id.get(id);
-    const button = document.createElement("button");
-    button.className = `tab${id === active_tab ? " active" : ""}`;
-    const label = spec ? spec.name : id;
-    const is_active = id === selected[0];
-    button.textContent = is_active ? `${label} ★` : label;
-    button.disabled = is_ready && !match_started;
-    button.addEventListener("click", () => {
-      if (is_ready && !match_started) {
-        return;
-      }
-      active_tab = id;
-      render_tabs();
-      render_config();
-    });
-    monster_tabs.appendChild(button);
-  }
+  render_config();
 }
 function render_config() {
   moves_grid.innerHTML = "";
@@ -642,17 +638,17 @@ function render_config() {
     stats_grid.appendChild(label);
   }
 }
-function set_active_index(index) {
-  if (index <= 0 || index >= selected.length) {
+function set_edit_target(index) {
+  if (is_ready && !match_started) {
     return;
   }
-  const [chosen] = selected.splice(index, 1);
-  selected.unshift(chosen);
-  save_team_selection();
+  const id = selected[index];
+  if (!id) {
+    return;
+  }
+  active_tab = id;
   update_slots();
-  render_tabs();
   render_config();
-  update_action_controls();
 }
 function toggle_selection(id) {
   if (is_ready && !match_started) {
@@ -696,7 +692,7 @@ function render_roster() {
     const is_disabled = !is_selected && selected.length >= 3 || is_ready && !match_started;
     card.className = `roster-card${is_selected ? " active" : ""}${is_disabled ? " disabled" : ""}`;
     card.innerHTML = `
-      <div class="sprite" style="width:36px;height:36px;">
+      <div class="sprite" style="width:24px;height:24px;">
         <img src="${icon_path(entry.id)}" alt="${entry.name}" />
       </div>
       <div>
@@ -846,7 +842,7 @@ function build_team_selection() {
   return { monsters, activeIndex: 0 };
 }
 function send_ready(next_ready) {
-  if (match_started || is_spectator || !slot) {
+  if (match_started) {
     return;
   }
   if (next_ready) {
@@ -856,6 +852,9 @@ function send_ready(next_ready) {
     }
     post(room, { $: "ready", ready: true, team });
   } else {
+    if (!slot) {
+      return;
+    }
     post(room, { $: "ready", ready: false });
   }
 }
@@ -865,22 +864,20 @@ function update_ready_ui() {
     status_ready.className = `status-pill ${is_ready ? "ok" : "off"}`;
   }
   ready_btn.textContent = is_ready ? "Unready" : "Ready";
-  ready_btn.disabled = is_spectator || !slot;
+  ready_btn.disabled = match_started;
   if (match_started) {
     prematch_hint.textContent = "Match started.";
     return;
   }
-  if (is_spectator) {
-    prematch_hint.textContent = "Spectator mode. Waiting for players to ready.";
-    return;
-  }
+  let hint = "Select 3 monsters, configure, then Ready.";
   if (is_ready) {
-    prematch_hint.textContent = "Waiting for opponent...";
+    hint = "Waiting for opponent...";
   } else if (opponent_ready) {
-    prematch_hint.textContent = "Opponent is ready. Configure and click Ready.";
-  } else {
-    prematch_hint.textContent = "Select 3 monsters, configure, then Ready.";
+    hint = "Opponent is ready. Configure and click Ready.";
+  } else if (is_spectator && !slot) {
+    hint = "Spectator mode. Select 3 monsters and click Ready to join.";
   }
+  prematch_hint.textContent = hint;
   render_roster();
   render_tabs();
   render_config();
@@ -1171,6 +1168,7 @@ function handle_post(message) {
   switch (data.$) {
     case "assign":
       slot = data.slot;
+      is_spectator = false;
       if (status_slot)
         status_slot.textContent = data.slot;
       status_conn.textContent = "synced";
@@ -1298,19 +1296,13 @@ match_end_btn.addEventListener("click", () => {
   window.location.reload();
 });
 slot_active.addEventListener("click", () => {
-  if (is_ready && !match_started)
-    return;
-  set_active_index(0);
+  set_edit_target(0);
 });
 slot_bench_a.addEventListener("click", () => {
-  if (is_ready && !match_started)
-    return;
-  set_active_index(1);
+  set_edit_target(1);
 });
 slot_bench_b.addEventListener("click", () => {
-  if (is_ready && !match_started)
-    return;
-  set_active_index(2);
+  set_edit_target(2);
 });
 setInterval(update_deadline, 1000);
 setInterval(() => {
