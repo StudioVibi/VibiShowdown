@@ -1,199 +1,1018 @@
 // src/config.ts
-var REMOTE_WSS = "wss://game.vibistudiotest.site";
-function has_window() {
-  return typeof window !== "undefined" && typeof window.location !== "undefined";
-}
-function from_global_override() {
-  if (!has_window())
-    return;
-  const global_any = window;
-  if (typeof global_any.__VIBI_WS_URL__ === "string") {
-    return global_any.__VIBI_WS_URL__;
-  }
-  return;
-}
-function normalize(value) {
-  if (value.startsWith("wss://") || value.startsWith("ws://")) {
-    return value;
-  }
-  if (value.startsWith("https://")) {
-    return `wss://${value.slice("https://".length)}`;
-  }
-  if (value.startsWith("http://")) {
-    return `ws://${value.slice("http://".length)}`;
-  }
-  const lower = value.toLowerCase();
-  const is_local = lower.startsWith("localhost") || lower.startsWith("127.0.0.1") || lower.startsWith("0.0.0.0");
-  return `${is_local ? "ws" : "wss"}://${value}`;
-}
-function from_query_param() {
-  if (!has_window())
-    return;
-  try {
-    const url = new URL(window.location.href);
-    const value = url.searchParams.get("ws");
-    if (value) {
-      return normalize(value);
-    }
-  } catch {}
-  return;
-}
-function detect_url() {
-  const manual = from_global_override() ?? from_query_param();
-  if (manual) {
-    return manual;
-  }
-  if (has_window()) {
-    try {
-      const origin = window.location.origin;
-      const host = window.location.hostname.toLowerCase();
-      const is_local_host = host === "localhost" || host === "127.0.0.1" || host === "0.0.0.0";
-      if (is_local_host && origin && origin !== "null") {
-        return normalize(origin);
-      }
-    } catch {}
-  }
-  return REMOTE_WSS;
-}
-var WS_URL = detect_url();
+var OFFICIAL_VIBINET_WSS = "wss://net.studiovibi.com";
+var WS_URL = OFFICIAL_VIBINET_WSS;
 
-// src/helpers.ts
+// ../VibiNet/src/packer.ts
+var MAX_SAFE_BITS = 53;
+var text_decoder = new TextDecoder();
+var union_cache = /* @__PURE__ */ new WeakMap();
+var struct_cache = /* @__PURE__ */ new WeakMap();
+var BitWriter = class {
+  buf;
+  bit_pos;
+  constructor(buf) {
+    this.buf = buf;
+    this.bit_pos = 0;
+  }
+  write_bit(bit) {
+    const byte_index = this.bit_pos >>> 3;
+    const bit_index = this.bit_pos & 7;
+    if (bit) {
+      this.buf[byte_index] |= 1 << bit_index;
+    }
+    this.bit_pos++;
+  }
+  write_bitsUnsigned(value, bits) {
+    if (bits === 0) return;
+    if (typeof value === "number") {
+      if (bits <= 32) {
+        const aligned = (this.bit_pos & 7) === 0 && (bits & 7) === 0;
+        if (aligned) {
+          let v2 = value >>> 0;
+          let byte_index = this.bit_pos >>> 3;
+          for (let i = 0; i < bits; i += 8) {
+            this.buf[byte_index++] = v2 & 255;
+            v2 >>>= 8;
+          }
+          this.bit_pos += bits;
+          return;
+        }
+        let v = value >>> 0;
+        for (let i = 0; i < bits; i++) {
+          this.write_bit(v & 1);
+          v >>>= 1;
+        }
+        return;
+      }
+      this.write_bitsBigint(BigInt(value), bits);
+      return;
+    }
+    this.write_bitsBigint(value, bits);
+  }
+  write_bitsBigint(value, bits) {
+    if (bits === 0) return;
+    const aligned = (this.bit_pos & 7) === 0 && (bits & 7) === 0;
+    if (aligned) {
+      let v2 = value;
+      let byte_index = this.bit_pos >>> 3;
+      for (let i = 0; i < bits; i += 8) {
+        this.buf[byte_index++] = Number(v2 & 0xffn);
+        v2 >>= 8n;
+      }
+      this.bit_pos += bits;
+      return;
+    }
+    let v = value;
+    for (let i = 0; i < bits; i++) {
+      this.write_bit((v & 1n) === 0n ? 0 : 1);
+      v >>= 1n;
+    }
+  }
+};
+var BitReader = class {
+  buf;
+  bit_pos;
+  constructor(buf) {
+    this.buf = buf;
+    this.bit_pos = 0;
+  }
+  read_bit() {
+    const byte_index = this.bit_pos >>> 3;
+    const bit_index = this.bit_pos & 7;
+    const bit = this.buf[byte_index] >>> bit_index & 1;
+    this.bit_pos++;
+    return bit;
+  }
+  read_bitsUnsigned(bits) {
+    if (bits === 0) return 0;
+    if (bits <= 32) {
+      const aligned = (this.bit_pos & 7) === 0 && (bits & 7) === 0;
+      if (aligned) {
+        let v2 = 0;
+        let shift = 0;
+        let byte_index = this.bit_pos >>> 3;
+        for (let i = 0; i < bits; i += 8) {
+          v2 |= this.buf[byte_index++] << shift;
+          shift += 8;
+        }
+        this.bit_pos += bits;
+        return v2 >>> 0;
+      }
+      let v = 0;
+      for (let i = 0; i < bits; i++) {
+        if (this.read_bit()) {
+          v |= 1 << i;
+        }
+      }
+      return v >>> 0;
+    }
+    if (bits <= MAX_SAFE_BITS) {
+      let v = 0;
+      let pow = 1;
+      for (let i = 0; i < bits; i++) {
+        if (this.read_bit()) {
+          v += pow;
+        }
+        pow *= 2;
+      }
+      return v;
+    }
+    return this.read_bitsBigint(bits);
+  }
+  read_bitsBigint(bits) {
+    if (bits === 0) return 0n;
+    const aligned = (this.bit_pos & 7) === 0 && (bits & 7) === 0;
+    if (aligned) {
+      let v2 = 0n;
+      let shift = 0n;
+      let byte_index = this.bit_pos >>> 3;
+      for (let i = 0; i < bits; i += 8) {
+        v2 |= BigInt(this.buf[byte_index++]) << shift;
+        shift += 8n;
+      }
+      this.bit_pos += bits;
+      return v2;
+    }
+    let v = 0n;
+    let pow = 1n;
+    for (let i = 0; i < bits; i++) {
+      if (this.read_bit()) {
+        v += pow;
+      }
+      pow <<= 1n;
+    }
+    return v;
+  }
+};
+function assert_integer(value, name) {
+  if (!Number.isInteger(value)) {
+    throw new TypeError(`${name} must be an integer`);
+  }
+}
+function assert_size(size) {
+  assert_integer(size, "size");
+  if (size < 0) throw new RangeError("size must be >= 0");
+}
+function assert_vector_size(expected, actual) {
+  if (actual !== expected) {
+    throw new RangeError(`vector size mismatch: expected ${expected}, got ${actual}`);
+  }
+}
+function size_bits(type, val) {
+  switch (type.$) {
+    case "UInt":
+    case "Int":
+      assert_size(type.size);
+      return type.size;
+    case "Nat": {
+      if (typeof val === "bigint") {
+        if (val < 0n) throw new RangeError("Nat must be >= 0");
+        if (val > BigInt(Number.MAX_SAFE_INTEGER)) {
+          throw new RangeError("Nat too large to size");
+        }
+        return Number(val) + 1;
+      }
+      assert_integer(val, "Nat");
+      if (val < 0) throw new RangeError("Nat must be >= 0");
+      return val + 1;
+    }
+    case "Tuple": {
+      const fields = type.fields;
+      const arr = as_array(val, "Tuple");
+      let bits = 0;
+      for (let i = 0; i < fields.length; i++) {
+        bits += size_bits(fields[i], arr[i]);
+      }
+      return bits;
+    }
+    case "Vector": {
+      assert_size(type.size);
+      const arr = as_array(val, "Vector");
+      assert_vector_size(type.size, arr.length);
+      let bits = 0;
+      for (let i = 0; i < type.size; i++) {
+        bits += size_bits(type.type, arr[i]);
+      }
+      return bits;
+    }
+    case "Struct": {
+      let bits = 0;
+      const keys = struct_keys(type.fields);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const v = get_struct_field(val, key);
+        bits += size_bits(type.fields[key], v);
+      }
+      return bits;
+    }
+    case "List": {
+      let bits = 1;
+      for_each_list(val, (item) => {
+        bits += 1;
+        bits += size_bits(type.type, item);
+      });
+      return bits;
+    }
+    case "Map": {
+      let bits = 1;
+      for_each_map(val, (k, v) => {
+        bits += 1;
+        bits += size_bits(type.key, k);
+        bits += size_bits(type.value, v);
+      });
+      return bits;
+    }
+    case "Union": {
+      const info = union_info(type);
+      const tag = get_union_tag(val);
+      const variant_type = type.variants[tag];
+      if (!variant_type) {
+        throw new RangeError(`Unknown union variant: ${tag}`);
+      }
+      const payload = get_union_payload(val, variant_type);
+      return info.tag_bits + size_bits(variant_type, payload);
+    }
+    case "String": {
+      const byte_len = utf8_byte_length(val);
+      return 1 + byte_len * 9;
+    }
+  }
+}
+function encode_into(writer, type, val) {
+  switch (type.$) {
+    case "UInt": {
+      assert_size(type.size);
+      if (type.size === 0) {
+        if (val === 0 || val === 0n) return;
+        throw new RangeError("UInt out of range");
+      }
+      if (typeof val === "bigint") {
+        if (val < 0n) throw new RangeError("UInt must be >= 0");
+        const max2 = 1n << BigInt(type.size);
+        if (val >= max2) throw new RangeError("UInt out of range");
+        writer.write_bitsUnsigned(val, type.size);
+        return;
+      }
+      assert_integer(val, "UInt");
+      if (val < 0) throw new RangeError("UInt must be >= 0");
+      if (type.size > MAX_SAFE_BITS) {
+        throw new RangeError("UInt too large for number; use bigint");
+      }
+      const max = 2 ** type.size;
+      if (val >= max) throw new RangeError("UInt out of range");
+      writer.write_bitsUnsigned(val, type.size);
+      return;
+    }
+    case "Int": {
+      assert_size(type.size);
+      if (type.size === 0) {
+        if (val === 0 || val === 0n) return;
+        throw new RangeError("Int out of range");
+      }
+      if (typeof val === "bigint") {
+        const size = BigInt(type.size);
+        const min2 = -(1n << size - 1n);
+        const max2 = (1n << size - 1n) - 1n;
+        if (val < min2 || val > max2) throw new RangeError("Int out of range");
+        let unsigned2 = val;
+        if (val < 0n) unsigned2 = (1n << size) + val;
+        writer.write_bitsUnsigned(unsigned2, type.size);
+        return;
+      }
+      assert_integer(val, "Int");
+      if (type.size > MAX_SAFE_BITS) {
+        throw new RangeError("Int too large for number; use bigint");
+      }
+      const min = -(2 ** (type.size - 1));
+      const max = 2 ** (type.size - 1) - 1;
+      if (val < min || val > max) throw new RangeError("Int out of range");
+      let unsigned = val;
+      if (val < 0) unsigned = 2 ** type.size + val;
+      writer.write_bitsUnsigned(unsigned, type.size);
+      return;
+    }
+    case "Nat": {
+      if (typeof val === "bigint") {
+        if (val < 0n) throw new RangeError("Nat must be >= 0");
+        let n = val;
+        while (n > 0n) {
+          writer.write_bit(1);
+          n -= 1n;
+        }
+        writer.write_bit(0);
+        return;
+      }
+      assert_integer(val, "Nat");
+      if (val < 0) throw new RangeError("Nat must be >= 0");
+      for (let i = 0; i < val; i++) {
+        writer.write_bit(1);
+      }
+      writer.write_bit(0);
+      return;
+    }
+    case "Tuple": {
+      const fields = type.fields;
+      const arr = as_array(val, "Tuple");
+      for (let i = 0; i < fields.length; i++) {
+        encode_into(writer, fields[i], arr[i]);
+      }
+      return;
+    }
+    case "Vector": {
+      assert_size(type.size);
+      const arr = as_array(val, "Vector");
+      assert_vector_size(type.size, arr.length);
+      for (let i = 0; i < type.size; i++) {
+        encode_into(writer, type.type, arr[i]);
+      }
+      return;
+    }
+    case "Struct": {
+      const keys = struct_keys(type.fields);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        encode_into(writer, type.fields[key], get_struct_field(val, key));
+      }
+      return;
+    }
+    case "List": {
+      for_each_list(val, (item) => {
+        writer.write_bit(1);
+        encode_into(writer, type.type, item);
+      });
+      writer.write_bit(0);
+      return;
+    }
+    case "Map": {
+      for_each_map(val, (k, v) => {
+        writer.write_bit(1);
+        encode_into(writer, type.key, k);
+        encode_into(writer, type.value, v);
+      });
+      writer.write_bit(0);
+      return;
+    }
+    case "Union": {
+      const info = union_info(type);
+      const tag = get_union_tag(val);
+      const index = info.index_by_tag.get(tag);
+      if (index === void 0) {
+        throw new RangeError(`Unknown union variant: ${tag}`);
+      }
+      if (info.tag_bits > 0) {
+        writer.write_bitsUnsigned(index, info.tag_bits);
+      }
+      const variant_type = type.variants[tag];
+      const payload = get_union_payload(val, variant_type);
+      encode_into(writer, variant_type, payload);
+      return;
+    }
+    case "String": {
+      write_utf8_list(writer, val);
+      return;
+    }
+  }
+}
+function decode_from(reader, type) {
+  switch (type.$) {
+    case "UInt": {
+      assert_size(type.size);
+      return reader.read_bitsUnsigned(type.size);
+    }
+    case "Int": {
+      assert_size(type.size);
+      if (type.size === 0) return 0;
+      const unsigned = reader.read_bitsUnsigned(type.size);
+      if (typeof unsigned === "bigint") {
+        const sign_bit2 = 1n << BigInt(type.size - 1);
+        if (unsigned & sign_bit2) {
+          return unsigned - (1n << BigInt(type.size));
+        }
+        return unsigned;
+      }
+      const sign_bit = 2 ** (type.size - 1);
+      if (unsigned >= sign_bit) {
+        return unsigned - 2 ** type.size;
+      }
+      return unsigned;
+    }
+    case "Nat": {
+      let n = 0;
+      let big = null;
+      while (reader.read_bit()) {
+        if (big !== null) {
+          big += 1n;
+        } else if (n === Number.MAX_SAFE_INTEGER) {
+          big = BigInt(n) + 1n;
+        } else {
+          n++;
+        }
+      }
+      return big ?? n;
+    }
+    case "Tuple": {
+      const out = new Array(type.fields.length);
+      for (let i = 0; i < type.fields.length; i++) {
+        out[i] = decode_from(reader, type.fields[i]);
+      }
+      return out;
+    }
+    case "Vector": {
+      const out = new Array(type.size);
+      for (let i = 0; i < type.size; i++) {
+        out[i] = decode_from(reader, type.type);
+      }
+      return out;
+    }
+    case "Struct": {
+      const out = {};
+      const keys = struct_keys(type.fields);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        out[key] = decode_from(reader, type.fields[key]);
+      }
+      return out;
+    }
+    case "List": {
+      const out = [];
+      while (reader.read_bit()) {
+        out.push(decode_from(reader, type.type));
+      }
+      return out;
+    }
+    case "Map": {
+      const out = /* @__PURE__ */ new Map();
+      while (reader.read_bit()) {
+        const key = decode_from(reader, type.key);
+        const value = decode_from(reader, type.value);
+        out.set(key, value);
+      }
+      return out;
+    }
+    case "Union": {
+      const info = union_info(type);
+      let raw_index = 0;
+      if (info.tag_bits > 0) {
+        raw_index = reader.read_bitsUnsigned(info.tag_bits);
+      }
+      let index;
+      if (typeof raw_index === "bigint") {
+        if (raw_index > BigInt(Number.MAX_SAFE_INTEGER)) {
+          throw new RangeError("Union tag index too large");
+        }
+        index = Number(raw_index);
+      } else {
+        index = raw_index;
+      }
+      if (index < 0 || index >= info.keys.length) {
+        throw new RangeError("Union tag index out of range");
+      }
+      const tag = info.keys[index];
+      const variant_type = type.variants[tag];
+      const payload = decode_from(reader, variant_type);
+      if (variant_type.$ === "Struct") {
+        if (payload && typeof payload === "object") {
+          payload.$ = tag;
+          return payload;
+        }
+      }
+      return { $: tag, value: payload };
+    }
+    case "String": {
+      return read_utf8_list(reader);
+    }
+  }
+}
+function as_array(val, label) {
+  if (!Array.isArray(val)) {
+    throw new TypeError(`${label} value must be an Array`);
+  }
+  return val;
+}
+function get_struct_field(val, key) {
+  if (val && typeof val === "object") {
+    return val[key];
+  }
+  throw new TypeError("Struct value must be an object");
+}
+function union_info(type) {
+  const cached = union_cache.get(type);
+  if (cached) return cached;
+  const keys = Object.keys(type.variants).sort();
+  if (keys.length === 0) {
+    throw new RangeError("Union must have at least one variant");
+  }
+  const index_by_tag = /* @__PURE__ */ new Map();
+  for (let i = 0; i < keys.length; i++) {
+    index_by_tag.set(keys[i], i);
+  }
+  const tag_bits = keys.length <= 1 ? 0 : Math.ceil(Math.log2(keys.length));
+  const info = { keys, index_by_tag, tag_bits };
+  union_cache.set(type, info);
+  return info;
+}
+function struct_keys(fields) {
+  const cached = struct_cache.get(fields);
+  if (cached) return cached;
+  const keys = Object.keys(fields);
+  struct_cache.set(fields, keys);
+  return keys;
+}
+function get_union_tag(val) {
+  if (!val || typeof val !== "object") {
+    throw new TypeError("Union value must be an object with a $ tag");
+  }
+  const tag = val.$;
+  if (typeof tag !== "string") {
+    throw new TypeError("Union value must have a string $ tag");
+  }
+  return tag;
+}
+function get_union_payload(val, variant_type) {
+  if (variant_type.$ !== "Struct" && val && typeof val === "object" && Object.prototype.hasOwnProperty.call(val, "value")) {
+    return val.value;
+  }
+  return val;
+}
+function for_each_list(val, fn) {
+  if (!Array.isArray(val)) {
+    throw new TypeError("List value must be an Array");
+  }
+  for (let i = 0; i < val.length; i++) {
+    fn(val[i]);
+  }
+}
+function for_each_map(val, fn) {
+  if (val == null) return;
+  if (val instanceof Map) {
+    for (const [k, v] of val) {
+      fn(k, v);
+    }
+    return;
+  }
+  if (typeof val === "object") {
+    for (const key of Object.keys(val)) {
+      fn(key, val[key]);
+    }
+    return;
+  }
+  throw new TypeError("Map value must be a Map or object");
+}
+function utf8_byte_length(value) {
+  if (typeof value !== "string") {
+    throw new TypeError("String value must be a string");
+  }
+  let len = 0;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 128) {
+      len += 1;
+    } else if (code < 2048) {
+      len += 2;
+    } else if (code >= 55296 && code <= 56319) {
+      const next = i + 1 < value.length ? value.charCodeAt(i + 1) : 0;
+      if (next >= 56320 && next <= 57343) {
+        i++;
+        len += 4;
+      } else {
+        len += 3;
+      }
+    } else if (code >= 56320 && code <= 57343) {
+      len += 3;
+    } else {
+      len += 3;
+    }
+  }
+  return len;
+}
+function write_utf8_list(writer, value) {
+  if (typeof value !== "string") {
+    throw new TypeError("String value must be a string");
+  }
+  for (let i = 0; i < value.length; i++) {
+    let code = value.charCodeAt(i);
+    if (code < 128) {
+      writer.write_bit(1);
+      writer.write_bitsUnsigned(code, 8);
+      continue;
+    }
+    if (code < 2048) {
+      writer.write_bit(1);
+      writer.write_bitsUnsigned(192 | code >>> 6, 8);
+      writer.write_bit(1);
+      writer.write_bitsUnsigned(128 | code & 63, 8);
+      continue;
+    }
+    if (code >= 55296 && code <= 56319) {
+      const next = i + 1 < value.length ? value.charCodeAt(i + 1) : 0;
+      if (next >= 56320 && next <= 57343) {
+        i++;
+        const cp = (code - 55296 << 10) + (next - 56320) + 65536;
+        writer.write_bit(1);
+        writer.write_bitsUnsigned(240 | cp >>> 18, 8);
+        writer.write_bit(1);
+        writer.write_bitsUnsigned(128 | cp >>> 12 & 63, 8);
+        writer.write_bit(1);
+        writer.write_bitsUnsigned(128 | cp >>> 6 & 63, 8);
+        writer.write_bit(1);
+        writer.write_bitsUnsigned(128 | cp & 63, 8);
+        continue;
+      }
+      code = 65533;
+    } else if (code >= 56320 && code <= 57343) {
+      code = 65533;
+    }
+    writer.write_bit(1);
+    writer.write_bitsUnsigned(224 | code >>> 12, 8);
+    writer.write_bit(1);
+    writer.write_bitsUnsigned(128 | code >>> 6 & 63, 8);
+    writer.write_bit(1);
+    writer.write_bitsUnsigned(128 | code & 63, 8);
+  }
+  writer.write_bit(0);
+}
+function read_utf8_list(reader) {
+  let bytes = new Uint8Array(16);
+  let len = 0;
+  while (reader.read_bit()) {
+    const byte = reader.read_bitsUnsigned(8);
+    if (len === bytes.length) {
+      const next = new Uint8Array(bytes.length * 2);
+      next.set(bytes);
+      bytes = next;
+    }
+    bytes[len++] = byte;
+  }
+  return text_decoder.decode(bytes.subarray(0, len));
+}
+function encode(type, val) {
+  const bits = size_bits(type, val);
+  const buf = new Uint8Array(bits + 7 >>> 3);
+  const writer = new BitWriter(buf);
+  encode_into(writer, type, val);
+  return buf;
+}
+function decode(type, buf) {
+  const reader = new BitReader(buf);
+  return decode_from(reader, type);
+}
+
+// ../VibiNet/src/protocol.ts
+var TIME_BITS = 53;
+var BYTE_LIST_PACKED = { $: "List", type: { $: "UInt", size: 8 } };
+var MESSAGE_PACKED = {
+  $: "Union",
+  variants: {
+    get_time: { $: "Struct", fields: {} },
+    info_time: {
+      $: "Struct",
+      fields: {
+        time: { $: "UInt", size: TIME_BITS }
+      }
+    },
+    post: {
+      $: "Struct",
+      fields: {
+        room: { $: "String" },
+        time: { $: "UInt", size: TIME_BITS },
+        name: { $: "String" },
+        payload: BYTE_LIST_PACKED
+      }
+    },
+    info_post: {
+      $: "Struct",
+      fields: {
+        room: { $: "String" },
+        index: { $: "UInt", size: 32 },
+        server_time: { $: "UInt", size: TIME_BITS },
+        client_time: { $: "UInt", size: TIME_BITS },
+        name: { $: "String" },
+        payload: BYTE_LIST_PACKED
+      }
+    },
+    load: {
+      $: "Struct",
+      fields: {
+        room: { $: "String" },
+        from: { $: "UInt", size: 32 }
+      }
+    },
+    watch: {
+      $: "Struct",
+      fields: {
+        room: { $: "String" }
+      }
+    },
+    unwatch: {
+      $: "Struct",
+      fields: {
+        room: { $: "String" }
+      }
+    }
+  }
+};
+function bytes_to_list(bytes) {
+  const out = new Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) {
+    out[i] = bytes[i];
+  }
+  return out;
+}
+function list_to_bytes(list) {
+  const out = new Uint8Array(list.length);
+  for (let i = 0; i < list.length; i++) {
+    out[i] = list[i] & 255;
+  }
+  return out;
+}
+function to_wire_message(message) {
+  switch (message.$) {
+    case "post":
+      return {
+        $: "post",
+        room: message.room,
+        time: message.time,
+        name: message.name,
+        payload: bytes_to_list(message.payload)
+      };
+    case "info_post":
+      return {
+        $: "info_post",
+        room: message.room,
+        index: message.index,
+        server_time: message.server_time,
+        client_time: message.client_time,
+        name: message.name,
+        payload: bytes_to_list(message.payload)
+      };
+    default:
+      return message;
+  }
+}
+function from_wire_message(message) {
+  switch (message.$) {
+    case "post":
+      return {
+        $: "post",
+        room: message.room,
+        time: message.time,
+        name: message.name,
+        payload: list_to_bytes(message.payload)
+      };
+    case "info_post":
+      return {
+        $: "info_post",
+        room: message.room,
+        index: message.index,
+        server_time: message.server_time,
+        client_time: message.client_time,
+        name: message.name,
+        payload: list_to_bytes(message.payload)
+      };
+    default:
+      return message;
+  }
+}
+function encode_message(message) {
+  return encode(MESSAGE_PACKED, to_wire_message(message));
+}
+function decode_message(buf) {
+  const message = decode(MESSAGE_PACKED, buf);
+  return from_wire_message(message);
+}
+
+// ../VibiNet/src/server_url.ts
+var OFFICIAL_SERVER_URL = "wss://net.studiovibi.com";
+function normalize_ws_url(raw_url) {
+  let ws_url = raw_url;
+  try {
+    const url = new URL(raw_url);
+    if (url.protocol === "http:") {
+      url.protocol = "ws:";
+    } else if (url.protocol === "https:") {
+      url.protocol = "wss:";
+    }
+    ws_url = url.toString();
+  } catch {
+    ws_url = raw_url;
+  }
+  if (typeof window !== "undefined" && window.location.protocol === "https:" && ws_url.startsWith("ws://")) {
+    const upgraded = `wss://${ws_url.slice("ws://".length)}`;
+    console.warn(
+      `[VibiNet] Upgrading insecure WebSocket URL "${ws_url}" to "${upgraded}" because the page is HTTPS.`
+    );
+    return upgraded;
+  }
+  return ws_url;
+}
+
+// ../VibiNet/src/client.ts
 function now() {
   return Math.floor(Date.now());
 }
-function random_id(length, alphabet, source) {
-  const bytes = new Uint8Array(length);
-  if (source) {
-    source.fillBytes(bytes);
+function default_ws_url() {
+  return OFFICIAL_SERVER_URL;
+}
+function gen_name() {
+  const alphabet = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
+  const bytes = new Uint8Array(8);
+  const can_crypto = typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function";
+  if (can_crypto) {
+    crypto.getRandomValues(bytes);
   } else {
-    for (let i = 0;i < length; i++) {
+    for (let i = 0; i < 8; i++) {
       bytes[i] = Math.floor(Math.random() * 256);
     }
   }
   let out = "";
-  for (let i = 0;i < length; i++) {
-    out += alphabet[bytes[i] % alphabet.length];
+  for (let i = 0; i < 8; i++) {
+    out += alphabet[bytes[i] % 64];
   }
   return out;
 }
+function create_client(server) {
+  const time_sync = {
+    clock_offset: Infinity,
+    lowest_ping: Infinity,
+    request_sent_at: 0,
+    last_ping: Infinity
+  };
+  const room_watchers2 = /* @__PURE__ */ new Map();
+  let is_synced = false;
+  const sync_listeners = [];
+  const ws_url = normalize_ws_url(server ?? default_ws_url());
+  const ws = new WebSocket(ws_url);
+  ws.binaryType = "arraybuffer";
+  function server_time() {
+    if (!isFinite(time_sync.clock_offset)) {
+      throw new Error("server_time() called before initial sync");
+    }
+    return Math.floor(now() + time_sync.clock_offset);
+  }
+  function ensure_open() {
+    if (ws.readyState !== WebSocket.OPEN) {
+      throw new Error("WebSocket not open");
+    }
+  }
+  function send(buf) {
+    ensure_open();
+    ws.send(buf);
+  }
+  function register_handler(room2, packer, handler) {
+    const existing = room_watchers2.get(room2);
+    if (existing) {
+      if (existing.packer !== packer) {
+        throw new Error(`Packed schema already registered for room: ${room2}`);
+      }
+      if (handler) {
+        existing.handler = handler;
+      }
+      return;
+    }
+    room_watchers2.set(room2, { handler, packer });
+  }
+  ws.addEventListener("open", () => {
+    console.log("[WS] Connected");
+    time_sync.request_sent_at = now();
+    send(encode_message({ $: "get_time" }));
+    setInterval(() => {
+      time_sync.request_sent_at = now();
+      send(encode_message({ $: "get_time" }));
+    }, 2e3);
+  });
+  ws.addEventListener("message", (event) => {
+    const data = event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : new Uint8Array(event.data);
+    const msg = decode_message(data);
+    switch (msg.$) {
+      case "info_time": {
+        const t = now();
+        const ping2 = t - time_sync.request_sent_at;
+        time_sync.last_ping = ping2;
+        if (ping2 < time_sync.lowest_ping) {
+          const local_avg = Math.floor((time_sync.request_sent_at + t) / 2);
+          time_sync.clock_offset = msg.time - local_avg;
+          time_sync.lowest_ping = ping2;
+        }
+        if (!is_synced) {
+          is_synced = true;
+          for (const cb of sync_listeners) {
+            cb();
+          }
+          sync_listeners.length = 0;
+        }
+        break;
+      }
+      case "info_post": {
+        const watcher = room_watchers2.get(msg.room);
+        if (watcher && watcher.handler) {
+          const data2 = decode(watcher.packer, msg.payload);
+          watcher.handler({
+            $: "info_post",
+            room: msg.room,
+            index: msg.index,
+            server_time: msg.server_time,
+            client_time: msg.client_time,
+            name: msg.name,
+            data: data2
+          });
+        }
+        break;
+      }
+    }
+  });
+  return {
+    on_sync: (callback) => {
+      if (is_synced) {
+        callback();
+        return;
+      }
+      sync_listeners.push(callback);
+    },
+    watch: (room2, packer, handler) => {
+      register_handler(room2, packer, handler);
+      send(encode_message({ $: "watch", room: room2 }));
+    },
+    load: (room2, from, packer) => {
+      register_handler(room2, packer);
+      send(encode_message({ $: "load", room: room2, from }));
+    },
+    post: (room2, data, packer) => {
+      const name = gen_name();
+      const payload = encode(packer, data);
+      send(encode_message({ $: "post", room: room2, time: server_time(), name, payload }));
+      return name;
+    },
+    server_time,
+    ping: () => time_sync.last_ping,
+    close: () => ws.close()
+  };
+}
 
 // src/client.ts
-var time_sync = {
-  clock_offset: Infinity,
-  lowest_ping: Infinity,
-  request_sent_at: 0,
-  last_ping: Infinity
-};
-var ws = new WebSocket(WS_URL);
-var room_watchers = new Map;
-var is_open = false;
-var open_listeners = [];
-var is_synced = false;
-var sync_listeners = [];
-function server_time() {
-  if (!isFinite(time_sync.clock_offset)) {
-    throw new Error("server_time() called before initial sync");
+var ROOM_POST_PACKER = { $: "String" };
+var client = create_client(WS_URL);
+var room_watchers = /* @__PURE__ */ new Map();
+function decode_room_post(raw) {
+  if (typeof raw !== "string") {
+    return null;
   }
-  return Math.floor(now() + time_sync.clock_offset);
-}
-function ensure_open() {
-  if (ws.readyState !== WebSocket.OPEN) {
-    throw new Error("WebSocket not open");
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || typeof parsed.$ !== "string") {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
   }
 }
-function send(obj) {
-  ensure_open();
-  ws.send(JSON.stringify(obj));
-}
-function register_handler(room, handler) {
+function emit_if_valid(room2, message) {
+  if (!message || message.$ !== "info_post") {
+    return;
+  }
+  const data = decode_room_post(message.data);
+  if (!data) {
+    return;
+  }
+  const handler = room_watchers.get(room2);
   if (!handler) {
     return;
   }
-  if (room_watchers.has(room)) {
-    throw new Error(`Handler already registered for room: ${room}`);
+  handler({
+    $: "info_post",
+    room: message.room,
+    index: message.index,
+    server_time: message.server_time,
+    client_time: message.client_time,
+    name: message.name,
+    data
+  });
+}
+function post(room2, data) {
+  return client.post(room2, JSON.stringify(data), ROOM_POST_PACKER);
+}
+function load(room2, from = 0, handler) {
+  if (handler) {
+    room_watchers.set(room2, handler);
   }
-  room_watchers.set(room, handler);
+  client.load(room2, from, ROOM_POST_PACKER);
 }
-ws.addEventListener("open", () => {
-  is_open = true;
-  for (const cb of open_listeners) {
-    cb();
+function watch(room2, handler) {
+  if (handler) {
+    room_watchers.set(room2, handler);
   }
-  open_listeners.length = 0;
-  console.log(`[WS] Connected to ${WS_URL}`);
-  time_sync.request_sent_at = now();
-  ws.send(JSON.stringify({ $: "get_time" }));
-  setInterval(() => {
-    time_sync.request_sent_at = now();
-    ws.send(JSON.stringify({ $: "get_time" }));
-  }, 2000);
-});
-ws.addEventListener("message", (event) => {
-  const msg = JSON.parse(event.data);
-  switch (msg.$) {
-    case "info_time": {
-      const t = now();
-      const ping = t - time_sync.request_sent_at;
-      time_sync.last_ping = ping;
-      if (ping < time_sync.lowest_ping) {
-        const local_avg = Math.floor((time_sync.request_sent_at + t) / 2);
-        time_sync.clock_offset = msg.time - local_avg;
-        time_sync.lowest_ping = ping;
-      }
-      if (!is_synced) {
-        is_synced = true;
-        for (const cb of sync_listeners) {
-          cb();
-        }
-        sync_listeners.length = 0;
-      }
-      break;
-    }
-    case "info_post": {
-      const handler = room_watchers.get(msg.room);
-      if (handler) {
-        handler(msg);
-      }
-      break;
-    }
-  }
-});
-function gen_name() {
-  const alphabet = "_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
-  const can_crypto = typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function";
-  const source = can_crypto ? { fillBytes: (bytes) => crypto.getRandomValues(bytes) } : undefined;
-  return random_id(8, alphabet, source);
-}
-function post(room, data) {
-  const name = gen_name();
-  const time = isFinite(time_sync.clock_offset) ? server_time() : now();
-  send({ $: "post", room, time, name, data });
-  return name;
-}
-function load(room, from = 0, handler) {
-  register_handler(room, handler);
-  send({ $: "load", room, from });
-}
-function watch(room, handler) {
-  register_handler(room, handler);
-  send({ $: "watch", room });
+  client.watch(room2, ROOM_POST_PACKER, (message) => {
+    emit_if_valid(room2, message);
+  });
 }
 function on_sync(callback) {
-  if (is_synced) {
-    callback();
-    return;
-  }
-  sync_listeners.push(callback);
+  client.on_sync(callback);
 }
 function on_open(callback) {
-  if (is_open) {
-    callback();
-    return;
-  }
-  open_listeners.push(callback);
+  client.on_sync(callback);
 }
 function ping() {
-  return time_sync.last_ping;
+  return client.ping();
 }
 
 // vibishowdown/index.ts
@@ -216,6 +1035,7 @@ var PASSIVE_LABELS = {
   none: "none",
   leftovers: "Leftovers",
   choice_band: "Choice Band",
+  // Legacy alias for older saved configs.
   regen_5pct: "Leftovers"
 };
 var roster = [
@@ -304,7 +1124,7 @@ var roster_by_id = new Map(roster.map((entry) => [entry.id, entry]));
 var room = prompt("Room name?") || gen_name();
 var player_name = prompt("Your name?") || gen_name();
 var token_key = `vibi_showdown_token:${room}:${player_name}`;
-var stored_token = localStorage.getItem(token_key) || undefined;
+var stored_token = localStorage.getItem(token_key) || void 0;
 var profile_key = `vibi_showdown_profile:${player_name}`;
 var team_key = `vibi_showdown_team:${room}:${player_name}`;
 var status_room = document.getElementById("status-room");
@@ -411,8 +1231,7 @@ function icon_path(id) {
   return `./icons/unit_${id}.png`;
 }
 function monster_label(id, fallback = "mon") {
-  if (!id)
-    return fallback;
+  if (!id) return fallback;
   return roster_by_id.get(id)?.name ?? id;
 }
 function append_log(line) {
@@ -423,13 +1242,11 @@ function append_chat(line) {
 }
 function send_chat_message(message) {
   const trimmed = message.trim();
-  if (!trimmed)
-    return;
+  if (!trimmed) return;
   post(room, { $: "chat", message: trimmed.slice(0, 200), from: player_name });
 }
 function setup_chat_input(input, button) {
-  if (!input || !button)
-    return;
+  if (!input || !button) return;
   input.disabled = false;
   button.disabled = false;
   input.placeholder = "Type message...";
@@ -445,8 +1262,7 @@ function setup_chat_input(input, button) {
   });
 }
 function append_line(container, line) {
-  if (!container)
-    return;
+  if (!container) return;
   const p = document.createElement("p");
   p.textContent = line;
   container.appendChild(p);
@@ -459,15 +1275,14 @@ function render_participants() {
   }
   for (const slot_id of PLAYER_SLOTS) {
     const name = participants.players[slot_id];
-    if (!name)
-      continue;
+    if (!name) continue;
     const item = document.createElement("div");
     item.className = "participant";
     const meta = slot_id === "player1" ? "P1" : "P2";
     item.innerHTML = `<span>${name}</span><span class="participant-meta">${meta}</span>`;
     participants_list.appendChild(item);
   }
-  const spectators = participants.spectators.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const spectators = participants.spectators.slice().sort((a, b) => a.localeCompare(b, void 0, { sensitivity: "base" }));
   for (const name of spectators) {
     const item = document.createElement("div");
     item.className = "participant";
@@ -481,8 +1296,8 @@ function update_deadline() {
     return;
   }
   const remaining = Math.max(0, deadline_at - Date.now());
-  const minutes = Math.floor(remaining / 60000);
-  const seconds = Math.floor(remaining % 60000 / 1000);
+  const minutes = Math.floor(remaining / 6e4);
+  const seconds = Math.floor(remaining % 6e4 / 1e3);
   status_deadline.textContent = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 function show_warning(message) {
@@ -494,8 +1309,7 @@ function clear_warning() {
 function load_json(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
-    if (!raw)
-      return fallback;
+    if (!raw) return fallback;
     return JSON.parse(raw);
   } catch {
     return fallback;
@@ -504,7 +1318,8 @@ function load_json(key, fallback) {
 function save_json(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+  } catch {
+  }
 }
 function load_profile() {
   const parsed = load_json(profile_key, null);
@@ -543,7 +1358,7 @@ function coerce_config(spec, value) {
     moves.push("none");
   }
   const allowed = new Set(spec.possibleMoves);
-  for (let i = 0;i < moves.length; i++) {
+  for (let i = 0; i < moves.length; i++) {
     if (!allowed.has(moves[i])) {
       moves[i] = "none";
     }
@@ -626,7 +1441,7 @@ function render_config() {
     return;
   }
   const config = get_config(active_tab);
-  for (let i = 0;i < 4; i++) {
+  for (let i = 0; i < 4; i++) {
     const label = document.createElement("label");
     label.textContent = `Move ${i + 1}`;
     const select = document.createElement("select");
@@ -677,8 +1492,7 @@ function render_config() {
   passive_select.value = config.passive;
   passive_select.disabled = is_ready && !match_started;
   passive_select.addEventListener("change", () => {
-    if (is_ready && !match_started)
-      return;
+    if (is_ready && !match_started) return;
     config.passive = passive_select.value;
     save_profile();
   });
@@ -699,8 +1513,7 @@ function render_config() {
     input.value = `${config.stats[key]}`;
     input.disabled = is_ready && !match_started;
     input.addEventListener("change", () => {
-      if (is_ready && !match_started)
-        return;
+      if (is_ready && !match_started) return;
       const value = Number(input.value);
       if (!Number.isFinite(value)) {
         return;
@@ -775,8 +1588,7 @@ function render_roster() {
       </div>
     `;
     card.addEventListener("click", () => {
-      if (is_disabled)
-        return;
+      if (is_disabled) return;
       toggle_selection(entry.id);
     });
     list.appendChild(card);
@@ -827,8 +1639,7 @@ function update_action_controls() {
       btn.textContent = `Move ${index + 1}`;
       btn.disabled = true;
     });
-    if (switch_btn)
-      switch_btn.disabled = true;
+    if (switch_btn) switch_btn.disabled = true;
     return;
   }
   const active_id = selected[0];
@@ -900,8 +1711,7 @@ function can_send_intent() {
   return true;
 }
 function send_move_intent(moveIndex) {
-  if (!can_send_intent())
-    return;
+  if (!can_send_intent()) return;
   post(room, { $: "intent", turn: current_turn, intent: { action: "use_move", moveIndex } });
   intent_locked = true;
   update_action_controls();
@@ -913,26 +1723,22 @@ function send_switch_intent(targetIndex) {
     close_switch_modal();
     return;
   }
-  if (!can_send_intent())
-    return;
+  if (!can_send_intent()) return;
   post(room, { $: "intent", turn: current_turn, intent: { action: "switch", targetIndex } });
   intent_locked = true;
   update_action_controls();
   append_log("intent sent");
 }
 function send_surrender() {
-  if (!match_started || is_spectator || !slot)
-    return;
+  if (!match_started || is_spectator || !slot) return;
   post(room, { $: "surrender" });
 }
 function close_switch_modal() {
   switch_modal.classList.remove("open");
 }
 function open_switch_modal(mode = "intent") {
-  if (!latest_state || !slot)
-    return;
-  if (mode === "intent" && !can_send_intent())
-    return;
+  if (!latest_state || !slot) return;
+  if (mode === "intent" && !can_send_intent()) return;
   switch_options.innerHTML = "";
   const player = latest_state.players[slot];
   const active_index = player.activeIndex;
@@ -951,8 +1757,7 @@ function open_switch_modal(mode = "intent") {
       button.textContent = `${entry.mon.name}${is_alive ? "" : " (fainted)"}`;
       button.addEventListener("click", () => {
         if (mode === "intent") {
-          if (!can_send_intent())
-            return;
+          if (!can_send_intent()) return;
           post(room, { $: "intent", turn: current_turn, intent: { action: "switch", targetIndex: entry.index } });
           intent_locked = true;
           update_action_controls();
@@ -1026,14 +1831,12 @@ function update_ready_ui() {
   render_config();
 }
 function update_opponent_ui(opponent_ready2, opponent_name2) {
-  if (!status_opponent)
-    return;
+  if (!status_opponent) return;
   status_opponent.textContent = opponent_ready2 ? "ready" : opponent_name2 ? "waiting" : "offline";
   status_opponent.className = `status-pill ${opponent_ready2 ? "ok" : opponent_name2 ? "warn" : "off"}`;
 }
 function show_match_end(winner) {
-  if (!match_end)
-    return;
+  if (!match_end) return;
   const is_winner = winner && slot === winner;
   match_end_title.textContent = is_winner ? "Victory" : "Defeat";
   if (!winner) {
@@ -1076,15 +1879,14 @@ function log_events(log) {
 }
 function update_panels(state, opts) {
   const viewer_slot = slot ?? (is_spectator ? "player1" : null);
-  if (!viewer_slot)
-    return;
+  if (!viewer_slot) return;
   const me = state.players[viewer_slot];
   const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
   const my_active = me.team[me.activeIndex];
   const opp_active = opp.team[opp.activeIndex];
   player_title.textContent = me.name || player_name;
   if (!opts?.skipMeta?.player) {
-    player_meta.textContent = `Lv ${my_active.level} · HP ${my_active.hp}/${my_active.maxHp}`;
+    player_meta.textContent = `Lv ${my_active.level} \xB7 HP ${my_active.hp}/${my_active.maxHp}`;
   }
   if (!opts?.skipBar?.player) {
     player_hp.style.width = `${Math.max(0, Math.min(1, my_active.hp / my_active.maxHp)) * 100}%`;
@@ -1094,7 +1896,7 @@ function update_panels(state, opts) {
   player_sprite.title = monster_label(my_active.id);
   enemy_title.textContent = opp.name || "Opponent";
   if (!opts?.skipMeta?.enemy) {
-    enemy_meta.textContent = `Lv ${opp_active.level} · HP ${opp_active.hp}/${opp_active.maxHp}`;
+    enemy_meta.textContent = `Lv ${opp_active.level} \xB7 HP ${opp_active.hp}/${opp_active.maxHp}`;
   }
   if (!opts?.skipBar?.enemy) {
     enemy_hp.style.width = `${Math.max(0, Math.min(1, opp_active.hp / opp_active.maxHp)) * 100}%`;
@@ -1120,7 +1922,7 @@ function animate_hp_text(side, level, from, to, maxHp, delay = 180) {
     }
     const t = Math.min(1, (elapsed - delay) / duration);
     const value = Math.round(from + (to - from) * t);
-    target.textContent = `Lv ${level} · HP ${value}/${maxHp}`;
+    target.textContent = `Lv ${level} \xB7 HP ${value}/${maxHp}`;
     if (t < 1) {
       hp_animation[raf_key] = requestAnimationFrame(tick);
     }
@@ -1130,7 +1932,7 @@ function animate_hp_text(side, level, from, to, maxHp, delay = 180) {
 function clear_animation_timers() {
   while (animation_timers.length) {
     const id = animation_timers.pop();
-    if (id !== undefined) {
+    if (id !== void 0) {
       clearTimeout(id);
     }
   }
@@ -1152,23 +1954,20 @@ function build_visual_steps(prev_state, log, viewer_slot) {
   for (const entry of log) {
     if (entry.type === "switch" || entry.type === "forced_switch") {
       const data = entry.data;
-      if (!data || !data.slot || typeof data.to !== "number")
-        continue;
+      if (!data || !data.slot || typeof data.to !== "number") continue;
       temp.players[data.slot].activeIndex = data.to;
       continue;
     }
     if (entry.type === "protect") {
       const data = entry.data;
-      if (!data?.slot)
-        continue;
+      if (!data?.slot) continue;
       const side = side_from_slot(viewer_slot, data.slot);
       steps.push({ kind: "shield_on", side });
       continue;
     }
     if (entry.type === "damage_blocked") {
       const data = entry.data;
-      if (!data?.slot)
-        continue;
+      if (!data?.slot) continue;
       const defenderSide2 = side_from_slot(viewer_slot, data.slot);
       const attackerSide2 = defenderSide2 === "player" ? "enemy" : "player";
       steps.push({ kind: "shield_hit", attackerSide: attackerSide2, defenderSide: defenderSide2 });
@@ -1176,14 +1975,12 @@ function build_visual_steps(prev_state, log, viewer_slot) {
     }
     if (entry.type === "passive_heal") {
       const data = entry.data;
-      if (!data?.slot)
-        continue;
+      if (!data?.slot) continue;
       const side = side_from_slot(viewer_slot, data.slot);
       steps.push({ kind: "heal", side });
       continue;
     }
-    if (entry.type !== "damage" && entry.type !== "recoil")
-      continue;
+    if (entry.type !== "damage" && entry.type !== "recoil") continue;
     const payload = entry.data;
     if (!payload || typeof payload.damage !== "number" || payload.damage <= 0 || !payload.slot) {
       continue;
@@ -1212,7 +2009,7 @@ function animate_hp_bar(bar, from, to) {
   bar.classList.remove("hp-anim");
   bar.style.transition = "none";
   bar.style.width = `${from}%`;
-  bar.offsetWidth;
+  void bar.offsetWidth;
   bar.style.transition = "";
   bar.classList.add("hp-anim");
   bar.style.width = `${to}%`;
@@ -1231,7 +2028,7 @@ function reset_sprite_fx() {
 }
 function trigger_class(el, className, duration) {
   el.classList.remove(className);
-  el.offsetWidth;
+  void el.offsetWidth;
   el.classList.add(className);
   window.setTimeout(() => {
     el.classList.remove(className);
@@ -1242,7 +2039,9 @@ function handle_state(data) {
   clear_animation_timers();
   const viewer_slot = slot ?? (is_spectator ? "player1" : null);
   const steps = prev_state ? build_visual_steps(prev_state, data.log, viewer_slot) : [];
-  const hit_sides = new Set(steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide));
+  const hit_sides = new Set(
+    steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide)
+  );
   latest_state = data.state;
   if (!match_started && data.state.status === "running") {
     match_started = true;
@@ -1319,10 +2118,8 @@ function handle_post(message) {
     case "assign":
       slot = data.slot;
       is_spectator = false;
-      if (status_slot)
-        status_slot.textContent = data.slot;
-      if (status_conn)
-        status_conn.textContent = "synced";
+      if (status_slot) status_slot.textContent = data.slot;
+      if (status_conn) status_conn.textContent = "synced";
       player_meta.textContent = `Slot ${data.slot}`;
       if (data.token) {
         localStorage.setItem(token_key, data.token);
@@ -1402,8 +2199,7 @@ function handle_post(message) {
       return;
     case "spectator":
       is_spectator = true;
-      if (status_slot)
-        status_slot.textContent = "spectator";
+      if (status_slot) status_slot.textContent = "spectator";
       update_ready_ui();
       return;
     case "chat":
@@ -1464,12 +2260,11 @@ slot_bench_b.addEventListener("click", () => {
 player_bench_slots.forEach((slot_el) => {
   slot_el.btn.addEventListener("click", () => {
     const index = Number(slot_el.btn.dataset.index);
-    if (!Number.isFinite(index))
-      return;
+    if (!Number.isFinite(index)) return;
     send_switch_intent(index);
   });
 });
-setInterval(update_deadline, 1000);
+setInterval(update_deadline, 1e3);
 setInterval(() => {
   const rtt = ping();
   if (isFinite(rtt)) {
@@ -1477,7 +2272,7 @@ setInterval(() => {
   } else {
     status_ping.textContent = "--";
   }
-}, 1000);
+}, 1e3);
 load_team_selection();
 render_roster();
 render_tabs();
@@ -1486,14 +2281,12 @@ update_roster_count();
 update_slots();
 update_action_controls();
 on_open(() => {
-  if (status_conn)
-    status_conn.textContent = "connected";
+  if (status_conn) status_conn.textContent = "connected";
   watch(room, handle_post);
   load(room, 0);
   post(room, { $: "join", name: player_name, token: stored_token });
   setup_chat_input(chat_input, chat_send);
 });
 on_sync(() => {
-  if (status_conn)
-    status_conn.textContent = "synced";
+  if (status_conn) status_conn.textContent = "synced";
 });
