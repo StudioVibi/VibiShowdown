@@ -361,7 +361,7 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Agility: pending (will apply only if HP does not change this turn)",
+      summary: "Agility: pending (applies at end of turn)",
       data: { move: spec.id, slot: player_slot, target: attacker.id }
     });
     return;
@@ -503,7 +503,7 @@ function apply_move(
       : "";
 
   if (spec.id === "return") {
-    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def*100)) = round(${effective_attack} * ${multiplier100} / (${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
+    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def)) = round(${effective_attack} * ${multiplier100} / (${effective_defense})) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }${choice_band_detail}`;
     log.push({
@@ -514,7 +514,7 @@ function apply_move(
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "double_edge") {
-    const detail = `Double-Edge: dmg = round(atk*120/(def*100)) = round(${effective_attack}*120/(${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
+    const detail = `Double-Edge: dmg = round(atk*120/(def)) = round(${effective_attack}*120/(${effective_defense})) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
     log.push({
@@ -536,7 +536,7 @@ function apply_move(
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "quick_attack") {
-    const detail = `Quick Attack: dmg = round(atk*66/(def*100)) = round(${effective_attack}*66/(${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${
+    const detail = `Quick Attack: dmg = round(atk*66/(def)) = round(${effective_attack}*66/(${effective_defense})) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }; speed check ignored${choice_band_detail}`;
     log.push({
@@ -568,16 +568,6 @@ function resolve_agility(
         turn: state.turn,
         phase: "attack_01",
         summary: "Agility failed: user fainted",
-        data: { move: "agility", slot: pending.slot, target: monster.id }
-      });
-      continue;
-    }
-    if (hp_changed.has(monster)) {
-      log.push({
-        type: "move_detail",
-        turn: state.turn,
-        phase: "attack_01",
-        summary: "Agility failed: HP changed this turn",
         data: { move: "agility", slot: pending.slot, target: monster.id }
       });
       continue;

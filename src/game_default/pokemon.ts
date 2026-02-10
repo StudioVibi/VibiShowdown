@@ -13,83 +13,83 @@ function all_passive_options(): string[] {
 export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
   {
     id: "babydragon",
-    name: "Baby Dragon TR",
-    role: "Return Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    name: "Baby Dragon",
+    role: "Snorlax",
+    stats: { level: 7, maxHp: 160, attack: 110, defense: 65, speed: 30 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "croni",
-    name: "Croni DR",
-    role: "Return Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    name: "Croni",
+    role: "Ninjask",
+    stats: { level: 7, maxHp: 61, attack: 90, defense: 45, speed: 160 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "harpy",
-    name: "Harpy TD",
-    role: "Double-Edge Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    name: "Harpy",
+    role: "Absol",
+    stats: { level: 7, maxHp: 65, attack: 130, defense: 60, speed: 75 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["double_edge", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "hoof",
-    name: "Hoof DD",
-    role: "Double-Edge Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    name: "Hoof",
+    role: "Chansey",
+    stats: { level: 7, maxHp: 250, attack: 5, defense: 5, speed: 50 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "knight",
-    name: "Knight TR",
-    role: "Return Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    name: "Knight",
+    role: "Metagross",
+    stats: { level: 7, maxHp: 80, attack: 135, defense: 130, speed: 70 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "miren",
-    name: "Miren DS",
-    role: "Seismic Toss Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    name: "Miren",
+    role: "Celebi",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 100, speed: 100 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "panda",
-    name: "Panda TS",
-    role: "Seismic Toss Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    name: "Panda",
+    role: "Cloyster",
+    stats: { level: 7, maxHp: 50, attack: 95, defense: 180, speed: 70 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["seismic_toss", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "valkyria",
-    name: "Valkyria DR",
-    role: "Return Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    name: "Valkyria",
+    role: "Aerodactyl",
+    stats: { level: 7, maxHp: 80, attack: 105, defense: 65, speed: 130 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   }
 ];
 
