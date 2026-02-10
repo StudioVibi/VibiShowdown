@@ -2,12 +2,13 @@
 var OFFICIAL_VIBINET_WSS = "wss://net.studiovibi.com";
 var WS_URL = OFFICIAL_VIBINET_WSS;
 
-// ../VibiNet/src/packer.ts
+// src/vibinet/packer.ts
 var MAX_SAFE_BITS = 53;
-var text_decoder = new TextDecoder();
-var union_cache = /* @__PURE__ */ new WeakMap();
-var struct_cache = /* @__PURE__ */ new WeakMap();
-var BitWriter = class {
+var text_decoder = new TextDecoder;
+var union_cache = new WeakMap;
+var struct_cache = new WeakMap;
+
+class BitWriter {
   buf;
   bit_pos;
   constructor(buf) {
@@ -23,14 +24,15 @@ var BitWriter = class {
     this.bit_pos++;
   }
   write_bitsUnsigned(value, bits) {
-    if (bits === 0) return;
+    if (bits === 0)
+      return;
     if (typeof value === "number") {
       if (bits <= 32) {
         const aligned = (this.bit_pos & 7) === 0 && (bits & 7) === 0;
         if (aligned) {
           let v2 = value >>> 0;
           let byte_index = this.bit_pos >>> 3;
-          for (let i = 0; i < bits; i += 8) {
+          for (let i = 0;i < bits; i += 8) {
             this.buf[byte_index++] = v2 & 255;
             v2 >>>= 8;
           }
@@ -38,7 +40,7 @@ var BitWriter = class {
           return;
         }
         let v = value >>> 0;
-        for (let i = 0; i < bits; i++) {
+        for (let i = 0;i < bits; i++) {
           this.write_bit(v & 1);
           v >>>= 1;
         }
@@ -50,12 +52,13 @@ var BitWriter = class {
     this.write_bitsBigint(value, bits);
   }
   write_bitsBigint(value, bits) {
-    if (bits === 0) return;
+    if (bits === 0)
+      return;
     const aligned = (this.bit_pos & 7) === 0 && (bits & 7) === 0;
     if (aligned) {
       let v2 = value;
       let byte_index = this.bit_pos >>> 3;
-      for (let i = 0; i < bits; i += 8) {
+      for (let i = 0;i < bits; i += 8) {
         this.buf[byte_index++] = Number(v2 & 0xffn);
         v2 >>= 8n;
       }
@@ -63,13 +66,14 @@ var BitWriter = class {
       return;
     }
     let v = value;
-    for (let i = 0; i < bits; i++) {
+    for (let i = 0;i < bits; i++) {
       this.write_bit((v & 1n) === 0n ? 0 : 1);
       v >>= 1n;
     }
   }
-};
-var BitReader = class {
+}
+
+class BitReader {
   buf;
   bit_pos;
   constructor(buf) {
@@ -84,14 +88,15 @@ var BitReader = class {
     return bit;
   }
   read_bitsUnsigned(bits) {
-    if (bits === 0) return 0;
+    if (bits === 0)
+      return 0;
     if (bits <= 32) {
       const aligned = (this.bit_pos & 7) === 0 && (bits & 7) === 0;
       if (aligned) {
         let v2 = 0;
         let shift = 0;
         let byte_index = this.bit_pos >>> 3;
-        for (let i = 0; i < bits; i += 8) {
+        for (let i = 0;i < bits; i += 8) {
           v2 |= this.buf[byte_index++] << shift;
           shift += 8;
         }
@@ -99,7 +104,7 @@ var BitReader = class {
         return v2 >>> 0;
       }
       let v = 0;
-      for (let i = 0; i < bits; i++) {
+      for (let i = 0;i < bits; i++) {
         if (this.read_bit()) {
           v |= 1 << i;
         }
@@ -109,7 +114,7 @@ var BitReader = class {
     if (bits <= MAX_SAFE_BITS) {
       let v = 0;
       let pow = 1;
-      for (let i = 0; i < bits; i++) {
+      for (let i = 0;i < bits; i++) {
         if (this.read_bit()) {
           v += pow;
         }
@@ -120,13 +125,14 @@ var BitReader = class {
     return this.read_bitsBigint(bits);
   }
   read_bitsBigint(bits) {
-    if (bits === 0) return 0n;
+    if (bits === 0)
+      return 0n;
     const aligned = (this.bit_pos & 7) === 0 && (bits & 7) === 0;
     if (aligned) {
       let v2 = 0n;
       let shift = 0n;
       let byte_index = this.bit_pos >>> 3;
-      for (let i = 0; i < bits; i += 8) {
+      for (let i = 0;i < bits; i += 8) {
         v2 |= BigInt(this.buf[byte_index++]) << shift;
         shift += 8n;
       }
@@ -135,7 +141,7 @@ var BitReader = class {
     }
     let v = 0n;
     let pow = 1n;
-    for (let i = 0; i < bits; i++) {
+    for (let i = 0;i < bits; i++) {
       if (this.read_bit()) {
         v += pow;
       }
@@ -143,7 +149,7 @@ var BitReader = class {
     }
     return v;
   }
-};
+}
 function assert_integer(value, name) {
   if (!Number.isInteger(value)) {
     throw new TypeError(`${name} must be an integer`);
@@ -151,7 +157,8 @@ function assert_integer(value, name) {
 }
 function assert_size(size) {
   assert_integer(size, "size");
-  if (size < 0) throw new RangeError("size must be >= 0");
+  if (size < 0)
+    throw new RangeError("size must be >= 0");
 }
 function assert_vector_size(expected, actual) {
   if (actual !== expected) {
@@ -166,21 +173,23 @@ function size_bits(type, val) {
       return type.size;
     case "Nat": {
       if (typeof val === "bigint") {
-        if (val < 0n) throw new RangeError("Nat must be >= 0");
+        if (val < 0n)
+          throw new RangeError("Nat must be >= 0");
         if (val > BigInt(Number.MAX_SAFE_INTEGER)) {
           throw new RangeError("Nat too large to size");
         }
         return Number(val) + 1;
       }
       assert_integer(val, "Nat");
-      if (val < 0) throw new RangeError("Nat must be >= 0");
+      if (val < 0)
+        throw new RangeError("Nat must be >= 0");
       return val + 1;
     }
     case "Tuple": {
       const fields = type.fields;
       const arr = as_array(val, "Tuple");
       let bits = 0;
-      for (let i = 0; i < fields.length; i++) {
+      for (let i = 0;i < fields.length; i++) {
         bits += size_bits(fields[i], arr[i]);
       }
       return bits;
@@ -190,7 +199,7 @@ function size_bits(type, val) {
       const arr = as_array(val, "Vector");
       assert_vector_size(type.size, arr.length);
       let bits = 0;
-      for (let i = 0; i < type.size; i++) {
+      for (let i = 0;i < type.size; i++) {
         bits += size_bits(type.type, arr[i]);
       }
       return bits;
@@ -198,7 +207,7 @@ function size_bits(type, val) {
     case "Struct": {
       let bits = 0;
       const keys = struct_keys(type.fields);
-      for (let i = 0; i < keys.length; i++) {
+      for (let i = 0;i < keys.length; i++) {
         const key = keys[i];
         const v = get_struct_field(val, key);
         bits += size_bits(type.fields[key], v);
@@ -243,39 +252,47 @@ function encode_into(writer, type, val) {
     case "UInt": {
       assert_size(type.size);
       if (type.size === 0) {
-        if (val === 0 || val === 0n) return;
+        if (val === 0 || val === 0n)
+          return;
         throw new RangeError("UInt out of range");
       }
       if (typeof val === "bigint") {
-        if (val < 0n) throw new RangeError("UInt must be >= 0");
+        if (val < 0n)
+          throw new RangeError("UInt must be >= 0");
         const max2 = 1n << BigInt(type.size);
-        if (val >= max2) throw new RangeError("UInt out of range");
+        if (val >= max2)
+          throw new RangeError("UInt out of range");
         writer.write_bitsUnsigned(val, type.size);
         return;
       }
       assert_integer(val, "UInt");
-      if (val < 0) throw new RangeError("UInt must be >= 0");
+      if (val < 0)
+        throw new RangeError("UInt must be >= 0");
       if (type.size > MAX_SAFE_BITS) {
         throw new RangeError("UInt too large for number; use bigint");
       }
       const max = 2 ** type.size;
-      if (val >= max) throw new RangeError("UInt out of range");
+      if (val >= max)
+        throw new RangeError("UInt out of range");
       writer.write_bitsUnsigned(val, type.size);
       return;
     }
     case "Int": {
       assert_size(type.size);
       if (type.size === 0) {
-        if (val === 0 || val === 0n) return;
+        if (val === 0 || val === 0n)
+          return;
         throw new RangeError("Int out of range");
       }
       if (typeof val === "bigint") {
         const size = BigInt(type.size);
         const min2 = -(1n << size - 1n);
         const max2 = (1n << size - 1n) - 1n;
-        if (val < min2 || val > max2) throw new RangeError("Int out of range");
+        if (val < min2 || val > max2)
+          throw new RangeError("Int out of range");
         let unsigned2 = val;
-        if (val < 0n) unsigned2 = (1n << size) + val;
+        if (val < 0n)
+          unsigned2 = (1n << size) + val;
         writer.write_bitsUnsigned(unsigned2, type.size);
         return;
       }
@@ -285,15 +302,18 @@ function encode_into(writer, type, val) {
       }
       const min = -(2 ** (type.size - 1));
       const max = 2 ** (type.size - 1) - 1;
-      if (val < min || val > max) throw new RangeError("Int out of range");
+      if (val < min || val > max)
+        throw new RangeError("Int out of range");
       let unsigned = val;
-      if (val < 0) unsigned = 2 ** type.size + val;
+      if (val < 0)
+        unsigned = 2 ** type.size + val;
       writer.write_bitsUnsigned(unsigned, type.size);
       return;
     }
     case "Nat": {
       if (typeof val === "bigint") {
-        if (val < 0n) throw new RangeError("Nat must be >= 0");
+        if (val < 0n)
+          throw new RangeError("Nat must be >= 0");
         let n = val;
         while (n > 0n) {
           writer.write_bit(1);
@@ -303,8 +323,9 @@ function encode_into(writer, type, val) {
         return;
       }
       assert_integer(val, "Nat");
-      if (val < 0) throw new RangeError("Nat must be >= 0");
-      for (let i = 0; i < val; i++) {
+      if (val < 0)
+        throw new RangeError("Nat must be >= 0");
+      for (let i = 0;i < val; i++) {
         writer.write_bit(1);
       }
       writer.write_bit(0);
@@ -313,7 +334,7 @@ function encode_into(writer, type, val) {
     case "Tuple": {
       const fields = type.fields;
       const arr = as_array(val, "Tuple");
-      for (let i = 0; i < fields.length; i++) {
+      for (let i = 0;i < fields.length; i++) {
         encode_into(writer, fields[i], arr[i]);
       }
       return;
@@ -322,14 +343,14 @@ function encode_into(writer, type, val) {
       assert_size(type.size);
       const arr = as_array(val, "Vector");
       assert_vector_size(type.size, arr.length);
-      for (let i = 0; i < type.size; i++) {
+      for (let i = 0;i < type.size; i++) {
         encode_into(writer, type.type, arr[i]);
       }
       return;
     }
     case "Struct": {
       const keys = struct_keys(type.fields);
-      for (let i = 0; i < keys.length; i++) {
+      for (let i = 0;i < keys.length; i++) {
         const key = keys[i];
         encode_into(writer, type.fields[key], get_struct_field(val, key));
       }
@@ -356,7 +377,7 @@ function encode_into(writer, type, val) {
       const info = union_info(type);
       const tag = get_union_tag(val);
       const index = info.index_by_tag.get(tag);
-      if (index === void 0) {
+      if (index === undefined) {
         throw new RangeError(`Unknown union variant: ${tag}`);
       }
       if (info.tag_bits > 0) {
@@ -381,7 +402,8 @@ function decode_from(reader, type) {
     }
     case "Int": {
       assert_size(type.size);
-      if (type.size === 0) return 0;
+      if (type.size === 0)
+        return 0;
       const unsigned = reader.read_bitsUnsigned(type.size);
       if (typeof unsigned === "bigint") {
         const sign_bit2 = 1n << BigInt(type.size - 1);
@@ -412,14 +434,14 @@ function decode_from(reader, type) {
     }
     case "Tuple": {
       const out = new Array(type.fields.length);
-      for (let i = 0; i < type.fields.length; i++) {
+      for (let i = 0;i < type.fields.length; i++) {
         out[i] = decode_from(reader, type.fields[i]);
       }
       return out;
     }
     case "Vector": {
       const out = new Array(type.size);
-      for (let i = 0; i < type.size; i++) {
+      for (let i = 0;i < type.size; i++) {
         out[i] = decode_from(reader, type.type);
       }
       return out;
@@ -427,7 +449,7 @@ function decode_from(reader, type) {
     case "Struct": {
       const out = {};
       const keys = struct_keys(type.fields);
-      for (let i = 0; i < keys.length; i++) {
+      for (let i = 0;i < keys.length; i++) {
         const key = keys[i];
         out[key] = decode_from(reader, type.fields[key]);
       }
@@ -441,7 +463,7 @@ function decode_from(reader, type) {
       return out;
     }
     case "Map": {
-      const out = /* @__PURE__ */ new Map();
+      const out = new Map;
       while (reader.read_bit()) {
         const key = decode_from(reader, type.key);
         const value = decode_from(reader, type.value);
@@ -497,13 +519,14 @@ function get_struct_field(val, key) {
 }
 function union_info(type) {
   const cached = union_cache.get(type);
-  if (cached) return cached;
+  if (cached)
+    return cached;
   const keys = Object.keys(type.variants).sort();
   if (keys.length === 0) {
     throw new RangeError("Union must have at least one variant");
   }
-  const index_by_tag = /* @__PURE__ */ new Map();
-  for (let i = 0; i < keys.length; i++) {
+  const index_by_tag = new Map;
+  for (let i = 0;i < keys.length; i++) {
     index_by_tag.set(keys[i], i);
   }
   const tag_bits = keys.length <= 1 ? 0 : Math.ceil(Math.log2(keys.length));
@@ -513,7 +536,8 @@ function union_info(type) {
 }
 function struct_keys(fields) {
   const cached = struct_cache.get(fields);
-  if (cached) return cached;
+  if (cached)
+    return cached;
   const keys = Object.keys(fields);
   struct_cache.set(fields, keys);
   return keys;
@@ -538,12 +562,13 @@ function for_each_list(val, fn) {
   if (!Array.isArray(val)) {
     throw new TypeError("List value must be an Array");
   }
-  for (let i = 0; i < val.length; i++) {
+  for (let i = 0;i < val.length; i++) {
     fn(val[i]);
   }
 }
 function for_each_map(val, fn) {
-  if (val == null) return;
+  if (val == null)
+    return;
   if (val instanceof Map) {
     for (const [k, v] of val) {
       fn(k, v);
@@ -563,7 +588,7 @@ function utf8_byte_length(value) {
     throw new TypeError("String value must be a string");
   }
   let len = 0;
-  for (let i = 0; i < value.length; i++) {
+  for (let i = 0;i < value.length; i++) {
     const code = value.charCodeAt(i);
     if (code < 128) {
       len += 1;
@@ -589,7 +614,7 @@ function write_utf8_list(writer, value) {
   if (typeof value !== "string") {
     throw new TypeError("String value must be a string");
   }
-  for (let i = 0; i < value.length; i++) {
+  for (let i = 0;i < value.length; i++) {
     let code = value.charCodeAt(i);
     if (code < 128) {
       writer.write_bit(1);
@@ -657,7 +682,7 @@ function decode(type, buf) {
   return decode_from(reader, type);
 }
 
-// ../VibiNet/src/protocol.ts
+// src/vibinet/protocol.ts
 var TIME_BITS = 53;
 var BYTE_LIST_PACKED = { $: "List", type: { $: "UInt", size: 8 } };
 var MESSAGE_PACKED = {
@@ -713,14 +738,14 @@ var MESSAGE_PACKED = {
 };
 function bytes_to_list(bytes) {
   const out = new Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) {
+  for (let i = 0;i < bytes.length; i++) {
     out[i] = bytes[i];
   }
   return out;
 }
 function list_to_bytes(list) {
   const out = new Uint8Array(list.length);
-  for (let i = 0; i < list.length; i++) {
+  for (let i = 0;i < list.length; i++) {
     out[i] = list[i] & 255;
   }
   return out;
@@ -781,7 +806,7 @@ function decode_message(buf) {
   return from_wire_message(message);
 }
 
-// ../VibiNet/src/server_url.ts
+// src/vibinet/server_url.ts
 var OFFICIAL_SERVER_URL = "wss://net.studiovibi.com";
 function normalize_ws_url(raw_url) {
   let ws_url = raw_url;
@@ -798,15 +823,13 @@ function normalize_ws_url(raw_url) {
   }
   if (typeof window !== "undefined" && window.location.protocol === "https:" && ws_url.startsWith("ws://")) {
     const upgraded = `wss://${ws_url.slice("ws://".length)}`;
-    console.warn(
-      `[VibiNet] Upgrading insecure WebSocket URL "${ws_url}" to "${upgraded}" because the page is HTTPS.`
-    );
+    console.warn(`[VibiNet] Upgrading insecure WebSocket URL "${ws_url}" to "${upgraded}" because the page is HTTPS.`);
     return upgraded;
   }
   return ws_url;
 }
 
-// ../VibiNet/src/client.ts
+// src/vibinet/client.ts
 function now() {
   return Math.floor(Date.now());
 }
@@ -820,12 +843,12 @@ function gen_name() {
   if (can_crypto) {
     crypto.getRandomValues(bytes);
   } else {
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0;i < 8; i++) {
       bytes[i] = Math.floor(Math.random() * 256);
     }
   }
   let out = "";
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0;i < 8; i++) {
     out += alphabet[bytes[i] % 64];
   }
   return out;
@@ -837,7 +860,7 @@ function create_client(server) {
     request_sent_at: 0,
     last_ping: Infinity
   };
-  const room_watchers2 = /* @__PURE__ */ new Map();
+  const room_watchers = new Map;
   let is_synced = false;
   const sync_listeners = [];
   const ws_url = normalize_ws_url(server ?? default_ws_url());
@@ -858,18 +881,18 @@ function create_client(server) {
     ensure_open();
     ws.send(buf);
   }
-  function register_handler(room2, packer, handler) {
-    const existing = room_watchers2.get(room2);
+  function register_handler(room, packer, handler) {
+    const existing = room_watchers.get(room);
     if (existing) {
       if (existing.packer !== packer) {
-        throw new Error(`Packed schema already registered for room: ${room2}`);
+        throw new Error(`Packed schema already registered for room: ${room}`);
       }
       if (handler) {
         existing.handler = handler;
       }
       return;
     }
-    room_watchers2.set(room2, { handler, packer });
+    room_watchers.set(room, { handler, packer });
   }
   ws.addEventListener("open", () => {
     console.log("[WS] Connected");
@@ -878,7 +901,7 @@ function create_client(server) {
     setInterval(() => {
       time_sync.request_sent_at = now();
       send(encode_message({ $: "get_time" }));
-    }, 2e3);
+    }, 2000);
   });
   ws.addEventListener("message", (event) => {
     const data = event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : new Uint8Array(event.data);
@@ -886,12 +909,12 @@ function create_client(server) {
     switch (msg.$) {
       case "info_time": {
         const t = now();
-        const ping2 = t - time_sync.request_sent_at;
-        time_sync.last_ping = ping2;
-        if (ping2 < time_sync.lowest_ping) {
+        const ping = t - time_sync.request_sent_at;
+        time_sync.last_ping = ping;
+        if (ping < time_sync.lowest_ping) {
           const local_avg = Math.floor((time_sync.request_sent_at + t) / 2);
           time_sync.clock_offset = msg.time - local_avg;
-          time_sync.lowest_ping = ping2;
+          time_sync.lowest_ping = ping;
         }
         if (!is_synced) {
           is_synced = true;
@@ -903,7 +926,7 @@ function create_client(server) {
         break;
       }
       case "info_post": {
-        const watcher = room_watchers2.get(msg.room);
+        const watcher = room_watchers.get(msg.room);
         if (watcher && watcher.handler) {
           const data2 = decode(watcher.packer, msg.payload);
           watcher.handler({
@@ -928,18 +951,18 @@ function create_client(server) {
       }
       sync_listeners.push(callback);
     },
-    watch: (room2, packer, handler) => {
-      register_handler(room2, packer, handler);
-      send(encode_message({ $: "watch", room: room2 }));
+    watch: (room, packer, handler) => {
+      register_handler(room, packer, handler);
+      send(encode_message({ $: "watch", room }));
     },
-    load: (room2, from, packer) => {
-      register_handler(room2, packer);
-      send(encode_message({ $: "load", room: room2, from }));
+    load: (room, from, packer) => {
+      register_handler(room, packer);
+      send(encode_message({ $: "load", room, from }));
     },
-    post: (room2, data, packer) => {
+    post: (room, data, packer) => {
       const name = gen_name();
       const payload = encode(packer, data);
-      send(encode_message({ $: "post", room: room2, time: server_time(), name, payload }));
+      send(encode_message({ $: "post", room, time: server_time(), name, payload }));
       return name;
     },
     server_time,
@@ -951,7 +974,7 @@ function create_client(server) {
 // src/client.ts
 var ROOM_POST_PACKER = { $: "String" };
 var client = create_client(WS_URL);
-var room_watchers = /* @__PURE__ */ new Map();
+var room_watchers = new Map;
 function decode_room_post(raw) {
   if (typeof raw !== "string") {
     return null;
@@ -966,7 +989,7 @@ function decode_room_post(raw) {
     return null;
   }
 }
-function emit_if_valid(room2, message) {
+function emit_if_valid(room, message) {
   if (!message || message.$ !== "info_post") {
     return;
   }
@@ -974,7 +997,7 @@ function emit_if_valid(room2, message) {
   if (!data) {
     return;
   }
-  const handler = room_watchers.get(room2);
+  const handler = room_watchers.get(room);
   if (!handler) {
     return;
   }
@@ -988,21 +1011,21 @@ function emit_if_valid(room2, message) {
     data
   });
 }
-function post(room2, data) {
-  return client.post(room2, JSON.stringify(data), ROOM_POST_PACKER);
+function post(room, data) {
+  return client.post(room, JSON.stringify(data), ROOM_POST_PACKER);
 }
-function load(room2, from = 0, handler) {
+function load(room, from = 0, handler) {
   if (handler) {
-    room_watchers.set(room2, handler);
+    room_watchers.set(room, handler);
   }
-  client.load(room2, from, ROOM_POST_PACKER);
+  client.load(room, from, ROOM_POST_PACKER);
 }
-function watch(room2, handler) {
+function watch(room, handler) {
   if (handler) {
-    room_watchers.set(room2, handler);
+    room_watchers.set(room, handler);
   }
-  client.watch(room2, ROOM_POST_PACKER, (message) => {
-    emit_if_valid(room2, message);
+  client.watch(room, ROOM_POST_PACKER, (message) => {
+    emit_if_valid(room, message);
   });
 }
 function on_sync(callback) {
@@ -1035,7 +1058,6 @@ var PASSIVE_LABELS = {
   none: "none",
   leftovers: "Leftovers",
   choice_band: "Choice Band",
-  // Legacy alias for older saved configs.
   regen_5pct: "Leftovers"
 };
 var roster = [
@@ -1124,7 +1146,7 @@ var roster_by_id = new Map(roster.map((entry) => [entry.id, entry]));
 var room = prompt("Room name?") || gen_name();
 var player_name = prompt("Your name?") || gen_name();
 var token_key = `vibi_showdown_token:${room}:${player_name}`;
-var stored_token = localStorage.getItem(token_key) || void 0;
+var stored_token = localStorage.getItem(token_key) || undefined;
 var profile_key = `vibi_showdown_profile:${player_name}`;
 var team_key = `vibi_showdown_team:${room}:${player_name}`;
 var status_room = document.getElementById("status-room");
@@ -1136,8 +1158,8 @@ var status_turn = document.getElementById("status-turn");
 var status_deadline = document.getElementById("status-deadline");
 var status_ready = document.getElementById("status-ready");
 var status_opponent = document.getElementById("status-opponent");
-var log_list = document.getElementById("log-list");
 var chat_messages = document.getElementById("chat-messages");
+var log_list = document.getElementById("log-list") ?? chat_messages;
 var chat_input = document.getElementById("chat-input");
 var chat_send = document.getElementById("chat-send");
 var participants_list = document.getElementById("participants-list");
@@ -1230,8 +1252,41 @@ var active_tab = null;
 function icon_path(id) {
   return `./icons/unit_${id}.png`;
 }
+function ensure_participants_state() {
+  if (!participants) {
+    participants = {
+      players: { player1: null, player2: null },
+      spectators: []
+    };
+  }
+  return participants;
+}
+function add_spectator(name) {
+  if (!name)
+    return;
+  const state = ensure_participants_state();
+  if (state.players.player1 === name || state.players.player2 === name) {
+    return;
+  }
+  if (!state.spectators.includes(name)) {
+    state.spectators.push(name);
+  }
+}
+function set_player_name(slot_id, name) {
+  const state = ensure_participants_state();
+  state.players[slot_id] = name;
+  state.spectators = state.spectators.filter((value) => value !== name);
+}
+function ensure_local_participant_visible() {
+  const state = ensure_participants_state();
+  const in_player_slot = state.players.player1 === player_name || state.players.player2 === player_name;
+  if (!in_player_slot && !state.spectators.includes(player_name)) {
+    state.spectators.push(player_name);
+  }
+}
 function monster_label(id, fallback = "mon") {
-  if (!id) return fallback;
+  if (!id)
+    return fallback;
   return roster_by_id.get(id)?.name ?? id;
 }
 function append_log(line) {
@@ -1242,11 +1297,13 @@ function append_chat(line) {
 }
 function send_chat_message(message) {
   const trimmed = message.trim();
-  if (!trimmed) return;
+  if (!trimmed)
+    return;
   post(room, { $: "chat", message: trimmed.slice(0, 200), from: player_name });
 }
 function setup_chat_input(input, button) {
-  if (!input || !button) return;
+  if (!input || !button)
+    return;
   input.disabled = false;
   button.disabled = false;
   input.placeholder = "Type message...";
@@ -1262,27 +1319,28 @@ function setup_chat_input(input, button) {
   });
 }
 function append_line(container, line) {
-  if (!container) return;
+  if (!container)
+    return;
   const p = document.createElement("p");
   p.textContent = line;
   container.appendChild(p);
   container.scrollTop = container.scrollHeight;
 }
 function render_participants() {
+  ensure_local_participant_visible();
   participants_list.innerHTML = "";
-  if (!participants) {
-    return;
-  }
+  const state = ensure_participants_state();
   for (const slot_id of PLAYER_SLOTS) {
-    const name = participants.players[slot_id];
-    if (!name) continue;
+    const name = state.players[slot_id];
+    if (!name)
+      continue;
     const item = document.createElement("div");
     item.className = "participant";
     const meta = slot_id === "player1" ? "P1" : "P2";
     item.innerHTML = `<span>${name}</span><span class="participant-meta">${meta}</span>`;
     participants_list.appendChild(item);
   }
-  const spectators = participants.spectators.slice().sort((a, b) => a.localeCompare(b, void 0, { sensitivity: "base" }));
+  const spectators = state.spectators.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   for (const name of spectators) {
     const item = document.createElement("div");
     item.className = "participant";
@@ -1296,8 +1354,8 @@ function update_deadline() {
     return;
   }
   const remaining = Math.max(0, deadline_at - Date.now());
-  const minutes = Math.floor(remaining / 6e4);
-  const seconds = Math.floor(remaining % 6e4 / 1e3);
+  const minutes = Math.floor(remaining / 60000);
+  const seconds = Math.floor(remaining % 60000 / 1000);
   status_deadline.textContent = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 function show_warning(message) {
@@ -1309,7 +1367,8 @@ function clear_warning() {
 function load_json(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
+    if (!raw)
+      return fallback;
     return JSON.parse(raw);
   } catch {
     return fallback;
@@ -1318,8 +1377,7 @@ function load_json(key, fallback) {
 function save_json(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-  }
+  } catch {}
 }
 function load_profile() {
   const parsed = load_json(profile_key, null);
@@ -1358,7 +1416,7 @@ function coerce_config(spec, value) {
     moves.push("none");
   }
   const allowed = new Set(spec.possibleMoves);
-  for (let i = 0; i < moves.length; i++) {
+  for (let i = 0;i < moves.length; i++) {
     if (!allowed.has(moves[i])) {
       moves[i] = "none";
     }
@@ -1441,7 +1499,7 @@ function render_config() {
     return;
   }
   const config = get_config(active_tab);
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0;i < 4; i++) {
     const label = document.createElement("label");
     label.textContent = `Move ${i + 1}`;
     const select = document.createElement("select");
@@ -1492,7 +1550,8 @@ function render_config() {
   passive_select.value = config.passive;
   passive_select.disabled = is_ready && !match_started;
   passive_select.addEventListener("change", () => {
-    if (is_ready && !match_started) return;
+    if (is_ready && !match_started)
+      return;
     config.passive = passive_select.value;
     save_profile();
   });
@@ -1513,7 +1572,8 @@ function render_config() {
     input.value = `${config.stats[key]}`;
     input.disabled = is_ready && !match_started;
     input.addEventListener("change", () => {
-      if (is_ready && !match_started) return;
+      if (is_ready && !match_started)
+        return;
       const value = Number(input.value);
       if (!Number.isFinite(value)) {
         return;
@@ -1588,7 +1648,8 @@ function render_roster() {
       </div>
     `;
     card.addEventListener("click", () => {
-      if (is_disabled) return;
+      if (is_disabled)
+        return;
       toggle_selection(entry.id);
     });
     list.appendChild(card);
@@ -1639,7 +1700,8 @@ function update_action_controls() {
       btn.textContent = `Move ${index + 1}`;
       btn.disabled = true;
     });
-    if (switch_btn) switch_btn.disabled = true;
+    if (switch_btn)
+      switch_btn.disabled = true;
     return;
   }
   const active_id = selected[0];
@@ -1711,7 +1773,8 @@ function can_send_intent() {
   return true;
 }
 function send_move_intent(moveIndex) {
-  if (!can_send_intent()) return;
+  if (!can_send_intent())
+    return;
   post(room, { $: "intent", turn: current_turn, intent: { action: "use_move", moveIndex } });
   intent_locked = true;
   update_action_controls();
@@ -1723,22 +1786,26 @@ function send_switch_intent(targetIndex) {
     close_switch_modal();
     return;
   }
-  if (!can_send_intent()) return;
+  if (!can_send_intent())
+    return;
   post(room, { $: "intent", turn: current_turn, intent: { action: "switch", targetIndex } });
   intent_locked = true;
   update_action_controls();
   append_log("intent sent");
 }
 function send_surrender() {
-  if (!match_started || is_spectator || !slot) return;
+  if (!match_started || is_spectator || !slot)
+    return;
   post(room, { $: "surrender" });
 }
 function close_switch_modal() {
   switch_modal.classList.remove("open");
 }
 function open_switch_modal(mode = "intent") {
-  if (!latest_state || !slot) return;
-  if (mode === "intent" && !can_send_intent()) return;
+  if (!latest_state || !slot)
+    return;
+  if (mode === "intent" && !can_send_intent())
+    return;
   switch_options.innerHTML = "";
   const player = latest_state.players[slot];
   const active_index = player.activeIndex;
@@ -1757,7 +1824,8 @@ function open_switch_modal(mode = "intent") {
       button.textContent = `${entry.mon.name}${is_alive ? "" : " (fainted)"}`;
       button.addEventListener("click", () => {
         if (mode === "intent") {
-          if (!can_send_intent()) return;
+          if (!can_send_intent())
+            return;
           post(room, { $: "intent", turn: current_turn, intent: { action: "switch", targetIndex: entry.index } });
           intent_locked = true;
           update_action_controls();
@@ -1831,12 +1899,14 @@ function update_ready_ui() {
   render_config();
 }
 function update_opponent_ui(opponent_ready2, opponent_name2) {
-  if (!status_opponent) return;
+  if (!status_opponent)
+    return;
   status_opponent.textContent = opponent_ready2 ? "ready" : opponent_name2 ? "waiting" : "offline";
   status_opponent.className = `status-pill ${opponent_ready2 ? "ok" : opponent_name2 ? "warn" : "off"}`;
 }
 function show_match_end(winner) {
-  if (!match_end) return;
+  if (!match_end)
+    return;
   const is_winner = winner && slot === winner;
   match_end_title.textContent = is_winner ? "Victory" : "Defeat";
   if (!winner) {
@@ -1879,14 +1949,15 @@ function log_events(log) {
 }
 function update_panels(state, opts) {
   const viewer_slot = slot ?? (is_spectator ? "player1" : null);
-  if (!viewer_slot) return;
+  if (!viewer_slot)
+    return;
   const me = state.players[viewer_slot];
   const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
   const my_active = me.team[me.activeIndex];
   const opp_active = opp.team[opp.activeIndex];
   player_title.textContent = me.name || player_name;
   if (!opts?.skipMeta?.player) {
-    player_meta.textContent = `Lv ${my_active.level} \xB7 HP ${my_active.hp}/${my_active.maxHp}`;
+    player_meta.textContent = `Lv ${my_active.level} · HP ${my_active.hp}/${my_active.maxHp}`;
   }
   if (!opts?.skipBar?.player) {
     player_hp.style.width = `${Math.max(0, Math.min(1, my_active.hp / my_active.maxHp)) * 100}%`;
@@ -1896,7 +1967,7 @@ function update_panels(state, opts) {
   player_sprite.title = monster_label(my_active.id);
   enemy_title.textContent = opp.name || "Opponent";
   if (!opts?.skipMeta?.enemy) {
-    enemy_meta.textContent = `Lv ${opp_active.level} \xB7 HP ${opp_active.hp}/${opp_active.maxHp}`;
+    enemy_meta.textContent = `Lv ${opp_active.level} · HP ${opp_active.hp}/${opp_active.maxHp}`;
   }
   if (!opts?.skipBar?.enemy) {
     enemy_hp.style.width = `${Math.max(0, Math.min(1, opp_active.hp / opp_active.maxHp)) * 100}%`;
@@ -1922,7 +1993,7 @@ function animate_hp_text(side, level, from, to, maxHp, delay = 180) {
     }
     const t = Math.min(1, (elapsed - delay) / duration);
     const value = Math.round(from + (to - from) * t);
-    target.textContent = `Lv ${level} \xB7 HP ${value}/${maxHp}`;
+    target.textContent = `Lv ${level} · HP ${value}/${maxHp}`;
     if (t < 1) {
       hp_animation[raf_key] = requestAnimationFrame(tick);
     }
@@ -1932,7 +2003,7 @@ function animate_hp_text(side, level, from, to, maxHp, delay = 180) {
 function clear_animation_timers() {
   while (animation_timers.length) {
     const id = animation_timers.pop();
-    if (id !== void 0) {
+    if (id !== undefined) {
       clearTimeout(id);
     }
   }
@@ -1954,20 +2025,23 @@ function build_visual_steps(prev_state, log, viewer_slot) {
   for (const entry of log) {
     if (entry.type === "switch" || entry.type === "forced_switch") {
       const data = entry.data;
-      if (!data || !data.slot || typeof data.to !== "number") continue;
+      if (!data || !data.slot || typeof data.to !== "number")
+        continue;
       temp.players[data.slot].activeIndex = data.to;
       continue;
     }
     if (entry.type === "protect") {
       const data = entry.data;
-      if (!data?.slot) continue;
+      if (!data?.slot)
+        continue;
       const side = side_from_slot(viewer_slot, data.slot);
       steps.push({ kind: "shield_on", side });
       continue;
     }
     if (entry.type === "damage_blocked") {
       const data = entry.data;
-      if (!data?.slot) continue;
+      if (!data?.slot)
+        continue;
       const defenderSide2 = side_from_slot(viewer_slot, data.slot);
       const attackerSide2 = defenderSide2 === "player" ? "enemy" : "player";
       steps.push({ kind: "shield_hit", attackerSide: attackerSide2, defenderSide: defenderSide2 });
@@ -1975,12 +2049,14 @@ function build_visual_steps(prev_state, log, viewer_slot) {
     }
     if (entry.type === "passive_heal") {
       const data = entry.data;
-      if (!data?.slot) continue;
+      if (!data?.slot)
+        continue;
       const side = side_from_slot(viewer_slot, data.slot);
       steps.push({ kind: "heal", side });
       continue;
     }
-    if (entry.type !== "damage" && entry.type !== "recoil") continue;
+    if (entry.type !== "damage" && entry.type !== "recoil")
+      continue;
     const payload = entry.data;
     if (!payload || typeof payload.damage !== "number" || payload.damage <= 0 || !payload.slot) {
       continue;
@@ -2009,7 +2085,7 @@ function animate_hp_bar(bar, from, to) {
   bar.classList.remove("hp-anim");
   bar.style.transition = "none";
   bar.style.width = `${from}%`;
-  void bar.offsetWidth;
+  bar.offsetWidth;
   bar.style.transition = "";
   bar.classList.add("hp-anim");
   bar.style.width = `${to}%`;
@@ -2028,7 +2104,7 @@ function reset_sprite_fx() {
 }
 function trigger_class(el, className, duration) {
   el.classList.remove(className);
-  void el.offsetWidth;
+  el.offsetWidth;
   el.classList.add(className);
   window.setTimeout(() => {
     el.classList.remove(className);
@@ -2039,9 +2115,7 @@ function handle_state(data) {
   clear_animation_timers();
   const viewer_slot = slot ?? (is_spectator ? "player1" : null);
   const steps = prev_state ? build_visual_steps(prev_state, data.log, viewer_slot) : [];
-  const hit_sides = new Set(
-    steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide)
-  );
+  const hit_sides = new Set(steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide));
   latest_state = data.state;
   if (!match_started && data.state.status === "running") {
     match_started = true;
@@ -2118,8 +2192,11 @@ function handle_post(message) {
     case "assign":
       slot = data.slot;
       is_spectator = false;
-      if (status_slot) status_slot.textContent = data.slot;
-      if (status_conn) status_conn.textContent = "synced";
+      set_player_name(data.slot, data.name);
+      if (status_slot)
+        status_slot.textContent = data.slot;
+      if (status_conn)
+        status_conn.textContent = "synced";
       player_meta.textContent = `Slot ${data.slot}`;
       if (data.token) {
         localStorage.setItem(token_key, data.token);
@@ -2127,6 +2204,7 @@ function handle_post(message) {
       }
       append_log(`assigned ${data.slot}`);
       append_chat(`${data.name} assigned to ${data.slot}`);
+      render_participants();
       return;
     case "ready_state": {
       const previous = last_ready_snapshot ?? { player1: false, player2: false };
@@ -2196,11 +2274,16 @@ function handle_post(message) {
     case "join":
       append_log(`join: ${data.name}`);
       append_chat(`${data.name} joined the room`);
+      add_spectator(data.name);
+      render_participants();
       return;
     case "spectator":
       is_spectator = true;
-      if (status_slot) status_slot.textContent = "spectator";
+      add_spectator(data.name);
+      if (status_slot)
+        status_slot.textContent = "spectator";
       update_ready_ui();
+      render_participants();
       return;
     case "chat":
       append_chat(`${data.from}: ${data.message}`);
@@ -2260,11 +2343,12 @@ slot_bench_b.addEventListener("click", () => {
 player_bench_slots.forEach((slot_el) => {
   slot_el.btn.addEventListener("click", () => {
     const index = Number(slot_el.btn.dataset.index);
-    if (!Number.isFinite(index)) return;
+    if (!Number.isFinite(index))
+      return;
     send_switch_intent(index);
   });
 });
-setInterval(update_deadline, 1e3);
+setInterval(update_deadline, 1000);
 setInterval(() => {
   const rtt = ping();
   if (isFinite(rtt)) {
@@ -2272,7 +2356,7 @@ setInterval(() => {
   } else {
     status_ping.textContent = "--";
   }
-}, 1e3);
+}, 1000);
 load_team_selection();
 render_roster();
 render_tabs();
@@ -2280,13 +2364,19 @@ render_config();
 update_roster_count();
 update_slots();
 update_action_controls();
+render_participants();
 on_open(() => {
-  if (status_conn) status_conn.textContent = "connected";
+  if (status_conn)
+    status_conn.textContent = "connected";
+  append_log(`connected: room=${room}`);
   watch(room, handle_post);
   load(room, 0);
   post(room, { $: "join", name: player_name, token: stored_token });
+  append_log(`join request: ${player_name}`);
   setup_chat_input(chat_input, chat_send);
 });
 on_sync(() => {
-  if (status_conn) status_conn.textContent = "synced";
+  if (status_conn)
+    status_conn.textContent = "synced";
+  append_log("sync complete");
 });

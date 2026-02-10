@@ -157,8 +157,8 @@ const status_turn = document.getElementById("status-turn")!;
 const status_deadline = document.getElementById("status-deadline")!;
 const status_ready = document.getElementById("status-ready");
 const status_opponent = document.getElementById("status-opponent");
-const log_list = document.getElementById("log-list");
 const chat_messages = document.getElementById("chat-messages")!;
+const log_list = (document.getElementById("log-list") as HTMLElement | null) ?? chat_messages;
 const chat_input = document.getElementById("chat-input") as HTMLInputElement | null;
 const chat_send = document.getElementById("chat-send") as HTMLButtonElement | null;
 const participants_list = document.getElementById("participants-list")!;
@@ -260,6 +260,41 @@ function icon_path(id: string): string {
   return `./icons/unit_${id}.png`;
 }
 
+function ensure_participants_state(): { players: Record<PlayerSlot, string | null>; spectators: string[] } {
+  if (!participants) {
+    participants = {
+      players: { player1: null, player2: null },
+      spectators: []
+    };
+  }
+  return participants;
+}
+
+function add_spectator(name: string): void {
+  if (!name) return;
+  const state = ensure_participants_state();
+  if (state.players.player1 === name || state.players.player2 === name) {
+    return;
+  }
+  if (!state.spectators.includes(name)) {
+    state.spectators.push(name);
+  }
+}
+
+function set_player_name(slot_id: PlayerSlot, name: string): void {
+  const state = ensure_participants_state();
+  state.players[slot_id] = name;
+  state.spectators = state.spectators.filter((value) => value !== name);
+}
+
+function ensure_local_participant_visible(): void {
+  const state = ensure_participants_state();
+  const in_player_slot = state.players.player1 === player_name || state.players.player2 === player_name;
+  if (!in_player_slot && !state.spectators.includes(player_name)) {
+    state.spectators.push(player_name);
+  }
+}
+
 function monster_label(id?: string, fallback: string = "mon"): string {
   if (!id) return fallback;
   return roster_by_id.get(id)?.name ?? id;
@@ -305,12 +340,11 @@ function append_line(container: HTMLElement | null, line: string): void {
 }
 
 function render_participants(): void {
+  ensure_local_participant_visible();
   participants_list.innerHTML = "";
-  if (!participants) {
-    return;
-  }
+  const state = ensure_participants_state();
   for (const slot_id of PLAYER_SLOTS) {
-    const name = participants.players[slot_id];
+    const name = state.players[slot_id];
     if (!name) continue;
     const item = document.createElement("div");
     item.className = "participant";
@@ -318,7 +352,7 @@ function render_participants(): void {
     item.innerHTML = `<span>${name}</span><span class="participant-meta">${meta}</span>`;
     participants_list.appendChild(item);
   }
-  const spectators = participants.spectators.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const spectators = state.spectators.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   for (const name of spectators) {
     const item = document.createElement("div");
     item.className = "participant";
@@ -1260,6 +1294,7 @@ function handle_post(message: any): void {
     case "assign":
       slot = data.slot;
       is_spectator = false;
+      set_player_name(data.slot, data.name);
       if (status_slot) status_slot.textContent = data.slot;
       if (status_conn) status_conn.textContent = "synced";
       player_meta.textContent = `Slot ${data.slot}`;
@@ -1269,6 +1304,7 @@ function handle_post(message: any): void {
       }
       append_log(`assigned ${data.slot}`);
       append_chat(`${data.name} assigned to ${data.slot}`);
+      render_participants();
       return;
     case "ready_state": {
       const previous = last_ready_snapshot ?? { player1: false, player2: false };
@@ -1338,11 +1374,15 @@ function handle_post(message: any): void {
     case "join":
       append_log(`join: ${data.name}`);
       append_chat(`${data.name} joined the room`);
+      add_spectator(data.name);
+      render_participants();
       return;
     case "spectator":
       is_spectator = true;
+      add_spectator(data.name);
       if (status_slot) status_slot.textContent = "spectator";
       update_ready_ui();
+      render_participants();
       return;
     case "chat":
       append_chat(`${data.from}: ${data.message}`);
@@ -1434,15 +1474,19 @@ render_config();
 update_roster_count();
 update_slots();
 update_action_controls();
+render_participants();
 
 on_open(() => {
   if (status_conn) status_conn.textContent = "connected";
+  append_log(`connected: room=${room}`);
   watch(room, handle_post);
   load(room, 0);
   post(room, { $: "join", name: player_name, token: stored_token });
+  append_log(`join request: ${player_name}`);
   setup_chat_input(chat_input, chat_send);
 });
 
 on_sync(() => {
   if (status_conn) status_conn.textContent = "synced";
+  append_log("sync complete");
 });

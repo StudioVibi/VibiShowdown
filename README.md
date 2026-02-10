@@ -6,6 +6,7 @@ Estrutura oficial do projeto:
 - `src/engine.ts`: regras do combate (motor).
 - `src/shared.ts`: tipos compartilhados entre cliente e servidor.
 - `src/client.ts` / `src/config.ts`: camada de conexao do cliente.
+- `src/vibinet/*`: runtime de rede embutido (copiado do VibiNet) para build sem depender de pasta externa.
 - `vibishowdown/index.ts`: frontend (fonte principal da UI).
 - `vibishowdown/index.html`: pagina do app.
 - `vibishowdown/icons/`: assets da UI.
@@ -18,9 +19,9 @@ Fonte de verdade da UI:
 
 Comandos:
 
-- `npm run dev`: bloqueado (este projeto usa apenas o servidor oficial VibiNet).
+- `npm run dev`: serve estatico do app em `http://localhost:8080` (sem depender de `npx serve`).
 - `npm run check`: type-check.
-- `bun build vibishowdown/index.ts --outdir vibishowdown/dist --target=browser --format=esm`: atualiza bundle web.
+- `npm run build:web`: atualiza bundle web.
 
 Networking:
 
