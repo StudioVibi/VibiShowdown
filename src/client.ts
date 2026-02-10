@@ -1,6 +1,6 @@
 import { WS_URL } from "./config.ts";
-import { create_client, gen_name } from "../../VibiNet/src/client.ts";
-import type { Packed } from "../../VibiNet/src/packer.ts";
+import { create_client, gen_name } from "./vibinet/client.ts";
+import type { Packed } from "./vibinet/packer.ts";
 import type { RoomPost } from "./shared.ts";
 
 type MessageHandler = (message: {

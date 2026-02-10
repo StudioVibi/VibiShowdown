@@ -1,8 +1,10 @@
 import { gen_name, load, on_open, on_sync, ping, post, watch } from "../src/client.ts";
+import { apply_forced_switch, create_initial_state, resolve_turn, validate_intent } from "../src/engine.ts";
 import type {
   EventLog,
   GameState,
   MonsterState,
+  PlayerIntent,
   PlayerSlot,
   RoomPost,
   Stats,
@@ -143,8 +145,13 @@ const roster_by_id = new Map<string, MonsterSpec>(roster.map((entry) => [entry.i
 const room = prompt("Room name?") || gen_name();
 const player_name = prompt("Your name?") || gen_name();
 
-const token_key = `vibi_showdown_token:${room}:${player_name}`;
-let stored_token = localStorage.getItem(token_key) || undefined;
+const player_id_key = "vibi_showdown_player_id";
+const saved_player_id = localStorage.getItem(player_id_key);
+const player_id = saved_player_id && saved_player_id.length > 0 ? saved_player_id : `${gen_name()}${gen_name()}`;
+if (!saved_player_id) {
+  localStorage.setItem(player_id_key, player_id);
+}
+
 const profile_key = `vibi_showdown_profile:${player_name}`;
 const team_key = `vibi_showdown_team:${room}:${player_name}`;
 
@@ -157,8 +164,8 @@ const status_turn = document.getElementById("status-turn")!;
 const status_deadline = document.getElementById("status-deadline")!;
 const status_ready = document.getElementById("status-ready");
 const status_opponent = document.getElementById("status-opponent");
-const log_list = document.getElementById("log-list");
 const chat_messages = document.getElementById("chat-messages")!;
+const log_list = (document.getElementById("log-list") as HTMLElement | null) ?? chat_messages;
 const chat_input = document.getElementById("chat-input") as HTMLInputElement | null;
 const chat_send = document.getElementById("chat-send") as HTMLButtonElement | null;
 const participants_list = document.getElementById("participants-list")!;
@@ -256,8 +263,395 @@ const sprite_fx_classes = ["jump", "hit", "heal", "shield-on", "shield-hit"];
 const selected: string[] = [];
 let active_tab: string | null = null;
 
+let relay_server_managed = false;
+let relay_ended = false;
+let relay_turn = 0;
+let relay_state: GameState | null = null;
+let relay_local_role_emitted = false;
+const relay_seen_indexes = new Set<number>();
+const relay_names_by_id = new Map<string, string>();
+const relay_slot_by_id = new Map<string, PlayerSlot>();
+const relay_ids_by_slot: Record<PlayerSlot, string | null> = { player1: null, player2: null };
+const relay_join_order: string[] = [];
+const relay_ready: Record<PlayerSlot, boolean> = { player1: false, player2: false };
+const relay_teams: Record<PlayerSlot, TeamSelection | null> = { player1: null, player2: null };
+const relay_intents: Record<PlayerSlot, PlayerIntent | null> = { player1: null, player2: null };
+const relay_ready_order: PlayerSlot[] = [];
+
 function icon_path(id: string): string {
   return `./icons/unit_${id}.png`;
+}
+
+function emit_local_post(data: RoomPost): void {
+  handle_post({ data });
+}
+
+function is_server_managed_post(data: RoomPost): boolean {
+  return (
+    data.$ === "assign" ||
+    data.$ === "spectator" ||
+    data.$ === "participants" ||
+    data.$ === "ready_state" ||
+    data.$ === "turn_start" ||
+    data.$ === "state" ||
+    data.$ === "intent_locked"
+  );
+}
+
+function legacy_player_id(name: string): string {
+  return `legacy:${name}`;
+}
+
+function relay_identity(data: RoomPost): string | null {
+  const candidate = (data as { player_id?: unknown }).player_id;
+  if (typeof candidate === "string" && candidate.length > 0) {
+    return candidate;
+  }
+  if (data.$ === "join") {
+    return legacy_player_id(data.name);
+  }
+  if (data.$ === "chat") {
+    return legacy_player_id(data.from);
+  }
+  return null;
+}
+
+function relay_name(id: string): string {
+  return relay_names_by_id.get(id) ?? id;
+}
+
+function relay_names_by_slot(): Record<PlayerSlot, string | null> {
+  const p1 = relay_ids_by_slot.player1;
+  const p2 = relay_ids_by_slot.player2;
+  return {
+    player1: p1 ? relay_name(p1) : null,
+    player2: p2 ? relay_name(p2) : null
+  };
+}
+
+function relay_spectator_names(): string[] {
+  return relay_join_order.filter((id) => !relay_slot_by_id.has(id)).map(relay_name);
+}
+
+function relay_emit_snapshots(): void {
+  const names = relay_names_by_slot();
+  emit_local_post({
+    $: "ready_state",
+    ready: { ...relay_ready },
+    names,
+    order: relay_ready_order.slice()
+  });
+  emit_local_post({
+    $: "participants",
+    players: names,
+    spectators: relay_spectator_names()
+  });
+}
+
+function relay_emit_local_role(): void {
+  if (relay_local_role_emitted) {
+    return;
+  }
+  const local_slot = relay_slot_by_id.get(player_id);
+  if (local_slot) {
+    relay_local_role_emitted = true;
+    emit_local_post({ $: "assign", slot: local_slot, token: player_id, name: relay_name(player_id) });
+    return;
+  }
+  if (relay_join_order.includes(player_id)) {
+    relay_local_role_emitted = true;
+    emit_local_post({ $: "spectator", name: relay_name(player_id) });
+  }
+}
+
+function relay_assign_slot(id: string): PlayerSlot | null {
+  const existing = relay_slot_by_id.get(id);
+  if (existing) {
+    return existing;
+  }
+  if (!relay_ids_by_slot.player1) {
+    relay_ids_by_slot.player1 = id;
+    relay_slot_by_id.set(id, "player1");
+    return "player1";
+  }
+  if (!relay_ids_by_slot.player2) {
+    relay_ids_by_slot.player2 = id;
+    relay_slot_by_id.set(id, "player2");
+    return "player2";
+  }
+  return null;
+}
+
+function relay_start_turn(): void {
+  if (!relay_state || relay_ended) {
+    return;
+  }
+  if (relay_state.pendingSwitch.player1 || relay_state.pendingSwitch.player2) {
+    return;
+  }
+  relay_turn += 1;
+  relay_state.turn = relay_turn;
+  relay_intents.player1 = null;
+  relay_intents.player2 = null;
+  emit_local_post({
+    $: "turn_start",
+    turn: relay_turn,
+    deadline_at: 0,
+    intents: { player1: false, player2: false }
+  });
+}
+
+function relay_start_match_if_ready(): void {
+  if (relay_state || relay_ended) {
+    return;
+  }
+  if (!relay_ready.player1 || !relay_ready.player2 || !relay_teams.player1 || !relay_teams.player2) {
+    return;
+  }
+  const names = relay_names_by_slot();
+  relay_state = create_initial_state(
+    {
+      player1: relay_teams.player1,
+      player2: relay_teams.player2
+    },
+    {
+      player1: names.player1 || "player1",
+      player2: names.player2 || "player2"
+    }
+  );
+  relay_state.status = "running";
+  relay_turn = 0;
+  emit_local_post({ $: "state", turn: 0, state: relay_state, log: [] });
+  relay_start_turn();
+}
+
+function relay_handle_join(data: Extract<RoomPost, { $: "join" }>): void {
+  const id = relay_identity(data);
+  if (!id) {
+    return;
+  }
+  relay_names_by_id.set(id, data.name);
+  if (!relay_join_order.includes(id)) {
+    relay_join_order.push(id);
+  }
+  relay_assign_slot(id);
+  emit_local_post({ $: "join", name: data.name });
+  relay_emit_local_role();
+  relay_emit_snapshots();
+}
+
+function relay_handle_ready(data: Extract<RoomPost, { $: "ready" }>): void {
+  if (relay_state || relay_turn > 0 || relay_ended) {
+    return;
+  }
+  const id = relay_identity(data);
+  if (!id) {
+    return;
+  }
+  const slot_id = relay_slot_by_id.get(id);
+  if (!slot_id) {
+    return;
+  }
+  if (!data.ready) {
+    relay_ready[slot_id] = false;
+    relay_teams[slot_id] = null;
+    const idx = relay_ready_order.indexOf(slot_id);
+    if (idx >= 0) {
+      relay_ready_order.splice(idx, 1);
+    }
+    relay_emit_snapshots();
+    return;
+  }
+  if (!data.team) {
+    return;
+  }
+  relay_ready[slot_id] = true;
+  relay_teams[slot_id] = data.team;
+  if (!relay_ready_order.includes(slot_id)) {
+    relay_ready_order.push(slot_id);
+  }
+  relay_emit_snapshots();
+  relay_start_match_if_ready();
+}
+
+function relay_handle_intent(data: Extract<RoomPost, { $: "intent" }>): void {
+  if (!relay_state || relay_ended) {
+    return;
+  }
+  const id = relay_identity(data);
+  if (!id) {
+    return;
+  }
+  const slot_id = relay_slot_by_id.get(id);
+  if (!slot_id) {
+    return;
+  }
+  if (data.turn !== relay_turn) {
+    return;
+  }
+  if (relay_intents[slot_id]) {
+    return;
+  }
+  const validation = validate_intent(relay_state, slot_id, data.intent);
+  if (validation) {
+    return;
+  }
+  relay_intents[slot_id] = data.intent;
+  emit_local_post({ $: "intent_locked", slot: slot_id, turn: relay_turn });
+  if (!relay_intents.player1 || !relay_intents.player2) {
+    return;
+  }
+  const { state, log } = resolve_turn(relay_state, {
+    player1: relay_intents.player1,
+    player2: relay_intents.player2
+  });
+  relay_state = state;
+  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log });
+  if (relay_state.status === "ended") {
+    relay_ended = true;
+    return;
+  }
+  if (!relay_state.pendingSwitch.player1 && !relay_state.pendingSwitch.player2) {
+    relay_start_turn();
+  }
+}
+
+function relay_handle_forced_switch(data: Extract<RoomPost, { $: "forced_switch" }>): void {
+  if (!relay_state || relay_ended) {
+    return;
+  }
+  const id = relay_identity(data);
+  if (!id) {
+    return;
+  }
+  const slot_id = relay_slot_by_id.get(id);
+  if (!slot_id) {
+    return;
+  }
+  const result = apply_forced_switch(relay_state, slot_id, data.targetIndex);
+  if (result.error) {
+    return;
+  }
+  relay_state = result.state;
+  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log: result.log });
+  if (!relay_state.pendingSwitch.player1 && !relay_state.pendingSwitch.player2) {
+    relay_start_turn();
+  }
+}
+
+function relay_handle_surrender(data: Extract<RoomPost, { $: "surrender" }>): void {
+  if (!relay_state || relay_ended || "loser" in data) {
+    return;
+  }
+  const id = relay_identity(data);
+  if (!id) {
+    return;
+  }
+  const loser = relay_slot_by_id.get(id);
+  if (!loser) {
+    return;
+  }
+  const winner: PlayerSlot = loser === "player1" ? "player2" : "player1";
+  relay_state.status = "ended";
+  relay_state.winner = winner;
+  relay_ended = true;
+  const log: EventLog[] = [
+    {
+      type: "match_end",
+      turn: relay_turn,
+      summary: `${winner} wins (surrender)`,
+      data: { winner }
+    }
+  ];
+  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log });
+  emit_local_post({ $: "surrender", turn: relay_turn, loser, winner });
+}
+
+function relay_consume_post(data: RoomPost): void {
+  switch (data.$) {
+    case "join":
+      relay_handle_join(data);
+      return;
+    case "chat":
+      emit_local_post(data);
+      return;
+    case "ready":
+      relay_handle_ready(data);
+      return;
+    case "intent":
+      relay_handle_intent(data);
+      return;
+    case "forced_switch":
+      relay_handle_forced_switch(data);
+      return;
+    case "surrender":
+      relay_handle_surrender(data);
+      return;
+    case "error":
+      emit_local_post(data);
+      return;
+    default:
+      return;
+  }
+}
+
+function consume_network_message(message: any): void {
+  const index = typeof message?.index === "number" ? message.index : -1;
+  if (index >= 0) {
+    if (relay_seen_indexes.has(index)) {
+      return;
+    }
+    relay_seen_indexes.add(index);
+  }
+  const data: RoomPost | null = message && typeof message === "object" ? (message.data as RoomPost) : null;
+  if (!data || typeof data !== "object" || typeof data.$ !== "string") {
+    return;
+  }
+  if (is_server_managed_post(data)) {
+    relay_server_managed = true;
+    emit_local_post(data);
+    return;
+  }
+  if (relay_server_managed) {
+    emit_local_post(data);
+    return;
+  }
+  relay_consume_post(data);
+}
+
+function ensure_participants_state(): { players: Record<PlayerSlot, string | null>; spectators: string[] } {
+  if (!participants) {
+    participants = {
+      players: { player1: null, player2: null },
+      spectators: []
+    };
+  }
+  return participants;
+}
+
+function add_spectator(name: string): void {
+  if (!name) return;
+  const state = ensure_participants_state();
+  if (state.players.player1 === name || state.players.player2 === name) {
+    return;
+  }
+  if (!state.spectators.includes(name)) {
+    state.spectators.push(name);
+  }
+}
+
+function set_player_name(slot_id: PlayerSlot, name: string): void {
+  const state = ensure_participants_state();
+  state.players[slot_id] = name;
+  state.spectators = state.spectators.filter((value) => value !== name);
+}
+
+function ensure_local_participant_visible(): void {
+  const state = ensure_participants_state();
+  const in_player_slot = state.players.player1 === player_name || state.players.player2 === player_name;
+  if (!in_player_slot && !state.spectators.includes(player_name)) {
+    state.spectators.push(player_name);
+  }
 }
 
 function monster_label(id?: string, fallback: string = "mon"): string {
@@ -273,10 +667,21 @@ function append_chat(line: string): void {
   append_line(chat_messages, line);
 }
 
+function try_post(data: RoomPost): boolean {
+  try {
+    post(room, data);
+    return true;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    append_log(`send failed: ${reason}`);
+    return false;
+  }
+}
+
 function send_chat_message(message: string): void {
   const trimmed = message.trim();
   if (!trimmed) return;
-  post(room, { $: "chat", message: trimmed.slice(0, 200), from: player_name });
+  try_post({ $: "chat", message: trimmed.slice(0, 200), from: player_name, player_id });
 }
 
 function setup_chat_input(input: HTMLInputElement | null, button: HTMLButtonElement | null): void {
@@ -305,12 +710,11 @@ function append_line(container: HTMLElement | null, line: string): void {
 }
 
 function render_participants(): void {
+  ensure_local_participant_visible();
   participants_list.innerHTML = "";
-  if (!participants) {
-    return;
-  }
+  const state = ensure_participants_state();
   for (const slot_id of PLAYER_SLOTS) {
-    const name = participants.players[slot_id];
+    const name = state.players[slot_id];
     if (!name) continue;
     const item = document.createElement("div");
     item.className = "participant";
@@ -318,7 +722,7 @@ function render_participants(): void {
     item.innerHTML = `<span>${name}</span><span class="participant-meta">${meta}</span>`;
     participants_list.appendChild(item);
   }
-  const spectators = participants.spectators.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  const spectators = state.spectators.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   for (const name of spectators) {
     const item = document.createElement("div");
     item.className = "participant";
@@ -808,7 +1212,9 @@ function can_send_intent(): boolean {
 
 function send_move_intent(moveIndex: number): void {
   if (!can_send_intent()) return;
-  post(room, { $: "intent", turn: current_turn, intent: { action: "use_move", moveIndex } });
+  if (!try_post({ $: "intent", turn: current_turn, intent: { action: "use_move", moveIndex }, player_id })) {
+    return;
+  }
   intent_locked = true;
   update_action_controls();
   append_log("intent sent");
@@ -816,12 +1222,15 @@ function send_move_intent(moveIndex: number): void {
 
 function send_switch_intent(targetIndex: number): void {
   if (has_pending_switch()) {
-    post(room, { $: "forced_switch", targetIndex });
-    close_switch_modal();
+    if (try_post({ $: "forced_switch", targetIndex, player_id })) {
+      close_switch_modal();
+    }
     return;
   }
   if (!can_send_intent()) return;
-  post(room, { $: "intent", turn: current_turn, intent: { action: "switch", targetIndex } });
+  if (!try_post({ $: "intent", turn: current_turn, intent: { action: "switch", targetIndex }, player_id })) {
+    return;
+  }
   intent_locked = true;
   update_action_controls();
   append_log("intent sent");
@@ -829,7 +1238,7 @@ function send_switch_intent(targetIndex: number): void {
 
 function send_surrender(): void {
   if (!match_started || is_spectator || !slot) return;
-  post(room, { $: "surrender" });
+  try_post({ $: "surrender", player_id });
 }
 
 function close_switch_modal(): void {
@@ -860,15 +1269,25 @@ function open_switch_modal(mode: "intent" | "forced" = "intent"): void {
       button.addEventListener("click", () => {
         if (mode === "intent") {
           if (!can_send_intent()) return;
-          post(room, { $: "intent", turn: current_turn, intent: { action: "switch", targetIndex: entry.index } });
+          if (
+            !try_post({
+            $: "intent",
+            turn: current_turn,
+            intent: { action: "switch", targetIndex: entry.index },
+            player_id
+          })
+          ) {
+            return;
+          }
           intent_locked = true;
           update_action_controls();
           append_log("intent sent");
           close_switch_modal();
           return;
         }
-        post(room, { $: "forced_switch", targetIndex: entry.index });
-        close_switch_modal();
+        if (try_post({ $: "forced_switch", targetIndex: entry.index, player_id })) {
+          close_switch_modal();
+        }
       });
       switch_options.appendChild(button);
     }
@@ -904,12 +1323,12 @@ function send_ready(next_ready: boolean): void {
     if (!team) {
       return;
     }
-    post(room, { $: "ready", ready: true, team });
+    try_post({ $: "ready", ready: true, team, player_id });
   } else {
     if (!slot) {
       return;
     }
-    post(room, { $: "ready", ready: false });
+    try_post({ $: "ready", ready: false, player_id });
   }
 }
 
@@ -1260,15 +1679,13 @@ function handle_post(message: any): void {
     case "assign":
       slot = data.slot;
       is_spectator = false;
+      set_player_name(data.slot, data.name);
       if (status_slot) status_slot.textContent = data.slot;
       if (status_conn) status_conn.textContent = "synced";
       player_meta.textContent = `Slot ${data.slot}`;
-      if (data.token) {
-        localStorage.setItem(token_key, data.token);
-        stored_token = data.token;
-      }
       append_log(`assigned ${data.slot}`);
       append_chat(`${data.name} assigned to ${data.slot}`);
+      render_participants();
       return;
     case "ready_state": {
       const previous = last_ready_snapshot ?? { player1: false, player2: false };
@@ -1338,11 +1755,15 @@ function handle_post(message: any): void {
     case "join":
       append_log(`join: ${data.name}`);
       append_chat(`${data.name} joined the room`);
+      add_spectator(data.name);
+      render_participants();
       return;
     case "spectator":
       is_spectator = true;
+      add_spectator(data.name);
       if (status_slot) status_slot.textContent = "spectator";
       update_ready_ui();
+      render_participants();
       return;
     case "chat":
       append_chat(`${data.from}: ${data.message}`);
@@ -1434,15 +1855,24 @@ render_config();
 update_roster_count();
 update_slots();
 update_action_controls();
+render_participants();
 
 on_open(() => {
   if (status_conn) status_conn.textContent = "connected";
-  watch(room, handle_post);
-  load(room, 0);
-  post(room, { $: "join", name: player_name, token: stored_token });
+  append_log(`connected: room=${room}`);
+  try {
+    watch(room, consume_network_message);
+    load(room, 0, consume_network_message);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    append_log(`sync setup failed: ${reason}`);
+  }
+  try_post({ $: "join", name: player_name, player_id });
+  append_log(`join request: ${player_name}`);
   setup_chat_input(chat_input, chat_send);
 });
 
 on_sync(() => {
   if (status_conn) status_conn.textContent = "synced";
+  append_log("sync complete");
 });

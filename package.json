@@ -3,11 +3,11 @@
   "type": "module",
   "scripts": {
     "check": "tsc --target esnext --noEmit --skipLibCheck",
-    "dev": "node -e \"console.error('Local server disabled. This project is locked to official VibiNet: wss://net.studiovibi.com'); process.exit(1)\"",
+    "build:web": "bun build vibishowdown/index.ts --outdir vibishowdown/dist --target=browser --format=esm",
+    "dev": "node scripts/serve-static.mjs",
     "server": "node -e \"console.error('Local server disabled. This project is locked to official VibiNet: wss://net.studiovibi.com'); process.exit(1)\""
   },
   "dependencies": {
-    "vibinet": "0.1.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {
