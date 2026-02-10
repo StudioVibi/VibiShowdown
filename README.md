@@ -19,8 +19,11 @@ Fonte de verdade da UI:
 
 Comandos:
 
+- `npm run setup`: instala dependencias + checks + build na ordem certa.
+- `npm run setup:run`: executa `setup` e sobe host local.
 - `npm run dev`: serve estatico do app em `http://localhost:8080` (sem depender de `npx serve`).
 - `npm run check`: type-check.
+- `npm run check:integrity`: valida integridade dos defaults em `src/game_default/*`.
 - `npm run build:web`: atualiza bundle web.
 
 Networking:

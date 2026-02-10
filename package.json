@@ -2,6 +2,8 @@
   "name": "vibi-showdown",
   "type": "module",
   "scripts": {
+    "setup": "npm install && npm run check && npm run check:integrity && npm run build:web",
+    "setup:run": "npm run setup && npm run dev",
     "check": "tsc --target esnext --noEmit --skipLibCheck",
     "check:integrity": "node --experimental-strip-types src/game_default/integrity-test.ts",
     "build:web": "bun build vibishowdown/index.ts --outdir vibishowdown/dist --target=browser --format=esm",
