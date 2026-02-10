@@ -36,6 +36,7 @@ Fluxo de mensagem recebida (consume_network_message):
 Observacao:
 - Mesmo com fallback deterministico, o endpoint permanece oficial:
   wss://net.studiovibi.com
+- Nao existe backend local de jogo neste repositorio.
 
 
 2) Ordem de combate (engine)
@@ -66,18 +67,17 @@ Ordem exata atual:
 Importante sobre passivas:
 - A ordem de chamada continua no engine (passo 6).
 - A logica da passiva fica no modulo de passivas:
-  src/data/pokedex/passives.ts
+  src/game_default/passives.ts
 - O engine chama apply_passive_turn_effect(...) para cada player ativo.
 
 
 3) Onde alterar cada tipo de regra
 ----------------------------------
 Cadastro de dados:
-- Pokemons/defaults: src/data/pokedex/pokemon.ts
-- Moves/catalogo: src/data/pokedex/moves.ts
-- Passivas/catalogo + efeitos: src/data/pokedex/passives.ts
-- Validacao de consistencia: src/data/pokedex/validate.ts
+- Pokemons/defaults: src/game_default/pokemon.ts
+- Moves/catalogo: src/game_default/moves.ts
+- Passivas/catalogo + efeitos: src/game_default/passives.ts
+- Check de integridade: src/game_default/integrity.ts
 
 Ordem de execucao:
 - Sempre em src/engine.ts (resolve_turn e funcoes auxiliares).
-

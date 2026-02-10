@@ -3,15 +3,12 @@
   "type": "module",
   "scripts": {
     "check": "tsc --target esnext --noEmit --skipLibCheck",
+    "check:integrity": "node --experimental-strip-types src/game_default/integrity-test.ts",
     "build:web": "bun build vibishowdown/index.ts --outdir vibishowdown/dist --target=browser --format=esm",
-    "dev": "node scripts/serve-static.mjs",
-    "server": "node -e \"console.error('Local server disabled. This project is locked to official VibiNet: wss://net.studiovibi.com'); process.exit(1)\""
+    "dev": "node scripts/serve-static.mjs"
   },
-  "dependencies": {
-    "ws": "^8.18.0"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@types/ws": "^8.5.13",
     "typescript": "^5.9.3"
   }
 }

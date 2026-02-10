@@ -2,12 +2,11 @@
 
 Estrutura oficial do projeto:
 
-- `src/game_server.ts`: servidor local legado (nao usado no modo oficial-only).
 - `src/engine.ts`: regras do combate (motor).
 - `src/shared.ts`: tipos compartilhados entre cliente e servidor.
 - `src/client.ts` / `src/config.ts`: camada de conexao do cliente.
 - `src/vibinet/*`: runtime de rede embutido (copiado do VibiNet) para build sem depender de pasta externa.
-- `src/data/pokedex/*`: catalogo de dados (pokemons, moves, passivas) + validacao de consistencia.
+- `src/game_default/*`: catalogo de defaults do jogo (pokemons, moves, passivas) + checks de integridade.
 - `vibishowdown/index.ts`: frontend (fonte principal da UI).
 - `vibishowdown/index.html`: pagina do app.
 - `vibishowdown/icons/`: assets da UI.
@@ -30,4 +29,4 @@ Networking:
 - modo atual: cliente-deterministico. Cada jogador envia `join/ready/intent/forced_switch/surrender` e todos recomputam o estado localmente com `src/engine.ts`.
 - identificacao de jogador por `player_id` persistido no browser (`localStorage`).
 - documento de ordem atual (rede + turnos): `docs/ordem_atual_sistema.txt`.
-- historico do modo antigo (override/local): `docs/networking-history.md`.
+- self-host removido deste repositorio (sem backend de jogo local).

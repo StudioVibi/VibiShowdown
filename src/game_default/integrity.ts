@@ -4,11 +4,11 @@ import type { MonsterCatalogEntry } from "./types.ts";
 
 function ensure(condition: unknown, message: string): void {
   if (!condition) {
-    throw new Error(`[pokedex] ${message}`);
+    throw new Error(`[game_default] ${message}`);
   }
 }
 
-export function validate_monster_roster(monsters: readonly MonsterCatalogEntry[]): void {
+export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[]): void {
   const monster_ids = new Set<string>();
 
   for (const monster of monsters) {

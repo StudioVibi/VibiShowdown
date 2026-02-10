@@ -1038,7 +1038,7 @@ function ping() {
   return client.ping();
 }
 
-// src/data/pokedex/moves.ts
+// src/game_default/moves.ts
 var MOVE_CATALOG = [
   { id: "basic_attack", label: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 110 },
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
@@ -1079,7 +1079,7 @@ function move_spec(move_id) {
   return MOVE_BY_ID_INTERNAL.get(move_id) ?? MOVE_BY_ID_INTERNAL.get("none");
 }
 
-// src/data/pokedex/passives.ts
+// src/game_default/passives.ts
 var PASSIVE_CATALOG = [
   { id: "none", label: "none" },
   { id: "leftovers", label: "Leftovers", aliases: ["regen_5pct"] },
@@ -1139,7 +1139,7 @@ function apply_passive_turn_effect(passive_id, context) {
   effect(context);
 }
 
-// src/data/pokedex/pokemon.ts
+// src/game_default/pokemon.ts
 function all_move_options() {
   return MOVE_OPTIONS.slice();
 }
@@ -1230,13 +1230,13 @@ var MONSTER_ROSTER = [
 ];
 var MONSTER_BY_ID = new Map(MONSTER_ROSTER.map((entry) => [entry.id, entry]));
 
-// src/data/pokedex/validate.ts
+// src/game_default/integrity.ts
 function ensure(condition, message) {
   if (!condition) {
-    throw new Error(`[pokedex] ${message}`);
+    throw new Error(`[game_default] ${message}`);
   }
 }
-function validate_monster_roster(monsters) {
+function assert_monster_integrity(monsters) {
   const monster_ids = new Set;
   for (const monster of monsters) {
     ensure(monster.id.length > 0, "monster id is required");
@@ -1273,8 +1273,8 @@ function validate_monster_roster(monsters) {
   }
 }
 
-// src/data/pokedex/index.ts
-validate_monster_roster(MONSTER_ROSTER);
+// src/game_default/index.ts
+assert_monster_integrity(MONSTER_ROSTER);
 
 // src/engine.ts
 var INITIATIVE_DEFAULT = ["speed", "attack", "hp", "defense"];

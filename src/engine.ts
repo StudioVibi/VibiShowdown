@@ -8,8 +8,8 @@ import type {
   PlayerState,
   TeamSelection
 } from "./shared.ts";
-import { move_spec } from "./data/pokedex/moves.ts";
-import { apply_passive_turn_effect, passive_spec } from "./data/pokedex/passives.ts";
+import { move_spec } from "./game_default/moves.ts";
+import { apply_passive_turn_effect, passive_spec } from "./game_default/passives.ts";
 
 type Phase = {
   id: string;

@@ -1,4 +1,4 @@
-import type { Stats } from "../../shared.ts";
+import type { Stats } from "../shared.ts";
 
 export type DamageType = "scaled" | "true" | "flat";
 

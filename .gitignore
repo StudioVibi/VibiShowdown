@@ -1,8 +1,5 @@
 node_modules/
 
-# Runtime logs/data (not needed in repo)
-db/
-
 # Internal docs/prompts (not needed for app runtime)
 prompt2.txt
 relatorio.txt

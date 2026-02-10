@@ -1,5 +1,5 @@
 import type { PassiveCatalogEntry } from "./types.ts";
-import type { EventLog, MonsterState, PlayerSlot } from "../../shared.ts";
+import type { EventLog, MonsterState, PlayerSlot } from "../shared.ts";
 
 export const PASSIVE_CATALOG: readonly PassiveCatalogEntry[] = [
   { id: "none", label: "none" },

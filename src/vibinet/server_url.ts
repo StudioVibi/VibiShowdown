@@ -1,12 +1,5 @@
 export const OFFICIAL_SERVER_URL = "wss://net.studiovibi.com";
 
-export function walkers_server_for_host(hostname: string): string | undefined {
-  if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return `ws://${hostname}:8080`;
-  }
-  return undefined;
-}
-
 export function normalize_ws_url(raw_url: string): string {
   let ws_url = raw_url;
 
