@@ -1,17 +1,15 @@
-// src/config.ts
-var OFFICIAL_VIBINET_WSS = "wss://net.studiovibi.com";
-var WS_URL = OFFICIAL_VIBINET_WSS;
-
-// src/vibinet/packer.ts
+// node_modules/vibinet/dist/index.js
+var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => (key in obj) ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 var MAX_SAFE_BITS = 53;
 var text_decoder = new TextDecoder;
-var union_cache = new WeakMap;
-var struct_cache = new WeakMap;
-
-class BitWriter {
-  buf;
-  bit_pos;
+var union_cache = /* @__PURE__ */ new WeakMap;
+var struct_cache = /* @__PURE__ */ new WeakMap;
+var BitWriter = class {
   constructor(buf) {
+    __publicField(this, "buf");
+    __publicField(this, "bit_pos");
     this.buf = buf;
     this.bit_pos = 0;
   }
@@ -71,12 +69,11 @@ class BitWriter {
       v >>= 1n;
     }
   }
-}
-
-class BitReader {
-  buf;
-  bit_pos;
+};
+var BitReader = class {
   constructor(buf) {
+    __publicField(this, "buf");
+    __publicField(this, "bit_pos");
     this.buf = buf;
     this.bit_pos = 0;
   }
@@ -149,7 +146,7 @@ class BitReader {
     }
     return v;
   }
-}
+};
 function assert_integer(value, name) {
   if (!Number.isInteger(value)) {
     throw new TypeError(`${name} must be an integer`);
@@ -463,7 +460,7 @@ function decode_from(reader, type) {
       return out;
     }
     case "Map": {
-      const out = new Map;
+      const out = /* @__PURE__ */ new Map;
       while (reader.read_bit()) {
         const key = decode_from(reader, type.key);
         const value = decode_from(reader, type.value);
@@ -525,7 +522,7 @@ function union_info(type) {
   if (keys.length === 0) {
     throw new RangeError("Union must have at least one variant");
   }
-  const index_by_tag = new Map;
+  const index_by_tag = /* @__PURE__ */ new Map;
   for (let i = 0;i < keys.length; i++) {
     index_by_tag.set(keys[i], i);
   }
@@ -681,8 +678,6 @@ function decode(type, buf) {
   const reader = new BitReader(buf);
   return decode_from(reader, type);
 }
-
-// src/vibinet/protocol.ts
 var TIME_BITS = 53;
 var BYTE_LIST_PACKED = { $: "List", type: { $: "UInt", size: 8 } };
 var MESSAGE_PACKED = {
@@ -732,6 +727,20 @@ var MESSAGE_PACKED = {
       $: "Struct",
       fields: {
         room: { $: "String" }
+      }
+    },
+    get_latest_post_index: {
+      $: "Struct",
+      fields: {
+        room: { $: "String" }
+      }
+    },
+    info_latest_post_index: {
+      $: "Struct",
+      fields: {
+        room: { $: "String" },
+        latest_index: { $: "Int", size: 32 },
+        server_time: { $: "UInt", size: TIME_BITS }
       }
     }
   }
@@ -805,8 +814,6 @@ function decode_message(buf) {
   const message = decode(MESSAGE_PACKED, buf);
   return from_wire_message(message);
 }
-
-// src/vibinet/server_url.ts
 var OFFICIAL_SERVER_URL = "wss://net.studiovibi.com";
 function normalize_ws_url(raw_url) {
   let ws_url = raw_url;
@@ -828,8 +835,6 @@ function normalize_ws_url(raw_url) {
   }
   return ws_url;
 }
-
-// src/vibinet/client.ts
 function now() {
   return Math.floor(Date.now());
 }
@@ -860,26 +865,88 @@ function create_client(server) {
     request_sent_at: 0,
     last_ping: Infinity
   };
-  const room_watchers = new Map;
+  const room_watchers = /* @__PURE__ */ new Map;
+  const watched_rooms = /* @__PURE__ */ new Set;
+  const latest_post_index_listeners = [];
   let is_synced = false;
   const sync_listeners = [];
+  let heartbeat_id = null;
+  let reconnect_timer_id = null;
+  let reconnect_attempt = 0;
+  let manual_close = false;
+  let ws = null;
+  const pending_posts = [];
   const ws_url = normalize_ws_url(server ?? default_ws_url());
-  const ws = new WebSocket(ws_url);
-  ws.binaryType = "arraybuffer";
   function server_time() {
     if (!isFinite(time_sync.clock_offset)) {
       throw new Error("server_time() called before initial sync");
     }
     return Math.floor(now() + time_sync.clock_offset);
   }
-  function ensure_open() {
-    if (ws.readyState !== WebSocket.OPEN) {
-      throw new Error("WebSocket not open");
+  function clear_heartbeat() {
+    if (heartbeat_id !== null) {
+      clearInterval(heartbeat_id);
+      heartbeat_id = null;
     }
   }
-  function send(buf) {
-    ensure_open();
-    ws.send(buf);
+  function clear_reconnect_timer() {
+    if (reconnect_timer_id !== null) {
+      clearTimeout(reconnect_timer_id);
+      reconnect_timer_id = null;
+    }
+  }
+  function reconnect_delay_ms() {
+    const base = 500;
+    const cap = 8000;
+    const expo = Math.min(cap, base * Math.pow(2, reconnect_attempt));
+    const jitter = Math.floor(Math.random() * 250);
+    return expo + jitter;
+  }
+  function flush_pending_posts_if_open() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    while (pending_posts.length > 0) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      const next = pending_posts[0];
+      try {
+        ws.send(next);
+        pending_posts.shift();
+      } catch {
+        connect();
+        return;
+      }
+    }
+  }
+  function send_time_request_if_open() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    time_sync.request_sent_at = now();
+    ws.send(encode_message({ $: "get_time" }));
+  }
+  function try_send(buf) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    try {
+      ws.send(buf);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function send_or_reconnect(buf) {
+    if (try_send(buf)) {
+      return;
+    }
+    connect();
+  }
+  function queue_post(buf) {
+    pending_posts.push(buf);
+    connect();
   }
   function register_handler(room, packer, handler) {
     const existing = room_watchers.get(room);
@@ -894,55 +961,107 @@ function create_client(server) {
     }
     room_watchers.set(room, { handler, packer });
   }
-  ws.addEventListener("open", () => {
-    console.log("[WS] Connected");
-    time_sync.request_sent_at = now();
-    send(encode_message({ $: "get_time" }));
-    setInterval(() => {
-      time_sync.request_sent_at = now();
-      send(encode_message({ $: "get_time" }));
-    }, 2000);
-  });
-  ws.addEventListener("message", (event) => {
-    const data = event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : new Uint8Array(event.data);
-    const msg = decode_message(data);
-    switch (msg.$) {
-      case "info_time": {
-        const t = now();
-        const ping = t - time_sync.request_sent_at;
-        time_sync.last_ping = ping;
-        if (ping < time_sync.lowest_ping) {
-          const local_avg = Math.floor((time_sync.request_sent_at + t) / 2);
-          time_sync.clock_offset = msg.time - local_avg;
-          time_sync.lowest_ping = ping;
-        }
-        if (!is_synced) {
-          is_synced = true;
-          for (const cb of sync_listeners) {
-            cb();
-          }
-          sync_listeners.length = 0;
-        }
-        break;
-      }
-      case "info_post": {
-        const watcher = room_watchers.get(msg.room);
-        if (watcher && watcher.handler) {
-          const data2 = decode(watcher.packer, msg.payload);
-          watcher.handler({
-            $: "info_post",
-            room: msg.room,
-            index: msg.index,
-            server_time: msg.server_time,
-            client_time: msg.client_time,
-            name: msg.name,
-            data: data2
-          });
-        }
-        break;
-      }
+  function schedule_reconnect() {
+    if (manual_close || reconnect_timer_id !== null) {
+      return;
     }
-  });
+    const delay = reconnect_delay_ms();
+    reconnect_timer_id = setTimeout(() => {
+      reconnect_timer_id = null;
+      reconnect_attempt += 1;
+      connect();
+    }, delay);
+  }
+  function connect() {
+    if (manual_close) {
+      return;
+    }
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+    clear_reconnect_timer();
+    const socket = new WebSocket(ws_url);
+    ws = socket;
+    socket.binaryType = "arraybuffer";
+    socket.addEventListener("open", () => {
+      if (ws !== socket) {
+        return;
+      }
+      reconnect_attempt = 0;
+      console.log("[WS] Connected");
+      send_time_request_if_open();
+      clear_heartbeat();
+      for (const room of watched_rooms.values()) {
+        socket.send(encode_message({ $: "watch", room }));
+      }
+      flush_pending_posts_if_open();
+      heartbeat_id = setInterval(send_time_request_if_open, 2000);
+    });
+    socket.addEventListener("message", (event) => {
+      const data = event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : new Uint8Array(event.data);
+      const msg = decode_message(data);
+      switch (msg.$) {
+        case "info_time": {
+          const t = now();
+          const ping = t - time_sync.request_sent_at;
+          time_sync.last_ping = ping;
+          if (ping < time_sync.lowest_ping) {
+            const local_avg = Math.floor((time_sync.request_sent_at + t) / 2);
+            time_sync.clock_offset = msg.time - local_avg;
+            time_sync.lowest_ping = ping;
+          }
+          if (!is_synced) {
+            is_synced = true;
+            for (const cb of sync_listeners) {
+              cb();
+            }
+            sync_listeners.length = 0;
+          }
+          break;
+        }
+        case "info_post": {
+          const watcher = room_watchers.get(msg.room);
+          if (watcher && watcher.handler) {
+            const data2 = decode(watcher.packer, msg.payload);
+            watcher.handler({
+              $: "info_post",
+              room: msg.room,
+              index: msg.index,
+              server_time: msg.server_time,
+              client_time: msg.client_time,
+              name: msg.name,
+              data: data2
+            });
+          }
+          break;
+        }
+        case "info_latest_post_index": {
+          for (const cb of latest_post_index_listeners) {
+            cb({
+              room: msg.room,
+              latest_index: msg.latest_index,
+              server_time: msg.server_time
+            });
+          }
+          break;
+        }
+      }
+    });
+    socket.addEventListener("close", (event) => {
+      if (ws !== socket) {
+        return;
+      }
+      clear_heartbeat();
+      ws = null;
+      if (manual_close) {
+        return;
+      }
+      console.warn(`[WS] Disconnected (code=${event.code}); reconnecting...`);
+      schedule_reconnect();
+    });
+    socket.addEventListener("error", () => {});
+  }
+  connect();
   return {
     on_sync: (callback) => {
       if (is_synced) {
@@ -953,27 +1072,703 @@ function create_client(server) {
     },
     watch: (room, packer, handler) => {
       register_handler(room, packer, handler);
-      send(encode_message({ $: "watch", room }));
+      watched_rooms.add(room);
+      send_or_reconnect(encode_message({ $: "watch", room }));
     },
-    load: (room, from, packer) => {
-      register_handler(room, packer);
-      send(encode_message({ $: "load", room, from }));
+    load: (room, from, packer, handler) => {
+      register_handler(room, packer, handler);
+      send_or_reconnect(encode_message({ $: "load", room, from }));
+    },
+    get_latest_post_index: (room) => {
+      send_or_reconnect(encode_message({ $: "get_latest_post_index", room }));
+    },
+    on_latest_post_index: (callback) => {
+      latest_post_index_listeners.push(callback);
     },
     post: (room, data, packer) => {
       const name = gen_name();
       const payload = encode(packer, data);
-      send(encode_message({ $: "post", room, time: server_time(), name, payload }));
+      const message = encode_message({ $: "post", room, time: server_time(), name, payload });
+      if (pending_posts.length > 0) {
+        flush_pending_posts_if_open();
+      }
+      if (!try_send(message)) {
+        queue_post(message);
+      }
       return name;
     },
     server_time,
     ping: () => time_sync.last_ping,
-    close: () => ws.close()
+    close: () => {
+      manual_close = true;
+      clear_reconnect_timer();
+      clear_heartbeat();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        for (const room of watched_rooms.values()) {
+          try {
+            ws.send(encode_message({ $: "unwatch", room }));
+          } catch {
+            break;
+          }
+        }
+      }
+      if (ws) {
+        ws.close();
+      }
+      ws = null;
+    },
+    debug_dump: () => ({
+      ws_url,
+      ws_ready_state: ws ? ws.readyState : WebSocket.CLOSED,
+      is_synced,
+      reconnect_attempt,
+      reconnect_scheduled: reconnect_timer_id !== null,
+      pending_post_count: pending_posts.length,
+      watched_rooms: Array.from(watched_rooms.values()),
+      room_watchers: Array.from(room_watchers.keys()),
+      room_watcher_count: room_watchers.size,
+      latest_post_index_listener_count: latest_post_index_listeners.length,
+      sync_listener_count: sync_listeners.length,
+      time_sync: {
+        clock_offset: time_sync.clock_offset,
+        lowest_ping: time_sync.lowest_ping,
+        request_sent_at: time_sync.request_sent_at,
+        last_ping: time_sync.last_ping
+      }
+    })
   };
 }
+var _VibiNet = class _VibiNet2 {
+  constructor(options) {
+    __publicField(this, "room");
+    __publicField(this, "init");
+    __publicField(this, "on_tick");
+    __publicField(this, "on_post");
+    __publicField(this, "packer");
+    __publicField(this, "smooth");
+    __publicField(this, "tick_rate");
+    __publicField(this, "tolerance");
+    __publicField(this, "client_api");
+    __publicField(this, "remote_posts");
+    __publicField(this, "local_posts");
+    __publicField(this, "timeline");
+    __publicField(this, "cache_enabled");
+    __publicField(this, "snapshot_stride");
+    __publicField(this, "snapshot_count");
+    __publicField(this, "snapshots");
+    __publicField(this, "snapshot_start_tick");
+    __publicField(this, "initial_time_value");
+    __publicField(this, "initial_tick_value");
+    __publicField(this, "no_pending_posts_before_ms");
+    __publicField(this, "max_contiguous_remote_index");
+    __publicField(this, "cache_drop_guard_hits");
+    __publicField(this, "latest_index_poll_interval_id");
+    __publicField(this, "max_remote_index");
+    const default_smooth = (remote, _local) => remote;
+    const smooth = options.smooth ?? default_smooth;
+    const cache = options.cache ?? true;
+    const snapshot_stride = options.snapshot_stride ?? 8;
+    const snapshot_count = options.snapshot_count ?? 256;
+    const client_api = options.client ?? create_client(options.server);
+    this.room = options.room;
+    this.init = options.initial;
+    this.on_tick = options.on_tick;
+    this.on_post = options.on_post;
+    this.packer = options.packer;
+    this.smooth = smooth;
+    this.tick_rate = options.tick_rate;
+    this.tolerance = options.tolerance;
+    this.client_api = client_api;
+    this.remote_posts = /* @__PURE__ */ new Map;
+    this.local_posts = /* @__PURE__ */ new Map;
+    this.timeline = /* @__PURE__ */ new Map;
+    this.cache_enabled = cache;
+    this.snapshot_stride = Math.max(1, Math.floor(snapshot_stride));
+    this.snapshot_count = Math.max(1, Math.floor(snapshot_count));
+    this.snapshots = /* @__PURE__ */ new Map;
+    this.snapshot_start_tick = null;
+    this.initial_time_value = null;
+    this.initial_tick_value = null;
+    this.no_pending_posts_before_ms = null;
+    this.max_contiguous_remote_index = -1;
+    this.cache_drop_guard_hits = 0;
+    this.latest_index_poll_interval_id = null;
+    this.max_remote_index = -1;
+    if (this.client_api.on_latest_post_index) {
+      this.client_api.on_latest_post_index((info) => {
+        this.on_latest_post_index_info(info);
+      });
+    }
+    this.client_api.on_sync(() => {
+      console.log(`[VIBI] synced; loading+watching room=${this.room}`);
+      const on_info_post = (post) => {
+        if (post.name) {
+          this.remove_local_post(post.name);
+        }
+        this.add_remote_post(post);
+      };
+      this.client_api.load(this.room, 0, this.packer, on_info_post);
+      this.client_api.watch(this.room, this.packer, on_info_post);
+      this.request_latest_post_index();
+      if (this.latest_index_poll_interval_id !== null) {
+        clearInterval(this.latest_index_poll_interval_id);
+      }
+      this.latest_index_poll_interval_id = setInterval(() => {
+        this.request_latest_post_index();
+      }, 2000);
+    });
+  }
+  official_time(post) {
+    if (post.client_time <= post.server_time - this.tolerance) {
+      return post.server_time - this.tolerance;
+    } else {
+      return post.client_time;
+    }
+  }
+  official_tick(post) {
+    return this.time_to_tick(this.official_time(post));
+  }
+  get_bucket(tick) {
+    let bucket = this.timeline.get(tick);
+    if (!bucket) {
+      bucket = { remote: [], local: [] };
+      this.timeline.set(tick, bucket);
+    }
+    return bucket;
+  }
+  insert_remote_post(post, tick) {
+    const bucket = this.get_bucket(tick);
+    bucket.remote.push(post);
+    bucket.remote.sort((a, b) => a.index - b.index);
+  }
+  invalidate_from_tick(tick) {
+    if (!this.cache_enabled) {
+      return;
+    }
+    const start_tick = this.snapshot_start_tick;
+    if (start_tick !== null && tick < start_tick) {
+      return;
+    }
+    if (start_tick === null || this.snapshots.size === 0) {
+      return;
+    }
+    const stride = this.snapshot_stride;
+    const end_tick = start_tick + (this.snapshots.size - 1) * stride;
+    if (tick > end_tick) {
+      return;
+    }
+    if (tick <= start_tick) {
+      this.snapshots.clear();
+      return;
+    }
+    for (let t = end_tick;t >= tick; t -= stride) {
+      this.snapshots.delete(t);
+    }
+  }
+  advance_state(state, from_tick, to_tick) {
+    let next = state;
+    for (let tick = from_tick + 1;tick <= to_tick; tick++) {
+      next = this.apply_tick(next, tick);
+    }
+    return next;
+  }
+  prune_before_tick(prune_tick) {
+    if (!this.cache_enabled) {
+      return;
+    }
+    const safe_prune_tick = this.safe_prune_tick();
+    if (safe_prune_tick !== null && prune_tick > safe_prune_tick) {
+      this.cache_drop_guard_hits += 1;
+      prune_tick = safe_prune_tick;
+    }
+    for (const tick of this.timeline.keys()) {
+      if (tick < prune_tick) {
+        this.timeline.delete(tick);
+      }
+    }
+    for (const [index, post] of this.remote_posts.entries()) {
+      if (this.official_tick(post) < prune_tick) {
+        this.remote_posts.delete(index);
+      }
+    }
+    for (const [name, post] of this.local_posts.entries()) {
+      if (this.official_tick(post) < prune_tick) {
+        this.local_posts.delete(name);
+      }
+    }
+  }
+  tick_ms() {
+    return 1000 / this.tick_rate;
+  }
+  cache_window_ticks() {
+    return this.snapshot_stride * Math.max(0, this.snapshot_count - 1);
+  }
+  safe_prune_tick() {
+    if (this.no_pending_posts_before_ms === null) {
+      return null;
+    }
+    return this.time_to_tick(this.no_pending_posts_before_ms);
+  }
+  safe_compute_tick(requested_tick) {
+    if (!this.cache_enabled) {
+      return requested_tick;
+    }
+    const safe_prune_tick = this.safe_prune_tick();
+    if (safe_prune_tick === null) {
+      return requested_tick;
+    }
+    const safe_tick = safe_prune_tick + this.cache_window_ticks();
+    return Math.min(requested_tick, safe_tick);
+  }
+  advance_no_pending_posts_before_ms(candidate) {
+    const bounded = Math.max(0, Math.floor(candidate));
+    if (this.no_pending_posts_before_ms === null || bounded > this.no_pending_posts_before_ms) {
+      this.no_pending_posts_before_ms = bounded;
+    }
+  }
+  advance_contiguous_remote_frontier() {
+    for (;; ) {
+      const next_index = this.max_contiguous_remote_index + 1;
+      const post = this.remote_posts.get(next_index);
+      if (!post) {
+        break;
+      }
+      this.max_contiguous_remote_index = next_index;
+      this.advance_no_pending_posts_before_ms(this.official_time(post));
+    }
+  }
+  on_latest_post_index_info(info) {
+    if (info.room !== this.room) {
+      return;
+    }
+    if (info.latest_index > this.max_contiguous_remote_index) {
+      return;
+    }
+    const conservative_margin = this.tick_ms();
+    const candidate = info.server_time - this.tolerance - conservative_margin;
+    this.advance_no_pending_posts_before_ms(candidate);
+  }
+  request_latest_post_index() {
+    if (!this.client_api.get_latest_post_index) {
+      return;
+    }
+    try {
+      this.client_api.get_latest_post_index(this.room);
+    } catch {}
+  }
+  ensure_snapshots(at_tick, initial_tick) {
+    if (!this.cache_enabled) {
+      return;
+    }
+    if (this.snapshot_start_tick === null) {
+      this.snapshot_start_tick = initial_tick;
+    }
+    let start_tick = this.snapshot_start_tick;
+    if (start_tick === null) {
+      return;
+    }
+    if (at_tick < start_tick) {
+      return;
+    }
+    const stride = this.snapshot_stride;
+    const target_tick = start_tick + Math.floor((at_tick - start_tick) / stride) * stride;
+    let state;
+    let current_tick;
+    if (this.snapshots.size === 0) {
+      state = this.init;
+      current_tick = start_tick - 1;
+    } else {
+      const end_tick = start_tick + (this.snapshots.size - 1) * stride;
+      state = this.snapshots.get(end_tick);
+      current_tick = end_tick;
+    }
+    let next_tick = current_tick + stride;
+    if (this.snapshots.size === 0) {
+      next_tick = start_tick;
+    }
+    for (;next_tick <= target_tick; next_tick += stride) {
+      state = this.advance_state(state, current_tick, next_tick);
+      this.snapshots.set(next_tick, state);
+      current_tick = next_tick;
+    }
+    const count = this.snapshots.size;
+    if (count > this.snapshot_count) {
+      const overflow = count - this.snapshot_count;
+      const drop_until = start_tick + overflow * stride;
+      for (let t = start_tick;t < drop_until; t += stride) {
+        this.snapshots.delete(t);
+      }
+      start_tick = drop_until;
+      this.snapshot_start_tick = start_tick;
+    }
+    this.prune_before_tick(start_tick);
+  }
+  add_remote_post(post) {
+    const tick = this.official_tick(post);
+    if (post.index === 0 && this.initial_time_value === null) {
+      const t = this.official_time(post);
+      this.initial_time_value = t;
+      this.initial_tick_value = this.time_to_tick(t);
+    }
+    if (this.remote_posts.has(post.index)) {
+      return;
+    }
+    const before_window = this.cache_enabled && this.snapshot_start_tick !== null && tick < this.snapshot_start_tick;
+    if (before_window) {
+      this.cache_drop_guard_hits += 1;
+      this.snapshots.clear();
+      this.snapshot_start_tick = null;
+    }
+    this.remote_posts.set(post.index, post);
+    if (post.index > this.max_remote_index) {
+      this.max_remote_index = post.index;
+    }
+    this.advance_contiguous_remote_frontier();
+    this.insert_remote_post(post, tick);
+    this.invalidate_from_tick(tick);
+  }
+  add_local_post(name, post) {
+    if (this.local_posts.has(name)) {
+      this.remove_local_post(name);
+    }
+    const tick = this.official_tick(post);
+    const before_window = this.cache_enabled && this.snapshot_start_tick !== null && tick < this.snapshot_start_tick;
+    if (before_window) {
+      this.cache_drop_guard_hits += 1;
+      this.snapshots.clear();
+      this.snapshot_start_tick = null;
+    }
+    this.local_posts.set(name, post);
+    this.get_bucket(tick).local.push(post);
+    this.invalidate_from_tick(tick);
+  }
+  remove_local_post(name) {
+    const post = this.local_posts.get(name);
+    if (!post) {
+      return;
+    }
+    this.local_posts.delete(name);
+    const tick = this.official_tick(post);
+    const bucket = this.timeline.get(tick);
+    if (bucket) {
+      const index = bucket.local.indexOf(post);
+      if (index !== -1) {
+        bucket.local.splice(index, 1);
+      } else {
+        const by_name = bucket.local.findIndex((p) => p.name === name);
+        if (by_name !== -1) {
+          bucket.local.splice(by_name, 1);
+        }
+      }
+      if (bucket.remote.length === 0 && bucket.local.length === 0) {
+        this.timeline.delete(tick);
+      }
+    }
+    this.invalidate_from_tick(tick);
+  }
+  apply_tick(state, tick) {
+    let next = this.on_tick(state);
+    const bucket = this.timeline.get(tick);
+    if (bucket) {
+      for (const post of bucket.remote) {
+        next = this.on_post(post.data, next);
+      }
+      for (const post of bucket.local) {
+        next = this.on_post(post.data, next);
+      }
+    }
+    return next;
+  }
+  compute_state_at_uncached(initial_tick, at_tick) {
+    let state = this.init;
+    for (let tick = initial_tick;tick <= at_tick; tick++) {
+      state = this.apply_tick(state, tick);
+    }
+    return state;
+  }
+  post_to_debug_dump(post) {
+    return {
+      room: post.room,
+      index: post.index,
+      server_time: post.server_time,
+      client_time: post.client_time,
+      name: post.name,
+      official_time: this.official_time(post),
+      official_tick: this.official_tick(post),
+      data: post.data
+    };
+  }
+  timeline_tick_bounds() {
+    let min = null;
+    let max = null;
+    for (const tick of this.timeline.keys()) {
+      if (min === null || tick < min) {
+        min = tick;
+      }
+      if (max === null || tick > max) {
+        max = tick;
+      }
+    }
+    return { min, max };
+  }
+  snapshot_tick_bounds() {
+    let min = null;
+    let max = null;
+    for (const tick of this.snapshots.keys()) {
+      if (min === null || tick < min) {
+        min = tick;
+      }
+      if (max === null || tick > max) {
+        max = tick;
+      }
+    }
+    return { min, max };
+  }
+  time_to_tick(server_time) {
+    return Math.floor(server_time * this.tick_rate / 1000);
+  }
+  server_time() {
+    return this.client_api.server_time();
+  }
+  server_tick() {
+    return this.time_to_tick(this.server_time());
+  }
+  post_count() {
+    return this.max_remote_index + 1;
+  }
+  compute_render_state() {
+    const curr_tick = this.server_tick();
+    const tick_ms = 1000 / this.tick_rate;
+    const tol_ticks = Math.ceil(this.tolerance / tick_ms);
+    const rtt_ms = this.client_api.ping();
+    const half_rtt = isFinite(rtt_ms) ? Math.ceil(rtt_ms / 2 / tick_ms) : 0;
+    const remote_lag = Math.max(tol_ticks, half_rtt + 1);
+    const remote_tick = Math.max(0, curr_tick - remote_lag);
+    const remote_state = this.compute_state_at(remote_tick);
+    const local_state = this.compute_state_at(curr_tick);
+    return this.smooth(remote_state, local_state);
+  }
+  initial_time() {
+    if (this.initial_time_value !== null) {
+      return this.initial_time_value;
+    }
+    const post = this.remote_posts.get(0);
+    if (!post) {
+      return null;
+    }
+    const t = this.official_time(post);
+    this.initial_time_value = t;
+    this.initial_tick_value = this.time_to_tick(t);
+    return t;
+  }
+  initial_tick() {
+    if (this.initial_tick_value !== null) {
+      return this.initial_tick_value;
+    }
+    const t = this.initial_time();
+    if (t === null) {
+      return null;
+    }
+    this.initial_tick_value = this.time_to_tick(t);
+    return this.initial_tick_value;
+  }
+  compute_state_at(at_tick) {
+    at_tick = this.safe_compute_tick(at_tick);
+    const initial_tick = this.initial_tick();
+    if (initial_tick === null) {
+      return this.init;
+    }
+    if (at_tick < initial_tick) {
+      return this.init;
+    }
+    if (!this.cache_enabled) {
+      return this.compute_state_at_uncached(initial_tick, at_tick);
+    }
+    this.ensure_snapshots(at_tick, initial_tick);
+    const start_tick = this.snapshot_start_tick;
+    if (start_tick === null || this.snapshots.size === 0) {
+      return this.init;
+    }
+    if (at_tick < start_tick) {
+      return this.snapshots.get(start_tick) ?? this.init;
+    }
+    const stride = this.snapshot_stride;
+    const end_tick = start_tick + (this.snapshots.size - 1) * stride;
+    const max_index = Math.floor((end_tick - start_tick) / stride);
+    const snap_index = Math.floor((at_tick - start_tick) / stride);
+    const index = Math.min(snap_index, max_index);
+    const snap_tick = start_tick + index * stride;
+    const base_state = this.snapshots.get(snap_tick) ?? this.init;
+    return this.advance_state(base_state, snap_tick, at_tick);
+  }
+  debug_dump() {
+    const remote_posts = Array.from(this.remote_posts.values()).sort((a, b) => a.index - b.index).map((post) => this.post_to_debug_dump(post));
+    const local_posts = Array.from(this.local_posts.values()).sort((a, b) => {
+      const ta = this.official_tick(a);
+      const tb = this.official_tick(b);
+      if (ta !== tb) {
+        return ta - tb;
+      }
+      const na = a.name ?? "";
+      const nb = b.name ?? "";
+      return na.localeCompare(nb);
+    }).map((post) => this.post_to_debug_dump(post));
+    const timeline = Array.from(this.timeline.entries()).sort((a, b) => a[0] - b[0]).map(([tick, bucket]) => ({
+      tick,
+      remote_count: bucket.remote.length,
+      local_count: bucket.local.length,
+      remote_posts: bucket.remote.map((post) => this.post_to_debug_dump(post)),
+      local_posts: bucket.local.map((post) => this.post_to_debug_dump(post))
+    }));
+    const snapshots = Array.from(this.snapshots.entries()).sort((a, b) => a[0] - b[0]).map(([tick, state]) => ({ tick, state }));
+    const initial_time = this.initial_time();
+    const initial_tick = this.initial_tick();
+    const timeline_bounds = this.timeline_tick_bounds();
+    const snapshot_bounds = this.snapshot_tick_bounds();
+    const history_truncated = initial_tick !== null && timeline_bounds.min !== null && timeline_bounds.min > initial_tick;
+    let server_time = null;
+    let server_tick = null;
+    try {
+      server_time = this.server_time();
+      server_tick = this.server_tick();
+    } catch {
+      server_time = null;
+      server_tick = null;
+    }
+    let min_remote_index = null;
+    let max_remote_index = null;
+    for (const index of this.remote_posts.keys()) {
+      if (min_remote_index === null || index < min_remote_index) {
+        min_remote_index = index;
+      }
+      if (max_remote_index === null || index > max_remote_index) {
+        max_remote_index = index;
+      }
+    }
+    const client_debug = typeof this.client_api.debug_dump === "function" ? this.client_api.debug_dump() : null;
+    return {
+      room: this.room,
+      tick_rate: this.tick_rate,
+      tolerance: this.tolerance,
+      cache_enabled: this.cache_enabled,
+      snapshot_stride: this.snapshot_stride,
+      snapshot_count: this.snapshot_count,
+      snapshot_start_tick: this.snapshot_start_tick,
+      no_pending_posts_before_ms: this.no_pending_posts_before_ms,
+      max_contiguous_remote_index: this.max_contiguous_remote_index,
+      initial_time,
+      initial_tick,
+      max_remote_index: this.max_remote_index,
+      post_count: this.post_count(),
+      server_time,
+      server_tick,
+      ping: this.ping(),
+      history_truncated,
+      cache_drop_guard_hits: this.cache_drop_guard_hits,
+      counts: {
+        remote_posts: this.remote_posts.size,
+        local_posts: this.local_posts.size,
+        timeline_ticks: this.timeline.size,
+        snapshots: this.snapshots.size
+      },
+      ranges: {
+        timeline_min_tick: timeline_bounds.min,
+        timeline_max_tick: timeline_bounds.max,
+        snapshot_min_tick: snapshot_bounds.min,
+        snapshot_max_tick: snapshot_bounds.max,
+        min_remote_index,
+        max_remote_index
+      },
+      remote_posts,
+      local_posts,
+      timeline,
+      snapshots,
+      client_debug
+    };
+  }
+  debug_recompute(at_tick) {
+    const initial_tick = this.initial_tick();
+    const timeline_bounds = this.timeline_tick_bounds();
+    const history_truncated = initial_tick !== null && timeline_bounds.min !== null && timeline_bounds.min > initial_tick;
+    let target_tick = at_tick;
+    if (target_tick === undefined) {
+      try {
+        target_tick = this.server_tick();
+      } catch {
+        target_tick = undefined;
+      }
+    }
+    if (target_tick === undefined) {
+      target_tick = initial_tick ?? 0;
+    }
+    const invalidated_snapshot_count = this.snapshots.size;
+    this.snapshots.clear();
+    this.snapshot_start_tick = null;
+    const notes = [];
+    if (history_truncated) {
+      notes.push("Local history before timeline_min_tick was pruned; full room replay may be impossible without reloading posts.");
+    }
+    if (initial_tick === null || target_tick < initial_tick) {
+      notes.push("No replayable post range available at target tick.");
+      return {
+        target_tick,
+        initial_tick,
+        cache_invalidated: true,
+        invalidated_snapshot_count,
+        history_truncated,
+        state: this.init,
+        notes
+      };
+    }
+    const state = this.compute_state_at_uncached(initial_tick, target_tick);
+    return {
+      target_tick,
+      initial_tick,
+      cache_invalidated: true,
+      invalidated_snapshot_count,
+      history_truncated,
+      state,
+      notes
+    };
+  }
+  post(data) {
+    const name = this.client_api.post(this.room, data, this.packer);
+    const t = this.server_time();
+    const local_post = {
+      room: this.room,
+      index: -1,
+      server_time: t,
+      client_time: t,
+      name,
+      data
+    };
+    this.add_local_post(name, local_post);
+  }
+  compute_current_state() {
+    return this.compute_state_at(this.server_tick());
+  }
+  on_sync(callback) {
+    this.client_api.on_sync(callback);
+  }
+  ping() {
+    return this.client_api.ping();
+  }
+  close() {
+    if (this.latest_index_poll_interval_id !== null) {
+      clearInterval(this.latest_index_poll_interval_id);
+      this.latest_index_poll_interval_id = null;
+    }
+    this.client_api.close();
+  }
+  static gen_name() {
+    return gen_name();
+  }
+};
+__publicField(_VibiNet, "game", _VibiNet);
 
 // src/client.ts
 var ROOM_POST_PACKER = { $: "String" };
-var client = create_client(WS_URL);
+var client = create_client();
 var room_watchers = new Map;
 function decode_room_post(raw) {
   if (typeof raw !== "string") {
@@ -1029,9 +1824,6 @@ function watch(room, handler) {
   });
 }
 function on_sync(callback) {
-  client.on_sync(callback);
-}
-function on_open(callback) {
   client.on_sync(callback);
 }
 function ping() {
@@ -2131,6 +2923,9 @@ var relay_ready = { player1: false, player2: false };
 var relay_teams = { player1: null, player2: null };
 var relay_intents = { player1: null, player2: null };
 var relay_ready_order = [];
+var join_sent = false;
+var room_feed_started = false;
+var chat_ready = false;
 function icon_path(id) {
   return `./icons/unit_${id}.png`;
 }
@@ -3570,23 +4365,30 @@ update_roster_count();
 update_slots();
 update_action_controls();
 render_participants();
-on_open(() => {
-  if (status_conn)
-    status_conn.textContent = "connected";
-  append_log(`connected: room=${room}`);
-  try {
-    watch(room, consume_network_message);
-    load(room, 0, consume_network_message);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    append_log(`sync setup failed: ${reason}`);
-  }
-  try_post({ $: "join", name: player_name, player_id });
-  append_log(`join request: ${player_name}`);
-  setup_chat_input(chat_input, chat_send);
-});
 on_sync(() => {
   if (status_conn)
     status_conn.textContent = "synced";
+  append_log(`connected: room=${room}`);
   append_log("sync complete");
+  if (!chat_ready) {
+    setup_chat_input(chat_input, chat_send);
+    chat_ready = true;
+  }
+  if (!room_feed_started) {
+    try {
+      watch(room, consume_network_message);
+      load(room, 0, consume_network_message);
+      room_feed_started = true;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      append_log(`sync setup failed: ${reason}`);
+      return;
+    }
+  }
+  if (!join_sent) {
+    if (try_post({ $: "join", name: player_name, player_id })) {
+      append_log(`join request: ${player_name}`);
+      join_sent = true;
+    }
+  }
 });

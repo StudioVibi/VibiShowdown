@@ -1,6 +1,4 @@
-import { WS_URL } from "./config.ts";
-import { create_client, gen_name } from "./vibinet/client.ts";
-import type { Packed } from "./vibinet/packer.ts";
+import { create_client, gen_name } from "vibinet";
 import type { RoomPost } from "./shared.ts";
 
 type MessageHandler = (message: {
@@ -13,8 +11,8 @@ type MessageHandler = (message: {
   data: RoomPost;
 }) => void;
 
-const ROOM_POST_PACKER: Packed = { $: "String" };
-const client = create_client<string>(WS_URL);
+const ROOM_POST_PACKER = { $: "String" } as const;
+const client = create_client<string>();
 const room_watchers = new Map<string, MessageHandler>();
 
 function decode_room_post(raw: unknown): RoomPost | null {
@@ -90,11 +88,6 @@ export function close(): void {
 }
 
 export function on_sync(callback: () => void): void {
-  client.on_sync(callback);
-}
-
-// The VibiNet client API only exposes `on_sync`; treat sync as ready/open.
-export function on_open(callback: () => void): void {
   client.on_sync(callback);
 }
 

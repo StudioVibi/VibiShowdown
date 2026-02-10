@@ -1,4 +1,4 @@
-import { gen_name, load, on_open, on_sync, ping, post, watch } from "../src/client.ts";
+import { gen_name, load, on_sync, ping, post, watch } from "../src/client.ts";
 import {
   MONSTER_BY_ID as roster_by_id,
   MONSTER_ROSTER as roster,
@@ -166,6 +166,9 @@ const relay_ready: Record<PlayerSlot, boolean> = { player1: false, player2: fals
 const relay_teams: Record<PlayerSlot, TeamSelection | null> = { player1: null, player2: null };
 const relay_intents: Record<PlayerSlot, PlayerIntent | null> = { player1: null, player2: null };
 const relay_ready_order: PlayerSlot[] = [];
+let join_sent = false;
+let room_feed_started = false;
+let chat_ready = false;
 
 function icon_path(id: string): string {
   return `./icons/unit_${id}.png`;
@@ -1742,22 +1745,29 @@ update_slots();
 update_action_controls();
 render_participants();
 
-on_open(() => {
-  if (status_conn) status_conn.textContent = "connected";
-  append_log(`connected: room=${room}`);
-  try {
-    watch(room, consume_network_message);
-    load(room, 0, consume_network_message);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    append_log(`sync setup failed: ${reason}`);
-  }
-  try_post({ $: "join", name: player_name, player_id });
-  append_log(`join request: ${player_name}`);
-  setup_chat_input(chat_input, chat_send);
-});
-
 on_sync(() => {
   if (status_conn) status_conn.textContent = "synced";
+  append_log(`connected: room=${room}`);
   append_log("sync complete");
+  if (!chat_ready) {
+    setup_chat_input(chat_input, chat_send);
+    chat_ready = true;
+  }
+  if (!room_feed_started) {
+    try {
+      watch(room, consume_network_message);
+      load(room, 0, consume_network_message);
+      room_feed_started = true;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      append_log(`sync setup failed: ${reason}`);
+      return;
+    }
+  }
+  if (!join_sent) {
+    if (try_post({ $: "join", name: player_name, player_id })) {
+      append_log(`join request: ${player_name}`);
+      join_sent = true;
+    }
+  }
 });

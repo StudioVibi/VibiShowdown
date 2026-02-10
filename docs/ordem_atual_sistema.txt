@@ -13,12 +13,11 @@ Documentar a ordem de execucao principal do app hoje:
 Arquivo principal: vibishowdown/index.ts
 
 Fluxo de inicializacao:
-1. Cliente abre websocket (via src/client.ts -> src/vibinet/client.ts).
-2. Em on_open:
+1. Cliente abre websocket via pacote oficial `vibinet` (src/client.ts).
+2. Em on_sync:
    - watch(room, consume_network_message)
    - load(room, 0, consume_network_message)
    - post(join)
-3. Em on_sync:
    - status muda para "synced"
    - app considera sincronizacao de tempo completa.
 
@@ -37,6 +36,7 @@ Observacao:
 - Mesmo com fallback deterministico, o endpoint permanece oficial:
   wss://net.studiovibi.com
 - Nao existe backend local de jogo neste repositorio.
+- Nao existe protocolo custom local (`src/vibinet/*` foi removido).
 
 
 2) Ordem de combate (engine)
