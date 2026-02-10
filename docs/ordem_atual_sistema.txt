@@ -1,0 +1,83 @@
+VibiShowdown - Ordem atual do sistema (oficial-only)
+=====================================================
+
+Objetivo deste arquivo
+----------------------
+Documentar a ordem de execucao principal do app hoje:
+1) ordem de rede/sincronizacao
+2) ordem de processamento de turno no motor de combate
+
+
+1) Ordem de rede (cliente)
+--------------------------
+Arquivo principal: vibishowdown/index.ts
+
+Fluxo de inicializacao:
+1. Cliente abre websocket (via src/client.ts -> src/vibinet/client.ts).
+2. Em on_open:
+   - watch(room, consume_network_message)
+   - load(room, 0, consume_network_message)
+   - post(join)
+3. Em on_sync:
+   - status muda para "synced"
+   - app considera sincronizacao de tempo completa.
+
+Fluxo de mensagem recebida (consume_network_message):
+1. Deduplica por index (quando index >= 0).
+2. Se mensagem for "server-managed" (assign/ready_state/participants/turn_start/state/intent_locked):
+   - ativa modo server-managed
+   - encaminha direto para handle_post.
+3. Se ja estiver em server-managed:
+   - encaminha direto para handle_post.
+4. Caso contrario:
+   - usa fallback cliente-deterministico (relay_consume_post)
+   - reconstrui estado local a partir de join/ready/intent/forced_switch/surrender/chat.
+
+Observacao:
+- Mesmo com fallback deterministico, o endpoint permanece oficial:
+  wss://net.studiovibi.com
+
+
+2) Ordem de combate (engine)
+----------------------------
+Arquivo principal: src/engine.ts
+
+Funcao central: resolve_turn(state, intents)
+
+Ordem exata atual:
+1. clone_state do estado recebido.
+2. reset_protect_flags no inicio do turno.
+3. build_actions a partir dos intents.
+4. Ordena fases por "order":
+   - switch (0)
+   - guard (1)
+   - attack_01 (2)
+5. Para cada fase:
+   - filtra actions da fase
+   - se houver duas actions, resolve iniciativa
+   - executa action por action
+   - valida fim de partida apos cada action
+6. Apos fases (se nao encerrou):
+   - apply_passives (motor decide QUANDO chamar)
+   - resolve_agility
+   - decrement_cooldowns
+   - reset_protect_flags no fim do turno
+
+Importante sobre passivas:
+- A ordem de chamada continua no engine (passo 6).
+- A logica da passiva fica no modulo de passivas:
+  src/data/pokedex/passives.ts
+- O engine chama apply_passive_turn_effect(...) para cada player ativo.
+
+
+3) Onde alterar cada tipo de regra
+----------------------------------
+Cadastro de dados:
+- Pokemons/defaults: src/data/pokedex/pokemon.ts
+- Moves/catalogo: src/data/pokedex/moves.ts
+- Passivas/catalogo + efeitos: src/data/pokedex/passives.ts
+- Validacao de consistencia: src/data/pokedex/validate.ts
+
+Ordem de execucao:
+- Sempre em src/engine.ts (resolve_turn e funcoes auxiliares).
+

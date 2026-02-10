@@ -1038,6 +1038,244 @@ function ping() {
   return client.ping();
 }
 
+// src/data/pokedex/moves.ts
+var MOVE_CATALOG = [
+  { id: "basic_attack", label: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 110 },
+  { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
+  { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
+  {
+    id: "return",
+    label: "Return",
+    phaseId: "attack_01",
+    attackMultiplier100: 72,
+    attackMultiplierPerLevel100: 4
+  },
+  {
+    id: "double_edge",
+    label: "Double-Edge",
+    phaseId: "attack_01",
+    attackMultiplier100: 120,
+    recoilNumerator: 1,
+    recoilDenominator: 3
+  },
+  {
+    id: "seismic_toss",
+    label: "Seismic Toss",
+    phaseId: "attack_01",
+    attackMultiplier100: 100,
+    damageType: "flat",
+    flatDamage: 75
+  },
+  { id: "screech", label: "Screech", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },
+  { id: "protect", label: "Protect", phaseId: "guard", attackMultiplier100: 100 },
+  { id: "none", label: "none", phaseId: "attack_01", attackMultiplier100: 100 }
+];
+var MOVE_OPTIONS = MOVE_CATALOG.map((entry) => entry.id);
+var MOVE_LABELS = Object.fromEntries(MOVE_CATALOG.map((entry) => [entry.id, entry.label]));
+var MOVE_BY_ID_INTERNAL = new Map(MOVE_CATALOG.map((entry) => [entry.id, entry]));
+var MOVE_BY_ID = MOVE_BY_ID_INTERNAL;
+function move_spec(move_id) {
+  return MOVE_BY_ID_INTERNAL.get(move_id) ?? MOVE_BY_ID_INTERNAL.get("none");
+}
+
+// src/data/pokedex/passives.ts
+var PASSIVE_CATALOG = [
+  { id: "none", label: "none" },
+  { id: "leftovers", label: "Leftovers", aliases: ["regen_5pct"] },
+  { id: "choice_band", label: "Choice Band" }
+];
+var PASSIVE_OPTIONS = PASSIVE_CATALOG.map((entry) => entry.id);
+var PASSIVE_LABELS = Object.fromEntries(PASSIVE_CATALOG.flatMap((entry) => {
+  const rows = [[entry.id, entry.label]];
+  for (const alias of entry.aliases ?? []) {
+    rows.push([alias, entry.label]);
+  }
+  return rows;
+}));
+var PASSIVE_BY_ID_INTERNAL = new Map;
+for (const entry of PASSIVE_CATALOG) {
+  PASSIVE_BY_ID_INTERNAL.set(entry.id, entry);
+  for (const alias of entry.aliases ?? []) {
+    PASSIVE_BY_ID_INTERNAL.set(alias, entry);
+  }
+}
+var PASSIVE_BY_ID = PASSIVE_BY_ID_INTERNAL;
+function normalize_passive_id(passive_id) {
+  return PASSIVE_BY_ID_INTERNAL.get(passive_id)?.id ?? passive_id;
+}
+function passive_spec(passive_id) {
+  return PASSIVE_BY_ID_INTERNAL.get(passive_id) ?? PASSIVE_BY_ID_INTERNAL.get("none");
+}
+function apply_leftovers(context) {
+  const { monster } = context;
+  const heal = Math.floor(monster.maxHp * 0.06);
+  if (heal <= 0) {
+    return;
+  }
+  const before = monster.hp;
+  monster.hp = Math.min(monster.maxHp, monster.hp + heal);
+  const gained = monster.hp - before;
+  if (gained <= 0) {
+    return;
+  }
+  context.hp_changed.add(monster);
+  context.log.push({
+    type: "passive_heal",
+    turn: context.turn,
+    summary: `${context.slot} Leftovers +${gained} HP`,
+    data: { slot: context.slot, amount: gained, passive: "leftovers" }
+  });
+}
+var NOOP_PASSIVE = () => {};
+var PASSIVE_TURN_EFFECTS = {
+  none: NOOP_PASSIVE,
+  leftovers: apply_leftovers,
+  choice_band: NOOP_PASSIVE
+};
+function apply_passive_turn_effect(passive_id, context) {
+  const normalized = passive_spec(passive_id).id;
+  const effect = PASSIVE_TURN_EFFECTS[normalized] ?? NOOP_PASSIVE;
+  effect(context);
+}
+
+// src/data/pokedex/pokemon.ts
+function all_move_options() {
+  return MOVE_OPTIONS.slice();
+}
+function all_passive_options() {
+  return PASSIVE_OPTIONS.slice();
+}
+var MONSTER_ROSTER = [
+  {
+    id: "babydragon",
+    name: "Baby Dragon TR",
+    role: "Return Tester",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    possibleMoves: all_move_options(),
+    possiblePassives: all_passive_options(),
+    defaultMoves: ["return", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "croni",
+    name: "Croni DR",
+    role: "Return Dummy",
+    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    possibleMoves: all_move_options(),
+    possiblePassives: all_passive_options(),
+    defaultMoves: ["none", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "harpy",
+    name: "Harpy TD",
+    role: "Double-Edge Tester",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    possibleMoves: all_move_options(),
+    possiblePassives: all_passive_options(),
+    defaultMoves: ["double_edge", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "hoof",
+    name: "Hoof DD",
+    role: "Double-Edge Dummy",
+    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    possibleMoves: all_move_options(),
+    possiblePassives: all_passive_options(),
+    defaultMoves: ["none", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "knight",
+    name: "Knight TR",
+    role: "Return Tester",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    possibleMoves: all_move_options(),
+    possiblePassives: all_passive_options(),
+    defaultMoves: ["return", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "miren",
+    name: "Miren DS",
+    role: "Seismic Toss Dummy",
+    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    possibleMoves: all_move_options(),
+    possiblePassives: all_passive_options(),
+    defaultMoves: ["none", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "panda",
+    name: "Panda TS",
+    role: "Seismic Toss Tester",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    possibleMoves: all_move_options(),
+    possiblePassives: all_passive_options(),
+    defaultMoves: ["seismic_toss", "none", "none", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "valkyria",
+    name: "Valkyria DR",
+    role: "Return Dummy",
+    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    possibleMoves: all_move_options(),
+    possiblePassives: all_passive_options(),
+    defaultMoves: ["none", "none", "none", "none"],
+    defaultPassive: "none"
+  }
+];
+var MONSTER_BY_ID = new Map(MONSTER_ROSTER.map((entry) => [entry.id, entry]));
+
+// src/data/pokedex/validate.ts
+function ensure(condition, message) {
+  if (!condition) {
+    throw new Error(`[pokedex] ${message}`);
+  }
+}
+function validate_monster_roster(monsters) {
+  const monster_ids = new Set;
+  for (const monster of monsters) {
+    ensure(monster.id.length > 0, "monster id is required");
+    ensure(!monster_ids.has(monster.id), `duplicate monster id: ${monster.id}`);
+    monster_ids.add(monster.id);
+    ensure(monster.defaultMoves.length === 4, `${monster.id}: defaultMoves must contain exactly 4 entries`);
+    const possible_moves = new Set(monster.possibleMoves);
+    ensure(possible_moves.size > 0, `${monster.id}: possibleMoves cannot be empty`);
+    for (const move_id of monster.possibleMoves) {
+      ensure(MOVE_BY_ID.has(move_id), `${monster.id}: unknown move in possibleMoves: ${move_id}`);
+    }
+    const move_dedup = new Set;
+    for (const move_id of monster.defaultMoves) {
+      ensure(MOVE_BY_ID.has(move_id), `${monster.id}: unknown move in defaultMoves: ${move_id}`);
+      ensure(possible_moves.has(move_id), `${monster.id}: default move not allowed: ${move_id}`);
+      if (move_id !== "none") {
+        ensure(!move_dedup.has(move_id), `${monster.id}: duplicate default move: ${move_id}`);
+        move_dedup.add(move_id);
+      }
+    }
+    ensure(monster.possiblePassives.length > 0, `${monster.id}: possiblePassives cannot be empty`);
+    const possible_passives = new Set(monster.possiblePassives.map(normalize_passive_id));
+    for (const passive_id of monster.possiblePassives) {
+      ensure(PASSIVE_BY_ID.has(passive_id), `${monster.id}: unknown passive in possiblePassives: ${passive_id}`);
+    }
+    const normalized_default = normalize_passive_id(monster.defaultPassive);
+    ensure(PASSIVE_BY_ID.has(monster.defaultPassive), `${monster.id}: unknown default passive: ${monster.defaultPassive}`);
+    ensure(possible_passives.has(normalized_default), `${monster.id}: default passive not allowed: ${monster.defaultPassive}`);
+    ensure(monster.stats.level > 0, `${monster.id}: level must be > 0`);
+    ensure(monster.stats.maxHp > 0, `${monster.id}: maxHp must be > 0`);
+    ensure(monster.stats.attack >= 0, `${monster.id}: attack must be >= 0`);
+    ensure(monster.stats.defense >= 0, `${monster.id}: defense must be >= 0`);
+    ensure(monster.stats.speed >= 0, `${monster.id}: speed must be >= 0`);
+  }
+}
+
+// src/data/pokedex/index.ts
+validate_monster_roster(MONSTER_ROSTER);
+
 // src/engine.ts
 var INITIATIVE_DEFAULT = ["speed", "attack", "hp", "defense"];
 var PHASES = [
@@ -1045,64 +1283,6 @@ var PHASES = [
   { id: "guard", name: "Guard", order: 1, initiative: INITIATIVE_DEFAULT },
   { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT }
 ];
-var MOVE_SPECS = {
-  basic_attack: { id: "basic_attack", name: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 110 },
-  agility: {
-    id: "agility",
-    name: "Agility",
-    phaseId: "attack_01",
-    attackMultiplier100: 0
-  },
-  quick_attack: {
-    id: "quick_attack",
-    name: "Quick Attack",
-    phaseId: "attack_01",
-    attackMultiplier100: 66
-  },
-  return: {
-    id: "return",
-    name: "Return",
-    phaseId: "attack_01",
-    attackMultiplier100: 72,
-    attackMultiplierPerLevel100: 4
-  },
-  double_edge: {
-    id: "double_edge",
-    name: "Double-Edge",
-    phaseId: "attack_01",
-    attackMultiplier100: 120,
-    recoilNumerator: 1,
-    recoilDenominator: 3
-  },
-  seismic_toss: {
-    id: "seismic_toss",
-    name: "Seismic Toss",
-    phaseId: "attack_01",
-    attackMultiplier100: 100,
-    damageType: "flat",
-    flatDamage: 75
-  },
-  screech: {
-    id: "screech",
-    name: "Screech",
-    phaseId: "attack_01",
-    attackMultiplier100: 0
-  },
-  endure: {
-    id: "endure",
-    name: "Endure",
-    phaseId: "guard",
-    attackMultiplier100: 0
-  },
-  protect: { id: "protect", name: "Protect", phaseId: "guard", attackMultiplier100: 100 },
-  none: { id: "none", name: "none", phaseId: "attack_01", attackMultiplier100: 100 }
-};
-var PASSIVE_SPECS = {
-  none: { id: "none", name: "none" },
-  leftovers: { id: "leftovers", name: "Leftovers" },
-  choice_band: { id: "choice_band", name: "Choice Band" },
-  regen_5pct: { id: "leftovers", name: "Leftovers" }
-};
 var INITIATIVE_WITHOUT_SPEED = ["attack", "hp", "defense"];
 function compare_action_initiative(state, phase, a, b) {
   const a_active = active_monster(state.players[a.player]);
@@ -1177,12 +1357,6 @@ function compare_initiative(a, b, stats) {
   }
   return 0;
 }
-function move_spec(moveId) {
-  return MOVE_SPECS[moveId] ?? MOVE_SPECS.none;
-}
-function passive_spec(passiveId) {
-  return PASSIVE_SPECS[passiveId] ?? PASSIVE_SPECS.none;
-}
 function is_alive(monster) {
   return monster.hp > 0;
 }
@@ -1225,24 +1399,13 @@ function apply_passives(state, log, hp_changed) {
     const active = active_monster(player);
     if (!is_alive(active))
       return;
-    const spec = passive_spec(active.chosenPassive);
-    if (spec.id === "leftovers") {
-      const heal = Math.floor(active.maxHp * 0.06);
-      if (heal > 0) {
-        const before = active.hp;
-        active.hp = Math.min(active.maxHp, active.hp + heal);
-        const gained = active.hp - before;
-        if (gained > 0) {
-          hp_changed.add(active);
-          log.push({
-            type: "passive_heal",
-            turn: state.turn,
-            summary: `${player.slot} Leftovers +${gained} HP`,
-            data: { slot: player.slot, amount: gained, passive: spec.id }
-          });
-        }
-      }
-    }
+    apply_passive_turn_effect(active.chosenPassive, {
+      slot: player.slot,
+      monster: active,
+      turn: state.turn,
+      log,
+      hp_changed
+    });
   });
 }
 function handle_faint(state, log, slot) {
@@ -1844,109 +2007,6 @@ function validate_intent(state, slot, intent) {
 
 // vibishowdown/index.ts
 var PLAYER_SLOTS = ["player1", "player2"];
-var MOVE_OPTIONS = ["basic_attack", "quick_attack", "agility", "return", "double_edge", "seismic_toss", "screech", "endure", "protect", "none"];
-var PASSIVE_OPTIONS = ["none", "leftovers", "choice_band"];
-var MOVE_LABELS = {
-  basic_attack: "Basic Attack",
-  quick_attack: "Quick Attack",
-  agility: "Agility",
-  return: "Return",
-  double_edge: "Double-Edge",
-  seismic_toss: "Seismic Toss",
-  screech: "Screech",
-  endure: "Endure",
-  protect: "Protect",
-  none: "none"
-};
-var PASSIVE_LABELS = {
-  none: "none",
-  leftovers: "Leftovers",
-  choice_band: "Choice Band",
-  regen_5pct: "Leftovers"
-};
-var roster = [
-  {
-    id: "babydragon",
-    name: "Baby Dragon TR",
-    role: "Return Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["return", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "croni",
-    name: "Croni DR",
-    role: "Return Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "harpy",
-    name: "Harpy TD",
-    role: "Double-Edge Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["double_edge", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "hoof",
-    name: "Hoof DD",
-    role: "Double-Edge Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "knight",
-    name: "Knight TR",
-    role: "Return Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["return", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "miren",
-    name: "Miren DS",
-    role: "Seismic Toss Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "panda",
-    name: "Panda TS",
-    role: "Seismic Toss Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["seismic_toss", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "valkyria",
-    name: "Valkyria DR",
-    role: "Return Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
-  }
-];
-var roster_by_id = new Map(roster.map((entry) => [entry.id, entry]));
 var room = prompt("Room name?") || gen_name();
 var player_name = prompt("Your name?") || gen_name();
 var player_id_key = "vibi_showdown_player_id";
@@ -2416,7 +2476,7 @@ function ensure_local_participant_visible() {
 function monster_label(id, fallback = "mon") {
   if (!id)
     return fallback;
-  return roster_by_id.get(id)?.name ?? id;
+  return MONSTER_BY_ID.get(id)?.name ?? id;
 }
 function append_log(line) {
   append_line(log_list, line);
@@ -2532,14 +2592,11 @@ function save_profile() {
 function load_team_selection() {
   const parsed = load_json(team_key, null);
   if (parsed && Array.isArray(parsed.selected)) {
-    selected.splice(0, selected.length, ...parsed.selected.filter((id) => roster_by_id.has(id)));
+    selected.splice(0, selected.length, ...parsed.selected.filter((id) => MONSTER_BY_ID.has(id)));
   }
 }
 function save_team_selection() {
   save_json(team_key, { selected: selected.slice() });
-}
-function normalize_passive_id(passive) {
-  return passive === "regen_5pct" ? "leftovers" : passive;
 }
 function coerce_config(spec, value) {
   const base = {
@@ -2573,7 +2630,7 @@ function coerce_config(spec, value) {
   };
 }
 function get_config(monster_id) {
-  const spec = roster_by_id.get(monster_id);
+  const spec = MONSTER_BY_ID.get(monster_id);
   if (!spec) {
     throw new Error(`Missing monster spec: ${monster_id}`);
   }
@@ -2632,7 +2689,7 @@ function render_config() {
     return;
   }
   clear_warning();
-  const spec = roster_by_id.get(active_tab);
+  const spec = MONSTER_BY_ID.get(active_tab);
   if (!spec) {
     show_warning("Unknown monster.");
     return;
@@ -2772,7 +2829,7 @@ function toggle_selection(id) {
 function render_roster() {
   const list = document.getElementById("roster-list");
   list.innerHTML = "";
-  for (const entry of roster) {
+  for (const entry of MONSTER_ROSTER) {
     const card = document.createElement("div");
     const is_selected = selected.includes(entry.id);
     const is_disabled = !is_selected && selected.length >= 3 || is_ready && !match_started;

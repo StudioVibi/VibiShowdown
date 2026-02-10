@@ -1,4 +1,12 @@
 import { gen_name, load, on_open, on_sync, ping, post, watch } from "../src/client.ts";
+import {
+  MONSTER_BY_ID as roster_by_id,
+  MONSTER_ROSTER as roster,
+  MOVE_LABELS,
+  PASSIVE_LABELS,
+  normalize_passive_id
+} from "../src/data/pokedex/index.ts";
+import type { MonsterCatalogEntry } from "../src/data/pokedex/index.ts";
 import { apply_forced_switch, create_initial_state, resolve_turn, validate_intent } from "../src/engine.ts";
 import type {
   EventLog,
@@ -11,17 +19,6 @@ import type {
   TeamSelection
 } from "../src/shared.ts";
 
-type MonsterSpec = {
-  id: string;
-  name: string;
-  role: string;
-  stats: Stats;
-  possibleMoves: string[];
-  possiblePassives: string[];
-  defaultMoves: string[];
-  defaultPassive: string;
-};
-
 type MonsterConfig = {
   moves: string[];
   passive: string;
@@ -33,114 +30,6 @@ type Profile = {
 };
 
 const PLAYER_SLOTS: PlayerSlot[] = ["player1", "player2"];
-const MOVE_OPTIONS = ["basic_attack", "quick_attack", "agility", "return", "double_edge", "seismic_toss", "screech", "endure", "protect", "none"];
-const PASSIVE_OPTIONS = ["none", "leftovers", "choice_band"];
-
-const MOVE_LABELS: Record<string, string> = {
-  basic_attack: "Basic Attack",
-  quick_attack: "Quick Attack",
-  agility: "Agility",
-  return: "Return",
-  double_edge: "Double-Edge",
-  seismic_toss: "Seismic Toss",
-  screech: "Screech",
-  endure: "Endure",
-  protect: "Protect",
-  none: "none"
-};
-
-const PASSIVE_LABELS: Record<string, string> = {
-  none: "none",
-  leftovers: "Leftovers",
-  choice_band: "Choice Band",
-  // Legacy alias for older saved configs.
-  regen_5pct: "Leftovers"
-};
-
-const roster: MonsterSpec[] = [
-  {
-    id: "babydragon",
-    name: "Baby Dragon TR",
-    role: "Return Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["return", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "croni",
-    name: "Croni DR",
-    role: "Return Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "harpy",
-    name: "Harpy TD",
-    role: "Double-Edge Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["double_edge", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "hoof",
-    name: "Hoof DD",
-    role: "Double-Edge Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "knight",
-    name: "Knight TR",
-    role: "Return Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["return", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "miren",
-    name: "Miren DS",
-    role: "Seismic Toss Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "panda",
-    name: "Panda TS",
-    role: "Seismic Toss Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["seismic_toss", "none", "none", "none"],
-    defaultPassive: "none"
-  },
-  {
-    id: "valkyria",
-    name: "Valkyria DR",
-    role: "Return Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
-    possibleMoves: MOVE_OPTIONS.slice(),
-    possiblePassives: PASSIVE_OPTIONS.slice(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
-  }
-];
-
-const roster_by_id = new Map<string, MonsterSpec>(roster.map((entry) => [entry.id, entry]));
 
 const room = prompt("Room name?") || gen_name();
 const player_name = prompt("Your name?") || gen_name();
@@ -793,11 +682,7 @@ function save_team_selection(): void {
   save_json(team_key, { selected: selected.slice() });
 }
 
-function normalize_passive_id(passive: string): string {
-  return passive === "regen_5pct" ? "leftovers" : passive;
-}
-
-function coerce_config(spec: MonsterSpec, value?: MonsterConfig): MonsterConfig {
+function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): MonsterConfig {
   const base: MonsterConfig = {
     moves: spec.defaultMoves.slice(0, 4),
     passive: spec.defaultPassive,

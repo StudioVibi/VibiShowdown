@@ -3,35 +3,19 @@ import type {
   GameState,
   MonsterState,
   MoveId,
-  PassiveId,
   PlayerIntent,
   PlayerSlot,
   PlayerState,
   TeamSelection
 } from "./shared.ts";
+import { move_spec } from "./data/pokedex/moves.ts";
+import { apply_passive_turn_effect, passive_spec } from "./data/pokedex/passives.ts";
 
 type Phase = {
   id: string;
   name: string;
   order: number;
   initiative: Array<keyof Pick<MonsterState, "speed" | "attack" | "hp" | "defense">>;
-};
-
-type MoveSpec = {
-  id: MoveId;
-  name: string;
-  phaseId: string;
-  attackMultiplier100: number;
-  attackMultiplierPerLevel100?: number;
-  damageType?: "scaled" | "true" | "flat";
-  flatDamage?: number;
-  recoilNumerator?: number;
-  recoilDenominator?: number;
-};
-
-type PassiveSpec = {
-  id: PassiveId;
-  name: string;
 };
 
 const INITIATIVE_DEFAULT: Phase["initiative"] = ["speed", "attack", "hp", "defense"];
@@ -41,67 +25,6 @@ const PHASES: Phase[] = [
   { id: "guard", name: "Guard", order: 1, initiative: INITIATIVE_DEFAULT },
   { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT }
 ];
-
-const MOVE_SPECS: Record<string, MoveSpec> = {
-  basic_attack: { id: "basic_attack", name: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 110 },
-  agility: {
-    id: "agility",
-    name: "Agility",
-    phaseId: "attack_01",
-    attackMultiplier100: 0
-  },
-  quick_attack: {
-    id: "quick_attack",
-    name: "Quick Attack",
-    phaseId: "attack_01",
-    attackMultiplier100: 66
-  },
-  return: {
-    id: "return",
-    name: "Return",
-    phaseId: "attack_01",
-    attackMultiplier100: 72,
-    attackMultiplierPerLevel100: 4
-  },
-  double_edge: {
-    id: "double_edge",
-    name: "Double-Edge",
-    phaseId: "attack_01",
-    attackMultiplier100: 120,
-    recoilNumerator: 1,
-    recoilDenominator: 3
-  },
-  seismic_toss: {
-    id: "seismic_toss",
-    name: "Seismic Toss",
-    phaseId: "attack_01",
-    attackMultiplier100: 100,
-    damageType: "flat",
-    flatDamage: 75
-  },
-  screech: {
-    id: "screech",
-    name: "Screech",
-    phaseId: "attack_01",
-    attackMultiplier100: 0
-  },
-  endure: {
-    id: "endure",
-    name: "Endure",
-    phaseId: "guard",
-    attackMultiplier100: 0
-  },
-  protect: { id: "protect", name: "Protect", phaseId: "guard", attackMultiplier100: 100 },
-  none: { id: "none", name: "none", phaseId: "attack_01", attackMultiplier100: 100 }
-};
-
-const PASSIVE_SPECS: Record<string, PassiveSpec> = {
-  none: { id: "none", name: "none" },
-  leftovers: { id: "leftovers", name: "Leftovers" },
-  choice_band: { id: "choice_band", name: "Choice Band" },
-  // Legacy alias to keep compatibility with older saved profiles.
-  regen_5pct: { id: "leftovers", name: "Leftovers" }
-};
 
 type Action =
   | { player: PlayerSlot; type: "switch"; phase: string; targetIndex: number }
@@ -201,14 +124,6 @@ function find_phase(phaseId: string): Phase | undefined {
   return PHASES.find((phase) => phase.id === phaseId);
 }
 
-function move_spec(moveId: MoveId): MoveSpec {
-  return MOVE_SPECS[moveId] ?? MOVE_SPECS.none;
-}
-
-function passive_spec(passiveId: PassiveId): PassiveSpec {
-  return PASSIVE_SPECS[passiveId] ?? PASSIVE_SPECS.none;
-}
-
 function is_alive(monster: MonsterState): boolean {
   return monster.hp > 0;
 }
@@ -255,24 +170,13 @@ function apply_passives(state: GameState, log: EventLog[], hp_changed: WeakSet<M
   for_each_player(state, (player) => {
     const active = active_monster(player);
     if (!is_alive(active)) return;
-    const spec = passive_spec(active.chosenPassive);
-    if (spec.id === "leftovers") {
-      const heal = Math.floor(active.maxHp * 0.06);
-      if (heal > 0) {
-        const before = active.hp;
-        active.hp = Math.min(active.maxHp, active.hp + heal);
-        const gained = active.hp - before;
-        if (gained > 0) {
-          hp_changed.add(active);
-          log.push({
-            type: "passive_heal",
-            turn: state.turn,
-            summary: `${player.slot} Leftovers +${gained} HP`,
-            data: { slot: player.slot, amount: gained, passive: spec.id }
-          });
-        }
-      }
-    }
+    apply_passive_turn_effect(active.chosenPassive, {
+      slot: player.slot,
+      monster: active,
+      turn: state.turn,
+      log,
+      hp_changed
+    });
   });
 }
 
