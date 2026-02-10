@@ -2913,7 +2913,7 @@ var relay_server_managed = false;
 var relay_ended = false;
 var relay_turn = 0;
 var relay_state = null;
-var relay_local_role_emitted = false;
+var relay_local_role = null;
 var relay_seen_indexes = new Set;
 var relay_names_by_id = new Map;
 var relay_slot_by_id = new Map;
@@ -2980,19 +2980,24 @@ function relay_emit_snapshots() {
   });
 }
 function relay_emit_local_role() {
-  if (relay_local_role_emitted) {
-    return;
-  }
   const local_slot = relay_slot_by_id.get(player_id);
   if (local_slot) {
-    relay_local_role_emitted = true;
+    if (relay_local_role === local_slot) {
+      return;
+    }
+    relay_local_role = local_slot;
     emit_local_post({ $: "assign", slot: local_slot, token: player_id, name: relay_name(player_id) });
     return;
   }
   if (relay_join_order.includes(player_id)) {
-    relay_local_role_emitted = true;
+    if (relay_local_role === "spectator") {
+      return;
+    }
+    relay_local_role = "spectator";
     emit_local_post({ $: "spectator", name: relay_name(player_id) });
+    return;
   }
+  relay_local_role = null;
 }
 function relay_assign_slot(id) {
   const existing = relay_slot_by_id.get(id);
@@ -3058,7 +3063,6 @@ function relay_handle_join(data) {
   if (!relay_join_order.includes(id)) {
     relay_join_order.push(id);
   }
-  relay_assign_slot(id);
   emit_local_post({ $: "join", name: data.name });
   relay_emit_local_role();
   relay_emit_snapshots();
@@ -3071,14 +3075,15 @@ function relay_handle_ready(data) {
   if (!id) {
     return;
   }
-  const slot_id = relay_slot_by_id.get(id);
-  if (!slot_id) {
-    return;
-  }
+  const assigned_slot = relay_slot_by_id.get(id);
   if (!data.ready) {
-    relay_ready[slot_id] = false;
-    relay_teams[slot_id] = null;
-    const idx = relay_ready_order.indexOf(slot_id);
+    if (!assigned_slot) {
+      return;
+    }
+    const slot_id2 = assigned_slot;
+    relay_ready[slot_id2] = false;
+    relay_teams[slot_id2] = null;
+    const idx = relay_ready_order.indexOf(slot_id2);
     if (idx >= 0) {
       relay_ready_order.splice(idx, 1);
     }
@@ -3088,6 +3093,11 @@ function relay_handle_ready(data) {
   if (!data.team) {
     return;
   }
+  const slot_id = assigned_slot ?? relay_assign_slot(id);
+  if (!slot_id) {
+    return;
+  }
+  relay_emit_local_role();
   relay_ready[slot_id] = true;
   relay_teams[slot_id] = data.team;
   if (!relay_ready_order.includes(slot_id)) {

@@ -156,7 +156,7 @@ let relay_server_managed = false;
 let relay_ended = false;
 let relay_turn = 0;
 let relay_state: GameState | null = null;
-let relay_local_role_emitted = false;
+let relay_local_role: PlayerSlot | "spectator" | null = null;
 const relay_seen_indexes = new Set<number>();
 const relay_names_by_id = new Map<string, string>();
 const relay_slot_by_id = new Map<string, PlayerSlot>();
@@ -241,19 +241,24 @@ function relay_emit_snapshots(): void {
 }
 
 function relay_emit_local_role(): void {
-  if (relay_local_role_emitted) {
-    return;
-  }
   const local_slot = relay_slot_by_id.get(player_id);
   if (local_slot) {
-    relay_local_role_emitted = true;
+    if (relay_local_role === local_slot) {
+      return;
+    }
+    relay_local_role = local_slot;
     emit_local_post({ $: "assign", slot: local_slot, token: player_id, name: relay_name(player_id) });
     return;
   }
   if (relay_join_order.includes(player_id)) {
-    relay_local_role_emitted = true;
+    if (relay_local_role === "spectator") {
+      return;
+    }
+    relay_local_role = "spectator";
     emit_local_post({ $: "spectator", name: relay_name(player_id) });
+    return;
   }
+  relay_local_role = null;
 }
 
 function relay_assign_slot(id: string): PlayerSlot | null {
@@ -326,7 +331,6 @@ function relay_handle_join(data: Extract<RoomPost, { $: "join" }>): void {
   if (!relay_join_order.includes(id)) {
     relay_join_order.push(id);
   }
-  relay_assign_slot(id);
   emit_local_post({ $: "join", name: data.name });
   relay_emit_local_role();
   relay_emit_snapshots();
@@ -340,11 +344,12 @@ function relay_handle_ready(data: Extract<RoomPost, { $: "ready" }>): void {
   if (!id) {
     return;
   }
-  const slot_id = relay_slot_by_id.get(id);
-  if (!slot_id) {
-    return;
-  }
+  const assigned_slot = relay_slot_by_id.get(id);
   if (!data.ready) {
+    if (!assigned_slot) {
+      return;
+    }
+    const slot_id = assigned_slot;
     relay_ready[slot_id] = false;
     relay_teams[slot_id] = null;
     const idx = relay_ready_order.indexOf(slot_id);
@@ -357,6 +362,11 @@ function relay_handle_ready(data: Extract<RoomPost, { $: "ready" }>): void {
   if (!data.team) {
     return;
   }
+  const slot_id = assigned_slot ?? relay_assign_slot(id);
+  if (!slot_id) {
+    return;
+  }
+  relay_emit_local_role();
   relay_ready[slot_id] = true;
   relay_teams[slot_id] = data.team;
   if (!relay_ready_order.includes(slot_id)) {
