@@ -1832,7 +1832,7 @@ function ping() {
 
 // src/game_default/moves.ts
 var MOVE_CATALOG = [
-  { id: "basic_attack", label: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 110 },
+  { id: "basic_attack", label: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 100 },
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
   {
@@ -1941,83 +1941,83 @@ function all_passive_options() {
 var MONSTER_ROSTER = [
   {
     id: "babydragon",
-    name: "Baby Dragon TR",
-    role: "Return Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    name: "Baby Dragon",
+    role: "Snorlax",
+    stats: { level: 7, maxHp: 160, attack: 110, defense: 65, speed: 30 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "croni",
-    name: "Croni DR",
-    role: "Return Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    name: "Croni",
+    role: "Ninjask",
+    stats: { level: 7, maxHp: 61, attack: 90, defense: 45, speed: 160 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "harpy",
-    name: "Harpy TD",
-    role: "Double-Edge Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    name: "Harpy",
+    role: "Absol",
+    stats: { level: 7, maxHp: 65, attack: 130, defense: 60, speed: 75 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["double_edge", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "hoof",
-    name: "Hoof DD",
-    role: "Double-Edge Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    name: "Hoof",
+    role: "Chansey",
+    stats: { level: 7, maxHp: 250, attack: 5, defense: 5, speed: 50 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "knight",
-    name: "Knight TR",
-    role: "Return Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    name: "Knight",
+    role: "Metagross",
+    stats: { level: 7, maxHp: 80, attack: 135, defense: 130, speed: 70 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "miren",
-    name: "Miren DS",
-    role: "Seismic Toss Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    name: "Miren",
+    role: "Celebi",
+    stats: { level: 7, maxHp: 100, attack: 100, defense: 100, speed: 100 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "panda",
-    name: "Panda TS",
-    role: "Seismic Toss Tester",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 10, speed: 20 },
+    name: "Panda",
+    role: "Cloyster",
+    stats: { level: 7, maxHp: 50, attack: 95, defense: 180, speed: 70 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["seismic_toss", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   },
   {
     id: "valkyria",
-    name: "Valkyria DR",
-    role: "Return Dummy",
-    stats: { level: 7, maxHp: 100, attack: 10, defense: 10, speed: 10 },
+    name: "Valkyria",
+    role: "Aerodactyl",
+    stats: { level: 7, maxHp: 80, attack: 105, defense: 65, speed: 130 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
-    defaultMoves: ["none", "none", "none", "none"],
-    defaultPassive: "none"
+    defaultMoves: ["return", "seismic_toss", "agility", "none"],
+    defaultPassive: "leftovers"
   }
 ];
 var MONSTER_BY_ID = new Map(MONSTER_ROSTER.map((entry) => [entry.id, entry]));
@@ -2268,7 +2268,7 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
   }
   return { before, after, applied: before - after };
 }
-function apply_move(state, log, player_slot, move_id, move_index, hp_changed) {
+function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pending_agility) {
   const player = state.players[player_slot];
   const opponent = state.players[other_slot(player_slot)];
   const attacker = active_monster(player);
@@ -2347,28 +2347,13 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed) {
     return;
   }
   if (spec.id === "agility") {
-    const before_speed = attacker.speed;
-    attacker.speed = Math.max(1, attacker.speed * 2);
-    log.push({
-      type: "stat_mod",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${player_slot} used Agility on ${attacker.name} (SPE ${before_speed} -> ${attacker.speed})`,
-      data: {
-        slot: player_slot,
-        target: attacker.id,
-        stat: "speed",
-        multiplier: 2,
-        before: before_speed,
-        after: attacker.speed
-      }
-    });
+    pending_agility.push({ slot: player_slot, monster: attacker });
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Agility: user SPE x2 (${before_speed} -> ${attacker.speed}), independent of opponent action`,
-      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_speed, after: attacker.speed }
+      summary: "Agility: pending (applies at end of turn)",
+      data: { move: spec.id, slot: player_slot, target: attacker.id }
     });
     return;
   }
@@ -2482,7 +2467,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed) {
   }
   const choice_band_detail = choice_band_active && damage_type !== "flat" ? `; Choice Band ATK boost: ${attacker.attack} -> ${effective_attack}` : "";
   if (spec.id === "return") {
-    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def*100)) = round(${effective_attack} * ${multiplier100} / (${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}${choice_band_detail}`;
+    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def)) = round(${effective_attack} * ${multiplier100} / (${effective_defense})) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}${choice_band_detail}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -2491,7 +2476,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed) {
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "double_edge") {
-    const detail = `Double-Edge: dmg = round(atk*120/(def*100)) = round(${effective_attack}*120/(${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
+    const detail = `Double-Edge: dmg = round(atk*120/(def)) = round(${effective_attack}*120/(${effective_defense})) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -2509,7 +2494,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed) {
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "quick_attack") {
-    const detail = `Quick Attack: dmg = round(atk*66/(def*100)) = round(${effective_attack}*66/(${effective_defense}*100)) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; speed check ignored${choice_band_detail}`;
+    const detail = `Quick Attack: dmg = round(atk*66/(def)) = round(${effective_attack}*66/(${effective_defense})) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; speed check ignored${choice_band_detail}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -2521,6 +2506,44 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed) {
   handle_faint(state, log, other_slot(player_slot));
   if (recoil_num > 0 && recoil_den > 0) {
     handle_faint(state, log, player_slot);
+  }
+}
+function resolve_agility(state, log, pending_agility, hp_changed) {
+  for (const pending of pending_agility) {
+    const monster = pending.monster;
+    if (!is_alive(monster)) {
+      log.push({
+        type: "move_detail",
+        turn: state.turn,
+        phase: "attack_01",
+        summary: "Agility failed: user fainted",
+        data: { move: "agility", slot: pending.slot, target: monster.id }
+      });
+      continue;
+    }
+    const before_speed = monster.speed;
+    monster.speed = Math.max(1, monster.speed * 2);
+    log.push({
+      type: "stat_mod",
+      turn: state.turn,
+      phase: "attack_01",
+      summary: `${pending.slot} Agility success on ${monster.name} (SPE ${before_speed} -> ${monster.speed})`,
+      data: {
+        slot: pending.slot,
+        target: monster.id,
+        stat: "speed",
+        multiplier: 2,
+        before: before_speed,
+        after: monster.speed
+      }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: "attack_01",
+      summary: `Agility: user SPE x2 (${before_speed} -> ${monster.speed})`,
+      data: { move: "agility", slot: pending.slot, target: monster.id, before: before_speed, after: monster.speed }
+    });
   }
 }
 function apply_switch(state, log, player_slot, targetIndex) {
@@ -2628,6 +2651,7 @@ function resolve_turn(state, intents) {
   const next = clone_state(state);
   const log = [];
   const hp_changed_this_turn = new WeakSet;
+  const pending_agility = [];
   if (next.status !== "running") {
     return { state: next, log };
   }
@@ -2665,7 +2689,7 @@ function resolve_turn(state, intents) {
       if (action.type === "switch") {
         apply_switch(next, log, action.player, action.targetIndex);
       } else {
-        apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn);
+        apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn, pending_agility);
       }
       if (!any_alive(next.players.player1)) {
         next.status = "ended";
@@ -2695,6 +2719,7 @@ function resolve_turn(state, intents) {
     }
   }
   apply_passives(next, log, hp_changed_this_turn);
+  resolve_agility(next, log, pending_agility, hp_changed_this_turn);
   decrement_cooldowns(next);
   reset_protect_flags(next);
   return { state: next, log };
