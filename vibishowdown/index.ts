@@ -34,12 +34,22 @@ const PLAYER_SLOTS: PlayerSlot[] = ["player1", "player2"];
 const room = prompt("Room name?") || gen_name();
 const player_name = prompt("Your name?") || gen_name();
 
-const player_id_key = "vibi_showdown_player_id";
-const saved_player_id = localStorage.getItem(player_id_key);
-const player_id = saved_player_id && saved_player_id.length > 0 ? saved_player_id : `${gen_name()}${gen_name()}`;
-if (!saved_player_id) {
-  localStorage.setItem(player_id_key, player_id);
+function get_tab_player_id(room_name: string): string {
+  const key = `vibi_showdown_player_id:${room_name}`;
+  try {
+    const saved = sessionStorage.getItem(key);
+    if (saved && saved.length > 0) {
+      return saved;
+    }
+    const created = `${gen_name()}${gen_name()}`;
+    sessionStorage.setItem(key, created);
+    return created;
+  } catch {
+    return `${gen_name()}${gen_name()}`;
+  }
 }
+
+const player_id = get_tab_player_id(room);
 
 const profile_key = `vibi_showdown_profile:${player_name}`;
 const team_key = `vibi_showdown_team:${room}:${player_name}`;

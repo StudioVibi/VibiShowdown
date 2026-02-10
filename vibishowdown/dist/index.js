@@ -2801,12 +2801,21 @@ function validate_intent(state, slot, intent) {
 var PLAYER_SLOTS = ["player1", "player2"];
 var room = prompt("Room name?") || gen_name();
 var player_name = prompt("Your name?") || gen_name();
-var player_id_key = "vibi_showdown_player_id";
-var saved_player_id = localStorage.getItem(player_id_key);
-var player_id = saved_player_id && saved_player_id.length > 0 ? saved_player_id : `${gen_name()}${gen_name()}`;
-if (!saved_player_id) {
-  localStorage.setItem(player_id_key, player_id);
+function get_tab_player_id(room_name) {
+  const key = `vibi_showdown_player_id:${room_name}`;
+  try {
+    const saved = sessionStorage.getItem(key);
+    if (saved && saved.length > 0) {
+      return saved;
+    }
+    const created = `${gen_name()}${gen_name()}`;
+    sessionStorage.setItem(key, created);
+    return created;
+  } catch {
+    return `${gen_name()}${gen_name()}`;
+  }
 }
+var player_id = get_tab_player_id(room);
 var profile_key = `vibi_showdown_profile:${player_name}`;
 var team_key = `vibi_showdown_team:${room}:${player_name}`;
 var status_room = document.getElementById("status-room");
