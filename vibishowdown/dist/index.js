@@ -3363,6 +3363,41 @@ function monster_label(id, fallback = "mon") {
     return fallback;
   return MONSTER_BY_ID.get(id)?.name ?? id;
 }
+function move_label(id) {
+  return MOVE_LABELS[id] || id;
+}
+function passive_label(id) {
+  return PASSIVE_LABELS[id] || id;
+}
+function build_monster_tooltip(name, stats, passive, moves) {
+  const move_lines = (moves.length > 0 ? moves : ["none", "none", "none", "none"]).slice(0, 4).map((move, index) => `${index + 1}. ${move_label(move)}`);
+  return [
+    name,
+    `ATK ${stats.attack} | DEF ${stats.defense} | SPE ${stats.speed} | HP ${stats.hp}`,
+    `Passive: ${passive_label(passive)}`,
+    "",
+    "Moves:",
+    ...move_lines
+  ].join(`
+`);
+}
+function tooltip_from_config(monster_id) {
+  const config = get_config(monster_id);
+  return build_monster_tooltip(monster_label(monster_id), {
+    attack: config.stats.attack,
+    defense: config.stats.defense,
+    speed: config.stats.speed,
+    hp: `${config.stats.maxHp}`
+  }, config.passive, config.moves);
+}
+function tooltip_from_state(mon) {
+  return build_monster_tooltip(monster_label(mon.id), {
+    attack: mon.attack,
+    defense: mon.defense,
+    speed: mon.speed,
+    hp: `${Math.max(0, mon.hp)}/${mon.maxHp}`
+  }, mon.chosenPassive, mon.chosenMoves);
+}
 function append_log(line) {
   append_line(log_list, line);
 }
@@ -3542,17 +3577,22 @@ function set_slot_card(index, card, img, name_el) {
   if (!id) {
     card.classList.add("empty");
     card.classList.remove("active");
+    card.title = "";
     img.classList.add("hidden");
     img.removeAttribute("src");
     img.alt = "";
+    img.title = "";
     name_el.textContent = "empty";
     return;
   }
   card.classList.remove("empty");
   card.classList.toggle("active", id === active_tab);
+  const tooltip = tooltip_from_config(id);
+  card.title = tooltip;
   img.classList.remove("hidden");
   img.src = icon_path(id);
   img.alt = monster_label(id);
+  img.title = tooltip;
   name_el.textContent = monster_label(id);
 }
 function update_slots() {
@@ -3628,8 +3668,8 @@ function render_config() {
     label.appendChild(select);
     moves_grid.appendChild(label);
   }
-  const passive_label = document.createElement("label");
-  passive_label.textContent = "Passive";
+  const passive_label2 = document.createElement("label");
+  passive_label2.textContent = "Passive";
   const passive_select = document.createElement("select");
   for (const passive of spec.possiblePassives) {
     const option = document.createElement("option");
@@ -3645,8 +3685,8 @@ function render_config() {
     config.passive = passive_select.value;
     save_profile();
   });
-  passive_label.appendChild(passive_select);
-  passive_grid.appendChild(passive_label);
+  passive_label2.appendChild(passive_select);
+  passive_grid.appendChild(passive_label2);
   const stat_fields = [
     ["level", "Level"],
     ["maxHp", "Max HP"],
@@ -3727,7 +3767,9 @@ function render_roster() {
     const card = document.createElement("div");
     const is_selected = selected.includes(entry.id);
     const is_disabled = !is_selected && selected.length >= 3 || is_ready && !match_started;
+    const tooltip = tooltip_from_config(entry.id);
     card.className = `roster-card${is_selected ? " active" : ""}${is_disabled ? " disabled" : ""}`;
+    card.title = tooltip;
     card.innerHTML = `
       <div class="sprite" style="width:24px;height:24px;">
         <img src="${icon_path(entry.id)}" alt="${entry.name}" />
@@ -3737,6 +3779,10 @@ function render_roster() {
         <p>${entry.role}</p>
       </div>
     `;
+    const card_img = card.querySelector("img");
+    if (card_img) {
+      card_img.title = tooltip;
+    }
     card.addEventListener("click", () => {
       if (is_disabled)
         return;
@@ -3753,15 +3799,18 @@ function set_bench_slot(slot2, mon, index, enabled) {
     slot2.btn.title = "";
     slot2.img.removeAttribute("src");
     slot2.img.alt = "";
+    slot2.img.title = "";
     slot2.img.style.display = "none";
     return;
   }
+  const tooltip = tooltip_from_state(mon);
   slot2.btn.classList.remove("empty");
   slot2.btn.dataset.index = `${index}`;
-  slot2.btn.title = monster_label(mon.id);
+  slot2.btn.title = tooltip;
   slot2.btn.disabled = !enabled || mon.hp <= 0;
   slot2.img.src = icon_path(mon.id);
   slot2.img.alt = monster_label(mon.id);
+  slot2.img.title = tooltip;
   slot2.img.style.display = "";
 }
 function update_bench(state, viewer_slot) {
@@ -4067,7 +4116,7 @@ function update_panels(state, opts) {
   }
   player_sprite.src = icon_path(my_active.id);
   player_sprite.alt = monster_label(my_active.id);
-  player_sprite.title = monster_label(my_active.id);
+  player_sprite.title = tooltip_from_state(my_active);
   enemy_title.textContent = opp.name || "Opponent";
   if (!opts?.skipMeta?.enemy) {
     enemy_meta.textContent = `Lv ${opp_active.level} · HP ${opp_active.hp}/${opp_active.maxHp}`;
@@ -4077,7 +4126,7 @@ function update_panels(state, opts) {
   }
   enemy_sprite.src = icon_path(opp_active.id);
   enemy_sprite.alt = monster_label(opp_active.id);
-  enemy_sprite.title = monster_label(opp_active.id);
+  enemy_sprite.title = tooltip_from_state(opp_active);
   update_bench(state, viewer_slot);
 }
 function animate_hp_text(side, level, from, to, maxHp, delay = 180) {
