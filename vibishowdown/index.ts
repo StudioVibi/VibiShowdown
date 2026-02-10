@@ -167,15 +167,17 @@ let relay_ended = false;
 let relay_turn = 0;
 let relay_state: GameState | null = null;
 let relay_local_role: PlayerSlot | "spectator" | null = null;
+const RELAY_WATCHER_TTL_MS = 90_000;
+const RELAY_JOIN_HEARTBEAT_MS = 25_000;
 const relay_seen_indexes = new Set<number>();
 const relay_names_by_id = new Map<string, string>();
+const relay_last_seen_at = new Map<string, number>();
 const relay_slot_by_id = new Map<string, PlayerSlot>();
 const relay_ids_by_slot: Record<PlayerSlot, string | null> = { player1: null, player2: null };
 const relay_join_order: string[] = [];
-const relay_ready: Record<PlayerSlot, boolean> = { player1: false, player2: false };
-const relay_teams: Record<PlayerSlot, TeamSelection | null> = { player1: null, player2: null };
+const relay_ready_order_ids: string[] = [];
+const relay_team_by_id = new Map<string, TeamSelection>();
 const relay_intents: Record<PlayerSlot, PlayerIntent | null> = { player1: null, player2: null };
-const relay_ready_order: PlayerSlot[] = [];
 let join_sent = false;
 let room_feed_started = false;
 let chat_ready = false;
@@ -237,11 +239,22 @@ function relay_spectator_names(): string[] {
 
 function relay_emit_snapshots(): void {
   const names = relay_names_by_slot();
+  const ready: Record<PlayerSlot, boolean> = {
+    player1: !!relay_ids_by_slot.player1,
+    player2: !!relay_ids_by_slot.player2
+  };
+  const order: PlayerSlot[] = [];
+  if (ready.player1) {
+    order.push("player1");
+  }
+  if (ready.player2) {
+    order.push("player2");
+  }
   emit_local_post({
     $: "ready_state",
-    ready: { ...relay_ready },
+    ready,
     names,
-    order: relay_ready_order.slice()
+    order
   });
   emit_local_post({
     $: "participants",
@@ -271,22 +284,76 @@ function relay_emit_local_role(): void {
   relay_local_role = null;
 }
 
-function relay_assign_slot(id: string): PlayerSlot | null {
-  const existing = relay_slot_by_id.get(id);
-  if (existing) {
-    return existing;
+function relay_recompute_slots_from_ready_order(): void {
+  relay_slot_by_id.clear();
+  const p1 = relay_ready_order_ids[0] ?? null;
+  const p2 = relay_ready_order_ids[1] ?? null;
+  relay_ids_by_slot.player1 = p1;
+  relay_ids_by_slot.player2 = p2;
+  if (p1) {
+    relay_slot_by_id.set(p1, "player1");
   }
-  if (!relay_ids_by_slot.player1) {
-    relay_ids_by_slot.player1 = id;
-    relay_slot_by_id.set(id, "player1");
-    return "player1";
+  if (p2) {
+    relay_slot_by_id.set(p2, "player2");
   }
-  if (!relay_ids_by_slot.player2) {
-    relay_ids_by_slot.player2 = id;
-    relay_slot_by_id.set(id, "player2");
-    return "player2";
+}
+
+function relay_reset_match_to_lobby(): void {
+  relay_state = null;
+  relay_ended = false;
+  relay_turn = 0;
+  relay_intents.player1 = null;
+  relay_intents.player2 = null;
+  relay_team_by_id.clear();
+  relay_ready_order_ids.length = 0;
+  relay_recompute_slots_from_ready_order();
+  relay_emit_local_role();
+  relay_emit_snapshots();
+}
+
+function relay_remove_participant(id: string): void {
+  const join_idx = relay_join_order.indexOf(id);
+  if (join_idx >= 0) {
+    relay_join_order.splice(join_idx, 1);
   }
-  return null;
+  relay_last_seen_at.delete(id);
+  relay_names_by_id.delete(id);
+
+  relay_team_by_id.delete(id);
+  const ready_idx = relay_ready_order_ids.indexOf(id);
+  if (ready_idx >= 0) {
+    relay_ready_order_ids.splice(ready_idx, 1);
+  }
+  relay_recompute_slots_from_ready_order();
+  relay_intents.player1 = null;
+  relay_intents.player2 = null;
+}
+
+function relay_prune_inactive(now_ms: number): void {
+  let changed = false;
+  for (let i = relay_join_order.length - 1; i >= 0; i--) {
+    const id = relay_join_order[i];
+    const seen_at = relay_last_seen_at.get(id);
+    if (typeof seen_at !== "number") {
+      relay_remove_participant(id);
+      changed = true;
+      continue;
+    }
+    if (now_ms - seen_at <= RELAY_WATCHER_TTL_MS) {
+      continue;
+    }
+    const slot_id = relay_slot_by_id.get(id);
+    if (slot_id && relay_state?.status === "running") {
+      continue;
+    }
+    relay_remove_participant(id);
+    changed = true;
+  }
+  if (!changed) {
+    return;
+  }
+  relay_emit_local_role();
+  relay_emit_snapshots();
 }
 
 function relay_start_turn(): void {
@@ -312,14 +379,21 @@ function relay_start_match_if_ready(): void {
   if (relay_state || relay_ended) {
     return;
   }
-  if (!relay_ready.player1 || !relay_ready.player2 || !relay_teams.player1 || !relay_teams.player2) {
+  const p1 = relay_ids_by_slot.player1;
+  const p2 = relay_ids_by_slot.player2;
+  if (!p1 || !p2) {
+    return;
+  }
+  const p1_team = relay_team_by_id.get(p1);
+  const p2_team = relay_team_by_id.get(p2);
+  if (!p1_team || !p2_team) {
     return;
   }
   const names = relay_names_by_slot();
   relay_state = create_initial_state(
     {
-      player1: relay_teams.player1,
-      player2: relay_teams.player2
+      player1: p1_team,
+      player2: p2_team
     },
     {
       player1: names.player1 || "player1",
@@ -337,51 +411,44 @@ function relay_handle_join(data: Extract<RoomPost, { $: "join" }>): void {
   if (!id) {
     return;
   }
+  const is_first_join = !relay_join_order.includes(id);
   relay_names_by_id.set(id, data.name);
-  if (!relay_join_order.includes(id)) {
+  if (is_first_join) {
     relay_join_order.push(id);
+    emit_local_post({ $: "join", name: data.name });
   }
-  emit_local_post({ $: "join", name: data.name });
   relay_emit_local_role();
   relay_emit_snapshots();
 }
 
 function relay_handle_ready(data: Extract<RoomPost, { $: "ready" }>): void {
-  if (relay_state || relay_turn > 0 || relay_ended) {
+  if (relay_state?.status === "running") {
     return;
   }
   const id = relay_identity(data);
   if (!id) {
     return;
   }
-  const assigned_slot = relay_slot_by_id.get(id);
   if (!data.ready) {
-    if (!assigned_slot) {
-      return;
-    }
-    const slot_id = assigned_slot;
-    relay_ready[slot_id] = false;
-    relay_teams[slot_id] = null;
-    const idx = relay_ready_order.indexOf(slot_id);
+    relay_team_by_id.delete(id);
+    const idx = relay_ready_order_ids.indexOf(id);
     if (idx >= 0) {
-      relay_ready_order.splice(idx, 1);
+      relay_ready_order_ids.splice(idx, 1);
     }
+    relay_recompute_slots_from_ready_order();
+    relay_emit_local_role();
     relay_emit_snapshots();
     return;
   }
   if (!data.team) {
     return;
   }
-  const slot_id = assigned_slot ?? relay_assign_slot(id);
-  if (!slot_id) {
-    return;
+  relay_team_by_id.set(id, data.team);
+  if (!relay_ready_order_ids.includes(id)) {
+    relay_ready_order_ids.push(id);
   }
+  relay_recompute_slots_from_ready_order();
   relay_emit_local_role();
-  relay_ready[slot_id] = true;
-  relay_teams[slot_id] = data.team;
-  if (!relay_ready_order.includes(slot_id)) {
-    relay_ready_order.push(slot_id);
-  }
   relay_emit_snapshots();
   relay_start_match_if_ready();
 }
@@ -421,6 +488,7 @@ function relay_handle_intent(data: Extract<RoomPost, { $: "intent" }>): void {
   emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log });
   if (relay_state.status === "ended") {
     relay_ended = true;
+    relay_reset_match_to_lobby();
     return;
   }
   if (!relay_state.pendingSwitch.player1 && !relay_state.pendingSwitch.player2) {
@@ -477,9 +545,14 @@ function relay_handle_surrender(data: Extract<RoomPost, { $: "surrender" }>): vo
   ];
   emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log });
   emit_local_post({ $: "surrender", turn: relay_turn, loser, winner });
+  relay_reset_match_to_lobby();
 }
 
-function relay_consume_post(data: RoomPost): void {
+function relay_consume_post(data: RoomPost, seen_at: number): void {
+  const id = relay_identity(data);
+  if (id) {
+    relay_last_seen_at.set(id, seen_at);
+  }
   switch (data.$) {
     case "join":
       relay_handle_join(data);
@@ -508,6 +581,7 @@ function relay_consume_post(data: RoomPost): void {
 }
 
 function consume_network_message(message: any): void {
+  const seen_at = typeof message?.server_time === "number" ? message.server_time : Date.now();
   const index = typeof message?.index === "number" ? message.index : -1;
   if (index >= 0) {
     if (relay_seen_indexes.has(index)) {
@@ -528,7 +602,8 @@ function consume_network_message(message: any): void {
     emit_local_post(data);
     return;
   }
-  relay_consume_post(data);
+  relay_consume_post(data, seen_at);
+  relay_prune_inactive(seen_at);
 }
 
 function ensure_participants_state(): { players: Record<PlayerSlot, string | null>; spectators: string[] } {
@@ -579,6 +654,14 @@ function append_chat(line: string): void {
   append_line(chat_messages, line);
 }
 
+function append_chat_user(name: string, message: string): void {
+  append_line(chat_messages, `${name}: ${message}`, "log-user");
+}
+
+function append_turn_marker(turn: number): void {
+  append_line(log_list, `turno ${turn}`, "log-turn");
+}
+
 function try_post(data: RoomPost): boolean {
   try {
     post(room, data);
@@ -613,9 +696,12 @@ function setup_chat_input(input: HTMLInputElement | null, button: HTMLButtonElem
   });
 }
 
-function append_line(container: HTMLElement | null, line: string): void {
+function append_line(container: HTMLElement | null, line: string, class_name?: string): void {
   if (!container) return;
   const p = document.createElement("p");
+  if (class_name) {
+    p.classList.add(class_name);
+  }
   p.textContent = line;
   container.appendChild(p);
   container.scrollTop = container.scrollHeight;
@@ -1288,7 +1374,7 @@ function handle_turn_start(data: { turn: number; deadline_at: number }): void {
   intent_locked = false;
   status_turn.textContent = `${current_turn}`;
   update_deadline();
-  append_log(`turn ${current_turn} started`);
+  append_turn_marker(current_turn);
   close_switch_modal();
   if (!match_started) {
     match_started = true;
@@ -1602,6 +1688,19 @@ function handle_post(message: any): void {
         players: { ...data.names },
         spectators: participants ? participants.spectators.slice() : []
       };
+      if (match_started && !data.ready.player1 && !data.ready.player2) {
+        match_started = false;
+        latest_state = null;
+        current_turn = 0;
+        deadline_at = 0;
+        intent_locked = false;
+        close_switch_modal();
+        match_end.classList.remove("open");
+        prematch.style.display = "";
+        document.body.classList.add("prematch-open");
+        status_turn.textContent = "0";
+        update_deadline();
+      }
       if (Array.isArray(data.order)) {
         ready_order = data.order.slice();
       } else {
@@ -1629,6 +1728,11 @@ function handle_post(message: any): void {
         opponent_ready = data.ready[opponent_slot];
         opponent_name = data.names[opponent_slot];
         update_opponent_ui(opponent_ready, opponent_name);
+      } else {
+        is_ready = false;
+        opponent_ready = false;
+        opponent_name = null;
+        update_opponent_ui(false, null);
       }
       update_ready_ui();
       render_participants();
@@ -1661,20 +1765,25 @@ function handle_post(message: any): void {
       append_chat(`error: ${data.message}`);
       return;
     case "join":
-      append_log(`join: ${data.name}`);
       append_chat(`${data.name} joined the room`);
       add_spectator(data.name);
       render_participants();
       return;
     case "spectator":
+      slot = null;
       is_spectator = true;
+      is_ready = false;
+      opponent_ready = false;
+      opponent_name = null;
       add_spectator(data.name);
       if (status_slot) status_slot.textContent = "spectator";
+      player_meta.textContent = "Spectator";
+      update_opponent_ui(false, null);
       update_ready_ui();
       render_participants();
       return;
     case "chat":
-      append_chat(`${data.from}: ${data.message}`);
+      append_chat_user(data.from, data.message);
       return;
     case "participants":
       participants = { players: data.players, spectators: data.spectators.slice() };
@@ -1755,6 +1864,20 @@ setInterval(() => {
     status_ping.textContent = "--";
   }
 }, 1000);
+
+setInterval(() => {
+  if (!join_sent || relay_server_managed) {
+    return;
+  }
+  try_post({ $: "join", name: player_name, player_id });
+}, RELAY_JOIN_HEARTBEAT_MS);
+
+setInterval(() => {
+  if (relay_server_managed) {
+    return;
+  }
+  relay_prune_inactive(Date.now());
+}, 5000);
 
 load_team_selection();
 render_roster();
