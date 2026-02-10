@@ -2764,8 +2764,44 @@ function validate_intent(state, slot, intent) {
 
 // vibishowdown/index.ts
 var PLAYER_SLOTS = ["player1", "player2"];
-var room = prompt("Room name?") || gen_name();
-var player_name = prompt("Your name?") || gen_name();
+var LAST_ROOM_KEY = "vibi_showdown_last_room";
+var LAST_PLAYER_NAME_KEY = "vibi_showdown_last_player_name";
+function normalize_identity_value(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+function read_saved_identity_value(key) {
+  try {
+    return normalize_identity_value(localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+function save_identity_value(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+function resolve_session_identity() {
+  const params = new URLSearchParams(window.location.search);
+  const room_param = normalize_identity_value(params.get("room"));
+  const name_param = normalize_identity_value(params.get("name"));
+  let resolved_room = room_param ?? read_saved_identity_value(LAST_ROOM_KEY);
+  if (!resolved_room) {
+    resolved_room = normalize_identity_value(prompt("Room name?")) ?? gen_name();
+  }
+  let resolved_name = name_param ?? read_saved_identity_value(LAST_PLAYER_NAME_KEY);
+  if (!resolved_name) {
+    resolved_name = normalize_identity_value(prompt("Your name?")) ?? gen_name();
+  }
+  save_identity_value(LAST_ROOM_KEY, resolved_room);
+  save_identity_value(LAST_PLAYER_NAME_KEY, resolved_name);
+  return { room: resolved_room, player_name: resolved_name };
+}
+var { room, player_name } = resolve_session_identity();
 function get_tab_player_id(room_name) {
   const key = `vibi_showdown_player_id:${room_name}`;
   try {
@@ -4032,6 +4068,20 @@ function show_match_end(winner) {
   match_end_sub.textContent = winner ? `${winner} wins the match.` : "Match finished.";
   match_end.classList.add("open");
 }
+function reset_to_lobby_view() {
+  match_started = false;
+  latest_state = null;
+  current_turn = 0;
+  deadline_at = 0;
+  intent_locked = false;
+  close_switch_modal();
+  match_end.classList.remove("open");
+  prematch.style.display = "";
+  document.body.classList.add("prematch-open");
+  status_turn.textContent = "0";
+  update_deadline();
+  update_action_controls();
+}
 function handle_turn_start(data) {
   current_turn = data.turn;
   deadline_at = data.deadline_at;
@@ -4327,17 +4377,7 @@ function handle_post(message) {
         spectators: participants ? participants.spectators.slice() : []
       };
       if (match_started && !data.ready.player1 && !data.ready.player2) {
-        match_started = false;
-        latest_state = null;
-        current_turn = 0;
-        deadline_at = 0;
-        intent_locked = false;
-        close_switch_modal();
-        match_end.classList.remove("open");
-        prematch.style.display = "";
-        document.body.classList.add("prematch-open");
-        status_turn.textContent = "0";
-        update_deadline();
+        reset_to_lobby_view();
       }
       if (Array.isArray(data.order)) {
         ready_order = data.order.slice();
@@ -4465,7 +4505,7 @@ ready_btn.addEventListener("click", () => {
   }
 });
 match_end_btn.addEventListener("click", () => {
-  window.location.reload();
+  reset_to_lobby_view();
 });
 slot_active.addEventListener("click", () => {
   set_edit_target(0);

@@ -31,8 +31,53 @@ type Profile = {
 
 const PLAYER_SLOTS: PlayerSlot[] = ["player1", "player2"];
 
-const room = prompt("Room name?") || gen_name();
-const player_name = prompt("Your name?") || gen_name();
+const LAST_ROOM_KEY = "vibi_showdown_last_room";
+const LAST_PLAYER_NAME_KEY = "vibi_showdown_last_player_name";
+
+function normalize_identity_value(value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function read_saved_identity_value(key: string): string | null {
+  try {
+    return normalize_identity_value(localStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+function save_identity_value(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {}
+}
+
+function resolve_session_identity(): { room: string; player_name: string } {
+  const params = new URLSearchParams(window.location.search);
+  const room_param = normalize_identity_value(params.get("room"));
+  const name_param = normalize_identity_value(params.get("name"));
+
+  let resolved_room = room_param ?? read_saved_identity_value(LAST_ROOM_KEY);
+  if (!resolved_room) {
+    resolved_room = normalize_identity_value(prompt("Room name?")) ?? gen_name();
+  }
+
+  let resolved_name = name_param ?? read_saved_identity_value(LAST_PLAYER_NAME_KEY);
+  if (!resolved_name) {
+    resolved_name = normalize_identity_value(prompt("Your name?")) ?? gen_name();
+  }
+
+  save_identity_value(LAST_ROOM_KEY, resolved_room);
+  save_identity_value(LAST_PLAYER_NAME_KEY, resolved_name);
+
+  return { room: resolved_room, player_name: resolved_name };
+}
+
+const { room, player_name } = resolve_session_identity();
 
 function get_tab_player_id(room_name: string): string {
   const key = `vibi_showdown_player_id:${room_name}`;
@@ -1438,6 +1483,21 @@ function show_match_end(winner?: PlayerSlot): void {
   match_end.classList.add("open");
 }
 
+function reset_to_lobby_view(): void {
+  match_started = false;
+  latest_state = null;
+  current_turn = 0;
+  deadline_at = 0;
+  intent_locked = false;
+  close_switch_modal();
+  match_end.classList.remove("open");
+  prematch.style.display = "";
+  document.body.classList.add("prematch-open");
+  status_turn.textContent = "0";
+  update_deadline();
+  update_action_controls();
+}
+
 function handle_turn_start(data: { turn: number; deadline_at: number }): void {
   current_turn = data.turn;
   deadline_at = data.deadline_at;
@@ -1759,17 +1819,7 @@ function handle_post(message: any): void {
         spectators: participants ? participants.spectators.slice() : []
       };
       if (match_started && !data.ready.player1 && !data.ready.player2) {
-        match_started = false;
-        latest_state = null;
-        current_turn = 0;
-        deadline_at = 0;
-        intent_locked = false;
-        close_switch_modal();
-        match_end.classList.remove("open");
-        prematch.style.display = "";
-        document.body.classList.add("prematch-open");
-        status_turn.textContent = "0";
-        update_deadline();
+        reset_to_lobby_view();
       }
       if (Array.isArray(data.order)) {
         ready_order = data.order.slice();
@@ -1903,7 +1953,7 @@ ready_btn.addEventListener("click", () => {
 });
 
 match_end_btn.addEventListener("click", () => {
-  window.location.reload();
+  reset_to_lobby_view();
 });
 
 slot_active.addEventListener("click", () => {
