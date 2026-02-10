@@ -6,6 +6,10 @@ Current policy: official-only.
 - Local game server script (`npm run server`) is intentionally disabled in `package.json`.
 - `npm run dev` now only serves the static `vibishowdown/` bundle via `scripts/serve-static.mjs` (no local WS backend).
 - The client networking runtime is vendored in `src/vibinet/*` to avoid `../VibiNet` path dependency.
+- Match progression is now client-deterministic in `vibishowdown/index.ts`:
+  - clients consume room posts in order,
+  - derive slots/ready state/participants locally,
+  - resolve turns locally with `src/engine.ts`.
 
 How it worked before this lock:
 

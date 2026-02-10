@@ -71,28 +71,28 @@ export type EventLog = {
   data?: Record<string, unknown>;
 };
 
-export type JoinPost = { $: "join"; name: string; token?: string };
+export type JoinPost = { $: "join"; name: string; player_id?: string; token?: string };
 export type AssignPost = { $: "assign"; slot: PlayerSlot; token: string; name: string };
 export type SpectatorPost = { $: "spectator"; name: string };
-export type ChatPost = { $: "chat"; message: string; from: string };
+export type ChatPost = { $: "chat"; message: string; from: string; player_id?: string };
 export type ParticipantsPost = {
   $: "participants";
   players: Record<PlayerSlot, string | null>;
   spectators: string[];
 };
-export type ReadyPost = { $: "ready"; ready: boolean; team?: TeamSelection };
+export type ReadyPost = { $: "ready"; ready: boolean; team?: TeamSelection; player_id?: string };
 export type ReadyStatePost = {
   $: "ready_state";
   ready: Record<PlayerSlot, boolean>;
   names: Record<PlayerSlot, string | null>;
   order?: PlayerSlot[];
 };
-export type IntentPost = { $: "intent"; turn: number; intent: PlayerIntent };
-export type ForcedSwitchPost = { $: "forced_switch"; targetIndex: number };
+export type IntentPost = { $: "intent"; turn: number; intent: PlayerIntent; player_id?: string };
+export type ForcedSwitchPost = { $: "forced_switch"; targetIndex: number; player_id?: string };
 export type IntentLockedPost = { $: "intent_locked"; slot: PlayerSlot; turn: number };
 export type TurnStartPost = { $: "turn_start"; turn: number; deadline_at: number; intents: Record<PlayerSlot, boolean> };
 export type StatePost = { $: "state"; turn: number; state: GameState; log: EventLog[] };
-export type SurrenderRequestPost = { $: "surrender" };
+export type SurrenderRequestPost = { $: "surrender"; player_id?: string };
 export type SurrenderPost = { $: "surrender"; turn: number; loser: PlayerSlot; winner: PlayerSlot };
 export type ErrorPost = { $: "error"; message: string; code?: string };
 

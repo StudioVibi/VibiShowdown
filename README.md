@@ -26,4 +26,6 @@ Comandos:
 Networking:
 
 - endpoint travado em `wss://net.studiovibi.com`.
+- modo atual: cliente-deterministico. Cada jogador envia `join/ready/intent/forced_switch/surrender` e todos recomputam o estado localmente com `src/engine.ts`.
+- identificacao de jogador por `player_id` persistido no browser (`localStorage`).
 - historico do modo antigo (override/local): `docs/networking-history.md`.
