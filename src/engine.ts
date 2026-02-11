@@ -416,7 +416,7 @@ function apply_move(
   } else if (damage_type === "true") {
     raw_damage = Math.round((effective_attack * multiplier100) / 100);
   } else {
-    raw_damage = Math.round((effective_attack * multiplier100) / (effective_defense * 100));
+    raw_damage = Math.round((effective_attack * multiplier100) / effective_defense);
   }
   let damage = Math.max(0, raw_damage);
   const was_blocked = defender.protectActiveThisTurn;
@@ -503,7 +503,7 @@ function apply_move(
       : "";
 
   if (spec.id === "return") {
-    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def)) = round(${effective_attack} * ${multiplier100} / (${effective_defense})) = ${raw_damage}; final=${final_damage}${
+    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / def) = round(${effective_attack} * ${multiplier100} / ${effective_defense}) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }${choice_band_detail}`;
     log.push({
@@ -514,7 +514,7 @@ function apply_move(
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "double_edge") {
-    const detail = `Double-Edge: dmg = round(atk*120/(def)) = round(${effective_attack}*120/(${effective_defense})) = ${raw_damage}; final=${final_damage}${
+    const detail = `Double-Edge: dmg = round(atk*120/def) = round(${effective_attack}*120/${effective_defense}) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
     log.push({
@@ -536,7 +536,7 @@ function apply_move(
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "quick_attack") {
-    const detail = `Quick Attack: dmg = round(atk*66/(def)) = round(${effective_attack}*66/(${effective_defense})) = ${raw_damage}; final=${final_damage}${
+    const detail = `Quick Attack: dmg = round(atk*66/def) = round(${effective_attack}*66/${effective_defense}) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }; speed check ignored${choice_band_detail}`;
     log.push({

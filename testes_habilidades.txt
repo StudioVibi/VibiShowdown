@@ -51,21 +51,21 @@ COMO TESTAR (MESMO DE ANTES)
 
 RESULTADOS ESPERADOS
 A) Return
-   Formula: dmg = round(atk * (72 + 4*lvl) / (def*100))
+   Formula: dmg = round(atk * (72 + 4*lvl) / def)
    Com Lv 7: (72 + 4*7) = 100
-   Dano esperado: round(100 * 100 / (10*100)) = 10
-   HP do Dummy: 100 -> 90
+   Dano esperado: round(100 * 100 / 10) = 1000
+   HP do Dummy: 100 -> 0
 
 B) Double-Edge
-   Formula: dmg = round(atk*120/(def*100))
-   Dano esperado: round(100*120/(10*100)) = 12
-   Recoil: round(dmg/3) = round(12/3) = 4
-   HP do Dummy: 100 -> 88
-   HP do Attacker: 100 -> 96
+   Formula: dmg = round(atk*120/def)
+   Dano esperado: round(100*120/10) = 1200
+   Recoil: round(dmg/3) = round(1200/3) = 400
+   HP do Dummy: 100 -> 0
+   HP do Attacker: 100 -> 0
 
 C) Seismic Toss
-   Dano flat: 75 (ignora defesa)
-   HP do Dummy: 100 -> 25
+   Dano flat: 35 (ignora defesa)
+   HP do Dummy: 100 -> 65
 
 OBSERVACAO
 - Se algum mon usar Protect, o dano final vira 0.

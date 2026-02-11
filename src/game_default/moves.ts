@@ -25,7 +25,7 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
     phaseId: "attack_01",
     attackMultiplier100: 100,
     damageType: "flat",
-    flatDamage: 75
+    flatDamage: 35
   },
   { id: "screech", label: "Screech", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },

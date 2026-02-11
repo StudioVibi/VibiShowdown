@@ -1856,7 +1856,7 @@ var MOVE_CATALOG = [
     phaseId: "attack_01",
     attackMultiplier100: 100,
     damageType: "flat",
-    flatDamage: 75
+    flatDamage: 35
   },
   { id: "screech", label: "Screech", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },
@@ -2404,7 +2404,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
   } else if (damage_type === "true") {
     raw_damage = Math.round(effective_attack * multiplier100 / 100);
   } else {
-    raw_damage = Math.round(effective_attack * multiplier100 / (effective_defense * 100));
+    raw_damage = Math.round(effective_attack * multiplier100 / effective_defense);
   }
   let damage = Math.max(0, raw_damage);
   const was_blocked = defender.protectActiveThisTurn;
@@ -2467,7 +2467,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
   }
   const choice_band_detail = choice_band_active && damage_type !== "flat" ? `; Choice Band ATK boost: ${attacker.attack} -> ${effective_attack}` : "";
   if (spec.id === "return") {
-    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / (def)) = round(${effective_attack} * ${multiplier100} / (${effective_defense})) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}${choice_band_detail}`;
+    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / def) = round(${effective_attack} * ${multiplier100} / ${effective_defense}) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}${choice_band_detail}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -2476,7 +2476,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "double_edge") {
-    const detail = `Double-Edge: dmg = round(atk*120/(def)) = round(${effective_attack}*120/(${effective_defense})) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
+    const detail = `Double-Edge: dmg = round(atk*120/def) = round(${effective_attack}*120/${effective_defense}) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -2494,7 +2494,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "quick_attack") {
-    const detail = `Quick Attack: dmg = round(atk*66/(def)) = round(${effective_attack}*66/(${effective_defense})) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; speed check ignored${choice_band_detail}`;
+    const detail = `Quick Attack: dmg = round(atk*66/def) = round(${effective_attack}*66/${effective_defense}) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; speed check ignored${choice_band_detail}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
