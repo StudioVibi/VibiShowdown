@@ -276,7 +276,8 @@ function apply_pending_wish(state: GameState, log: EventLog[], slot: PlayerSlot,
   const player = state.players[slot];
   const target = active_monster(player);
   const before_hp = target.hp;
-  const after_hp = Math.min(target.maxHp, Math.max(0, mul_div_round(before_hp, 3, 2)));
+  const wish_heal = Math.max(0, mul_div_round(target.maxHp, 1, 2));
+  const after_hp = Math.min(target.maxHp, Math.max(0, before_hp + wish_heal));
   state.pendingWish[slot] = null;
 
   if (after_hp !== before_hp) {
@@ -286,16 +287,16 @@ function apply_pending_wish(state: GameState, log: EventLog[], slot: PlayerSlot,
       type: "wish_heal",
       turn: state.turn,
       phase: END_PHASE_ID,
-      summary: `${target.name} recebeu Wish (${before_hp} -> ${after_hp})`,
-      data: { slot, target: target.id, before: before_hp, after: after_hp }
+      summary: `${target.name} recebeu Wish (+${wish_heal} por maxHp: ${before_hp} -> ${after_hp})`,
+      data: { slot, target: target.id, before: before_hp, after: after_hp, amount: wish_heal, basedOn: "maxHp" }
     });
   } else {
     log.push({
       type: "wish_heal",
       turn: state.turn,
       phase: END_PHASE_ID,
-      summary: `${target.name} recebeu Wish (sem efeito: ${before_hp} -> ${after_hp})`,
-      data: { slot, target: target.id, before: before_hp, after: after_hp }
+      summary: `${target.name} recebeu Wish (sem efeito: +${wish_heal} por maxHp, ${before_hp} -> ${after_hp})`,
+      data: { slot, target: target.id, before: before_hp, after: after_hp, amount: wish_heal, basedOn: "maxHp" }
     });
   }
 }
@@ -943,7 +944,7 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Wish: no turno ${trigger_turn}, no inicio do end_turn, o ativo de ${player_slot} recebe HP x1.5 (max ${attacker.maxHp})`,
+      summary: `Wish: no turno ${trigger_turn}, no inicio do end_turn, o ativo de ${player_slot} cura +50% do maxHp (clamp no max)`,
       data: { move: spec.id, slot: player_slot, triggerTurn: trigger_turn }
     });
     return;
@@ -952,7 +953,8 @@ function apply_move(
   if (spec.id === "bells_drum") {
     const before_hp = attacker.hp;
     const before_attack = attacker.attack;
-    const after_hp = Math.max(1, mul_div_floor(before_hp, 1, 2));
+    const hp_cost = Math.max(1, mul_div_floor(attacker.maxHp, 1, 2));
+    const after_hp = Math.max(1, before_hp - hp_cost);
     const after_attack = Math.max(0, mul_div_round(before_attack, 2, 1));
     attacker.hp = after_hp;
     attacker.attack = after_attack;
@@ -987,13 +989,15 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Bells Drum: user HP x0.5 (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
+      summary: `Bells Drum: user paga 50% do maxHp (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
       data: {
         move: spec.id,
         slot: player_slot,
         target: attacker.id,
         hpBefore: before_hp,
         hpAfter: after_hp,
+        hpCost: hp_cost,
+        hpCostBasedOn: "maxHp",
         attackBefore: before_attack,
         attackAfter: after_attack
       }
