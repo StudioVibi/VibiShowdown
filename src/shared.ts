@@ -57,6 +57,7 @@ export type GameState = {
   winner?: PlayerSlot;
   players: Record<PlayerSlot, PlayerState>;
   pendingSwitch: Record<PlayerSlot, boolean>;
+  pendingWish: Record<PlayerSlot, number | null>;
 };
 
 export type PlayerIntent =

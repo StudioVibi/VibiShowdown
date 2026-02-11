@@ -30,7 +30,8 @@ const PHASES: Phase[] = [
 
 type Action =
   | { player: PlayerSlot; type: "switch"; phase: string; targetIndex: number }
-  | { player: PlayerSlot; type: "move"; phase: string; moveId: MoveId; moveIndex: number };
+  | { player: PlayerSlot; type: "move"; phase: string; moveId: MoveId; moveIndex: number }
+  | { player: PlayerSlot; type: "wish"; phase: string };
 
 type AgilityPending = {
   slot: PlayerSlot;
@@ -55,6 +56,33 @@ function compare_action_initiative(state: GameState, phase: Phase, a: Action, b:
   }
 
   return compare_initiative(a_active, b_active, phase.initiative);
+}
+
+function action_type_order(action: Action): number {
+  if (action.type === "wish") return 0;
+  if (action.type === "move") return 1;
+  return 2;
+}
+
+function compare_actions_for_phase(state: GameState, phase: Phase, a: Action, b: Action): number {
+  const cmp = compare_action_initiative(state, phase, a, b);
+  if (cmp !== 0) {
+    return -cmp;
+  }
+  if (a.player !== b.player) {
+    return a.player === "player1" ? -1 : 1;
+  }
+  const type_cmp = action_type_order(a) - action_type_order(b);
+  if (type_cmp !== 0) {
+    return type_cmp;
+  }
+  if (a.type === "move" && b.type === "move") {
+    return a.moveIndex - b.moveIndex;
+  }
+  if (a.type === "switch" && b.type === "switch") {
+    return a.targetIndex - b.targetIndex;
+  }
+  return 0;
 }
 
 function clone_monster(monster: MonsterState): MonsterState {
@@ -82,6 +110,10 @@ function empty_pending(): Record<PlayerSlot, boolean> {
   return { player1: false, player2: false };
 }
 
+function empty_pending_wish(): Record<PlayerSlot, number | null> {
+  return { player1: null, player2: null };
+}
+
 function clone_player(player: PlayerState): PlayerState {
   return {
     slot: player.slot,
@@ -100,7 +132,11 @@ export function clone_state(state: GameState): GameState {
       player1: clone_player(state.players.player1),
       player2: clone_player(state.players.player2)
     },
-    pendingSwitch: { ...state.pendingSwitch }
+    pendingSwitch: { ...state.pendingSwitch },
+    pendingWish: {
+      player1: state.pendingWish?.player1 ?? null,
+      player2: state.pendingWish?.player2 ?? null
+    }
   };
 }
 
@@ -180,6 +216,38 @@ function apply_passives(state: GameState, log: EventLog[], hp_changed: WeakSet<M
       hp_changed
     });
   });
+}
+
+function apply_pending_wish(state: GameState, log: EventLog[], slot: PlayerSlot, hp_changed: WeakSet<MonsterState>): void {
+  if ((state.pendingWish?.[slot] ?? null) !== state.turn) {
+    return;
+  }
+
+  const player = state.players[slot];
+  const target = active_monster(player);
+  const before_hp = target.hp;
+  const after_hp = Math.min(target.maxHp, Math.max(0, mul_div_round(before_hp, 3, 2)));
+  state.pendingWish[slot] = null;
+
+  if (after_hp !== before_hp) {
+    target.hp = after_hp;
+    hp_changed.add(target);
+    log.push({
+      type: "wish_heal",
+      turn: state.turn,
+      phase: "attack_01",
+      summary: `${target.name} recebeu Wish (${before_hp} -> ${after_hp})`,
+      data: { slot, target: target.id, before: before_hp, after: after_hp }
+    });
+  } else {
+    log.push({
+      type: "wish_heal",
+      turn: state.turn,
+      phase: "attack_01",
+      summary: `${target.name} recebeu Wish (sem efeito: ${before_hp} -> ${after_hp})`,
+      data: { slot, target: target.id, before: before_hp, after: after_hp }
+    });
+  }
 }
 
 function handle_faint(state: GameState, log: EventLog[], slot: PlayerSlot): void {
@@ -365,6 +433,22 @@ function apply_move(
       phase: spec.phaseId,
       summary: "Agility: pending (applies at end of turn)",
       data: { move: spec.id, slot: player_slot, target: attacker.id }
+    });
+    return;
+  }
+
+  if (spec.id === "wish") {
+    const trigger_turn = state.turn + 1;
+    if (!state.pendingWish) {
+      state.pendingWish = empty_pending_wish();
+    }
+    state.pendingWish[player_slot] = trigger_turn;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Wish: no turno ${trigger_turn}, o ativo de ${player_slot} recebe HP x1.5 (max ${attacker.maxHp})`,
+      data: { move: spec.id, slot: player_slot, triggerTurn: trigger_turn }
     });
     return;
   }
@@ -694,6 +778,9 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
 function build_actions(intents: Record<PlayerSlot, PlayerIntent | null>, state: GameState): Action[] {
   const actions: Action[] = [];
   for (const slot of ["player1", "player2"] as const) {
+    if ((state.pendingWish?.[slot] ?? null) === state.turn) {
+      actions.push({ player: slot, type: "wish", phase: "attack_01" });
+    }
     const intent = intents[slot];
     if (!intent) continue;
     if (intent.action === "switch") {
@@ -765,7 +852,8 @@ export function create_initial_state(
       player1: build_player("player1"),
       player2: build_player("player2")
     },
-    pendingSwitch: empty_pending()
+    pendingSwitch: empty_pending(),
+    pendingWish: empty_pending_wish()
   };
 }
 
@@ -785,6 +873,9 @@ export function resolve_turn(
   if (!next.pendingSwitch) {
     next.pendingSwitch = empty_pending();
   }
+  if (!next.pendingWish) {
+    next.pendingWish = empty_pending_wish();
+  }
 
   reset_protect_flags(next);
   const actions = build_actions(intents, next);
@@ -796,16 +887,10 @@ export function resolve_turn(
       continue;
     }
 
-    if (phase_actions.length === 2) {
-      const a = phase_actions[0];
-      const b = phase_actions[1];
-      const cmp = compare_action_initiative(next, phase, a, b);
-      let first = a;
-      let second = b;
-      if (cmp < 0 || (cmp === 0 && a.player === "player2")) {
-        first = b;
-        second = a;
-      }
+    if (phase_actions.length >= 2) {
+      phase_actions.sort((a, b) => compare_actions_for_phase(next, phase, a, b));
+      const first = phase_actions[0];
+      const second = phase_actions[1];
       log.push({
         type: "initiative",
         turn: next.turn,
@@ -813,12 +898,13 @@ export function resolve_turn(
         summary: `${first.player} acts first in ${phase.name}`,
         data: { phase: phase.id }
       });
-      phase_actions.splice(0, 2, first, second);
     }
 
     for (const action of phase_actions) {
       if (action.type === "switch") {
         apply_switch(next, log, action.player, action.targetIndex);
+      } else if (action.type === "wish") {
+        apply_pending_wish(next, log, action.player, hp_changed_this_turn);
       } else {
         apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn, pending_agility);
       }

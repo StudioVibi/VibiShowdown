@@ -1892,7 +1892,7 @@ function build_visual_steps(prev_state: GameState, log: EventLog[], viewer_slot:
       steps.push({ kind: "shield_hit", attackerSide, defenderSide });
       continue;
     }
-    if (entry.type === "passive_heal") {
+    if (entry.type === "passive_heal" || entry.type === "wish_heal") {
       const data = entry.data as { slot?: PlayerSlot } | undefined;
       if (!data?.slot) continue;
       const side = side_from_slot(viewer_slot, data.slot);

@@ -1835,6 +1835,7 @@ var MOVE_CATALOG = [
   { id: "basic_attack", label: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 100 },
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "wish", label: "Wish", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "bells_drum", label: "Bells Drum", phaseId: "attack_01", attackMultiplier100: 0 },
   {
     id: "return",
@@ -2169,6 +2170,33 @@ function compare_action_initiative(state, phase, a, b) {
   }
   return compare_initiative(a_active, b_active, phase.initiative);
 }
+function action_type_order(action) {
+  if (action.type === "wish")
+    return 0;
+  if (action.type === "move")
+    return 1;
+  return 2;
+}
+function compare_actions_for_phase(state, phase, a, b) {
+  const cmp = compare_action_initiative(state, phase, a, b);
+  if (cmp !== 0) {
+    return -cmp;
+  }
+  if (a.player !== b.player) {
+    return a.player === "player1" ? -1 : 1;
+  }
+  const type_cmp = action_type_order(a) - action_type_order(b);
+  if (type_cmp !== 0) {
+    return type_cmp;
+  }
+  if (a.type === "move" && b.type === "move") {
+    return a.moveIndex - b.moveIndex;
+  }
+  if (a.type === "switch" && b.type === "switch") {
+    return a.targetIndex - b.targetIndex;
+  }
+  return 0;
+}
 function clone_monster(monster) {
   return {
     id: monster.id,
@@ -2192,6 +2220,9 @@ function clone_monster(monster) {
 function empty_pending() {
   return { player1: false, player2: false };
 }
+function empty_pending_wish() {
+  return { player1: null, player2: null };
+}
 function clone_player(player) {
   return {
     slot: player.slot,
@@ -2209,7 +2240,11 @@ function clone_state(state) {
       player1: clone_player(state.players.player1),
       player2: clone_player(state.players.player2)
     },
-    pendingSwitch: { ...state.pendingSwitch }
+    pendingSwitch: { ...state.pendingSwitch },
+    pendingWish: {
+      player1: state.pendingWish?.player1 ?? null,
+      player2: state.pendingWish?.player2 ?? null
+    }
   };
 }
 function active_monster(player) {
@@ -2277,6 +2312,35 @@ function apply_passives(state, log, hp_changed) {
       hp_changed
     });
   });
+}
+function apply_pending_wish(state, log, slot, hp_changed) {
+  if ((state.pendingWish?.[slot] ?? null) !== state.turn) {
+    return;
+  }
+  const player = state.players[slot];
+  const target = active_monster(player);
+  const before_hp = target.hp;
+  const after_hp = Math.min(target.maxHp, Math.max(0, mul_div_round(before_hp, 3, 2)));
+  state.pendingWish[slot] = null;
+  if (after_hp !== before_hp) {
+    target.hp = after_hp;
+    hp_changed.add(target);
+    log.push({
+      type: "wish_heal",
+      turn: state.turn,
+      phase: "attack_01",
+      summary: `${target.name} recebeu Wish (${before_hp} -> ${after_hp})`,
+      data: { slot, target: target.id, before: before_hp, after: after_hp }
+    });
+  } else {
+    log.push({
+      type: "wish_heal",
+      turn: state.turn,
+      phase: "attack_01",
+      summary: `${target.name} recebeu Wish (sem efeito: ${before_hp} -> ${after_hp})`,
+      data: { slot, target: target.id, before: before_hp, after: after_hp }
+    });
+  }
 }
 function handle_faint(state, log, slot) {
   const player = state.players[slot];
@@ -2432,6 +2496,21 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
       phase: spec.phaseId,
       summary: "Agility: pending (applies at end of turn)",
       data: { move: spec.id, slot: player_slot, target: attacker.id }
+    });
+    return;
+  }
+  if (spec.id === "wish") {
+    const trigger_turn = state.turn + 1;
+    if (!state.pendingWish) {
+      state.pendingWish = empty_pending_wish();
+    }
+    state.pendingWish[player_slot] = trigger_turn;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Wish: no turno ${trigger_turn}, o ativo de ${player_slot} recebe HP x1.5 (max ${attacker.maxHp})`,
+      data: { move: spec.id, slot: player_slot, triggerTurn: trigger_turn }
     });
     return;
   }
@@ -2715,6 +2794,9 @@ function apply_switch(state, log, player_slot, targetIndex) {
 function build_actions(intents, state) {
   const actions = [];
   for (const slot of ["player1", "player2"]) {
+    if ((state.pendingWish?.[slot] ?? null) === state.turn) {
+      actions.push({ player: slot, type: "wish", phase: "attack_01" });
+    }
     const intent = intents[slot];
     if (!intent)
       continue;
@@ -2781,7 +2863,8 @@ function create_initial_state(teams, names) {
       player1: build_player("player1"),
       player2: build_player("player2")
     },
-    pendingSwitch: empty_pending()
+    pendingSwitch: empty_pending(),
+    pendingWish: empty_pending_wish()
   };
 }
 function resolve_turn(state, intents) {
@@ -2795,6 +2878,9 @@ function resolve_turn(state, intents) {
   if (!next.pendingSwitch) {
     next.pendingSwitch = empty_pending();
   }
+  if (!next.pendingWish) {
+    next.pendingWish = empty_pending_wish();
+  }
   reset_protect_flags(next);
   const actions = build_actions(intents, next);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
@@ -2803,16 +2889,10 @@ function resolve_turn(state, intents) {
     if (phase_actions.length === 0) {
       continue;
     }
-    if (phase_actions.length === 2) {
-      const a = phase_actions[0];
-      const b = phase_actions[1];
-      const cmp = compare_action_initiative(next, phase, a, b);
-      let first = a;
-      let second = b;
-      if (cmp < 0 || cmp === 0 && a.player === "player2") {
-        first = b;
-        second = a;
-      }
+    if (phase_actions.length >= 2) {
+      phase_actions.sort((a, b) => compare_actions_for_phase(next, phase, a, b));
+      const first = phase_actions[0];
+      const second = phase_actions[1];
       log.push({
         type: "initiative",
         turn: next.turn,
@@ -2820,11 +2900,12 @@ function resolve_turn(state, intents) {
         summary: `${first.player} acts first in ${phase.name}`,
         data: { phase: phase.id }
       });
-      phase_actions.splice(0, 2, first, second);
     }
     for (const action of phase_actions) {
       if (action.type === "switch") {
         apply_switch(next, log, action.player, action.targetIndex);
+      } else if (action.type === "wish") {
+        apply_pending_wish(next, log, action.player, hp_changed_this_turn);
       } else {
         apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn, pending_agility);
       }
@@ -4592,7 +4673,7 @@ function build_visual_steps(prev_state, log, viewer_slot) {
       steps.push({ kind: "shield_hit", attackerSide: attackerSide2, defenderSide: defenderSide2 });
       continue;
     }
-    if (entry.type === "passive_heal") {
+    if (entry.type === "passive_heal" || entry.type === "wish_heal") {
       const data = entry.data;
       if (!data?.slot)
         continue;
