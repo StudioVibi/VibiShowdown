@@ -1,6 +1,7 @@
 import { MOVE_BY_ID } from "./moves.ts";
 import { PASSIVE_BY_ID, normalize_passive_id } from "./passives.ts";
 import type { MonsterCatalogEntry } from "./types.ts";
+import { LEVEL_MAX, LEVEL_MIN } from "../stats_calc.ts";
 
 function ensure(condition: unknown, message: string): void {
   if (!condition) {
@@ -57,11 +58,19 @@ export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[
     ensure_int(monster.stats.maxHp, `${monster.id}: maxHp must be integer`);
     ensure_int(monster.stats.attack, `${monster.id}: attack must be integer`);
     ensure_int(monster.stats.defense, `${monster.id}: defense must be integer`);
+    ensure_int(monster.stats.spAttack, `${monster.id}: spAttack must be integer`);
+    ensure_int(monster.stats.spDefense, `${monster.id}: spDefense must be integer`);
     ensure_int(monster.stats.speed, `${monster.id}: speed must be integer`);
     ensure(monster.stats.level > 0, `${monster.id}: level must be > 0`);
+    ensure(
+      monster.stats.level >= LEVEL_MIN && monster.stats.level <= LEVEL_MAX,
+      `${monster.id}: level must be between ${LEVEL_MIN} and ${LEVEL_MAX}`
+    );
     ensure(monster.stats.maxHp > 0, `${monster.id}: maxHp must be > 0`);
     ensure(monster.stats.attack >= 0, `${monster.id}: attack must be >= 0`);
     ensure(monster.stats.defense >= 0, `${monster.id}: defense must be >= 0`);
+    ensure(monster.stats.spAttack >= 0, `${monster.id}: spAttack must be >= 0`);
+    ensure(monster.stats.spDefense >= 0, `${monster.id}: spDefense must be >= 0`);
     ensure(monster.stats.speed >= 0, `${monster.id}: speed must be >= 0`);
   }
 }

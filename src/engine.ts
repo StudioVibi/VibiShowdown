@@ -1,4 +1,5 @@
 import type {
+  EVSpread,
   EventLog,
   GameState,
   MonsterState,
@@ -6,12 +7,13 @@ import type {
   PlayerIntent,
   PlayerSlot,
   PlayerState,
-  Stats,
   TeamSelection
 } from "./shared.ts";
+import { MONSTER_BY_ID } from "./game_default/pokemon.ts";
 import { move_spec } from "./game_default/moves.ts";
 import { apply_passive_turn_effect, passive_spec } from "./game_default/passives.ts";
 import { mul_div_ceil, mul_div_floor, mul_div_round, normalize_int } from "./int_math.ts";
+import { LEVEL_MAX, LEVEL_MIN, calc_final_stats, validate_ev_spread } from "./stats_calc.ts";
 
 type Phase = {
   id: string;
@@ -103,6 +105,8 @@ function clone_monster(monster: MonsterState): MonsterState {
     level: monster.level,
     attack: monster.attack,
     defense: monster.defense,
+    spAttack: monster.spAttack,
+    spDefense: monster.spDefense,
     speed: monster.speed,
     possibleMoves: monster.possibleMoves.slice(),
     possiblePassives: monster.possiblePassives.slice(),
@@ -1221,27 +1225,64 @@ export function create_initial_state(
   teams: Record<PlayerSlot, TeamSelection>,
   names: Record<PlayerSlot, string>
 ): GameState {
-  const normalize_stats = (stats: Stats): Stats => ({
-    level: normalize_int(stats.level, 1, 1),
-    maxHp: normalize_int(stats.maxHp, 1, 1),
-    attack: normalize_int(stats.attack, 0, 0),
-    defense: normalize_int(stats.defense, 0, 0),
-    speed: normalize_int(stats.speed, 0, 0)
-  });
+  const read_ev_component = (source: Partial<EVSpread>, key: keyof EVSpread): number => {
+    const raw = source[key];
+    if (raw === undefined) {
+      return 0;
+    }
+    return typeof raw === "number" ? raw : Number.NaN;
+  };
+
+  const normalize_ev = (value: unknown): EVSpread => {
+    const source = (typeof value === "object" && value !== null ? value : {}) as Partial<EVSpread>;
+    return {
+      hp: read_ev_component(source, "hp"),
+      atk: read_ev_component(source, "atk"),
+      def: read_ev_component(source, "def"),
+      spa: read_ev_component(source, "spa"),
+      spd: read_ev_component(source, "spd"),
+      spe: read_ev_component(source, "spe")
+    };
+  };
 
   const build_player = (slot: PlayerSlot): PlayerState => {
     const selection = teams[slot];
     const team = selection.monsters.map((monster) => {
-      const stats = normalize_stats(monster.stats);
+      const spec = MONSTER_BY_ID.get(monster.id);
+      if (!spec) {
+        throw new Error(`team invalid: unknown monster id ${monster.id}`);
+      }
+      const level_input = typeof monster.stats?.level === "number" ? monster.stats.level : spec.stats.level;
+      const normalized_level = normalize_int(level_input, spec.stats.level, LEVEL_MIN);
+      const level = Math.min(LEVEL_MAX, normalized_level);
+      const ev = normalize_ev(monster.ev);
+      const ev_error = validate_ev_spread(ev);
+      if (ev_error) {
+        throw new Error(`team invalid (${monster.id}): ${ev_error}`);
+      }
+      const final_stats = calc_final_stats(
+        {
+          hp: spec.stats.maxHp,
+          atk: spec.stats.attack,
+          def: spec.stats.defense,
+          spa: spec.stats.spAttack,
+          spd: spec.stats.spDefense,
+          spe: spec.stats.speed
+        },
+        level,
+        ev
+      );
       return {
         id: monster.id,
         name: monster.id,
-        hp: stats.maxHp,
-        maxHp: stats.maxHp,
-        level: stats.level,
-        attack: stats.attack,
-        defense: stats.defense,
-        speed: stats.speed,
+        hp: final_stats.hpMax,
+        maxHp: final_stats.hpMax,
+        level,
+        attack: final_stats.atk,
+        defense: final_stats.def,
+        spAttack: final_stats.spa,
+        spDefense: final_stats.spd,
+        speed: final_stats.spe,
         possibleMoves: monster.moves.slice(),
         possiblePassives: [monster.passive],
         chosenMoves: monster.moves.slice(0, 4),

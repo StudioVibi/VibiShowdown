@@ -2019,7 +2019,7 @@ var MONSTER_ROSTER = [
     id: "babydragon",
     name: "Baby Dragon",
     role: "Snorlax",
-    stats: { level: 7, maxHp: 160, attack: 110, defense: 65, speed: 30 },
+    stats: { level: 12, maxHp: 575, attack: 438, defense: 250, spAttack: 438, spDefense: 250, speed: 105 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2029,7 +2029,7 @@ var MONSTER_ROSTER = [
     id: "croni",
     name: "Croni",
     role: "Ninjask",
-    stats: { level: 7, maxHp: 61, attack: 90, defense: 45, speed: 160 },
+    stats: { level: 12, maxHp: 163, attack: 355, defense: 167, spAttack: 355, spDefense: 167, speed: 646 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2039,7 +2039,7 @@ var MONSTER_ROSTER = [
     id: "harpy",
     name: "Harpy",
     role: "Absol",
-    stats: { level: 7, maxHp: 65, attack: 130, defense: 60, speed: 75 },
+    stats: { level: 12, maxHp: 180, attack: 521, defense: 230, spAttack: 521, spDefense: 230, speed: 292 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2049,7 +2049,7 @@ var MONSTER_ROSTER = [
     id: "hoof",
     name: "Hoof",
     role: "Chansey",
-    stats: { level: 7, maxHp: 250, attack: 5, defense: 5, speed: 50 },
+    stats: { level: 12, maxHp: 950, attack: 0, defense: 0, spAttack: 0, spDefense: 0, speed: 188 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2059,7 +2059,7 @@ var MONSTER_ROSTER = [
     id: "knight",
     name: "Knight",
     role: "Metagross",
-    stats: { level: 7, maxHp: 80, attack: 135, defense: 130, speed: 70 },
+    stats: { level: 12, maxHp: 242, attack: 542, defense: 521, spAttack: 542, spDefense: 521, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2069,7 +2069,7 @@ var MONSTER_ROSTER = [
     id: "miren",
     name: "Miren",
     role: "Celebi",
-    stats: { level: 7, maxHp: 100, attack: 100, defense: 100, speed: 100 },
+    stats: { level: 12, maxHp: 325, attack: 396, defense: 396, spAttack: 396, spDefense: 396, speed: 396 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2079,7 +2079,7 @@ var MONSTER_ROSTER = [
     id: "panda",
     name: "Panda",
     role: "Cloyster",
-    stats: { level: 7, maxHp: 50, attack: 95, defense: 180, speed: 70 },
+    stats: { level: 12, maxHp: 117, attack: 375, defense: 730, spAttack: 375, spDefense: 730, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2089,7 +2089,7 @@ var MONSTER_ROSTER = [
     id: "valkyria",
     name: "Valkyria",
     role: "Aerodactyl",
-    stats: { level: 7, maxHp: 80, attack: 105, defense: 65, speed: 130 },
+    stats: { level: 12, maxHp: 242, attack: 417, defense: 250, spAttack: 417, spDefense: 250, speed: 521 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2097,6 +2097,64 @@ var MONSTER_ROSTER = [
   }
 ];
 var MONSTER_BY_ID = new Map(MONSTER_ROSTER.map((entry) => [entry.id, entry]));
+
+// src/stats_calc.ts
+var EV_PER_STAT_MAX = 252;
+var EV_TOTAL_MAX = 508;
+var LEVEL_MIN = 1;
+var LEVEL_MAX = 12;
+function empty_ev_spread() {
+  return { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
+}
+function empty_iv_spread() {
+  return { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
+}
+function neutral_nature() {
+  return { atk: 1, def: 1, spa: 1, spd: 1, spe: 1 };
+}
+function ev_bonus(ev) {
+  return Math.floor(ev / 4);
+}
+function validate_ev_spread(ev) {
+  const values = [
+    ["hp", ev.hp],
+    ["atk", ev.atk],
+    ["def", ev.def],
+    ["spa", ev.spa],
+    ["spd", ev.spd],
+    ["spe", ev.spe]
+  ];
+  for (const [key, value] of values) {
+    if (!Number.isInteger(value)) {
+      return `EV ${key} must be integer`;
+    }
+    if (value < 0 || value > EV_PER_STAT_MAX) {
+      return `EV ${key} must be between 0 and ${EV_PER_STAT_MAX}`;
+    }
+  }
+  const total = values.reduce((sum, [, value]) => sum + value, 0);
+  if (total > EV_TOTAL_MAX) {
+    return `EV total must be <= ${EV_TOTAL_MAX} (got ${total})`;
+  }
+  return null;
+}
+function calc_hp_max(base_hp, level, ev_hp, iv_hp) {
+  return Math.floor((2 * base_hp + iv_hp + ev_bonus(ev_hp)) * level / 100) + level + 10;
+}
+function calc_non_hp_stat(base, level, ev, iv, nature) {
+  const term = Math.floor((2 * base + iv + ev_bonus(ev)) * level / 100) + 5;
+  return Math.floor(term * nature);
+}
+function calc_final_stats(base, level, ev, iv = empty_iv_spread(), nature = neutral_nature()) {
+  return {
+    hpMax: calc_hp_max(base.hp, level, ev.hp, iv.hp),
+    atk: calc_non_hp_stat(base.atk, level, ev.atk, iv.atk, nature.atk),
+    def: calc_non_hp_stat(base.def, level, ev.def, iv.def, nature.def),
+    spa: calc_non_hp_stat(base.spa, level, ev.spa, iv.spa, nature.spa),
+    spd: calc_non_hp_stat(base.spd, level, ev.spd, iv.spd, nature.spd),
+    spe: calc_non_hp_stat(base.spe, level, ev.spe, iv.spe, nature.spe)
+  };
+}
 
 // src/game_default/integrity.ts
 function ensure(condition, message) {
@@ -2140,11 +2198,16 @@ function assert_monster_integrity(monsters) {
     ensure_int(monster.stats.maxHp, `${monster.id}: maxHp must be integer`);
     ensure_int(monster.stats.attack, `${monster.id}: attack must be integer`);
     ensure_int(monster.stats.defense, `${monster.id}: defense must be integer`);
+    ensure_int(monster.stats.spAttack, `${monster.id}: spAttack must be integer`);
+    ensure_int(monster.stats.spDefense, `${monster.id}: spDefense must be integer`);
     ensure_int(monster.stats.speed, `${monster.id}: speed must be integer`);
     ensure(monster.stats.level > 0, `${monster.id}: level must be > 0`);
+    ensure(monster.stats.level >= LEVEL_MIN && monster.stats.level <= LEVEL_MAX, `${monster.id}: level must be between ${LEVEL_MIN} and ${LEVEL_MAX}`);
     ensure(monster.stats.maxHp > 0, `${monster.id}: maxHp must be > 0`);
     ensure(monster.stats.attack >= 0, `${monster.id}: attack must be >= 0`);
     ensure(monster.stats.defense >= 0, `${monster.id}: defense must be >= 0`);
+    ensure(monster.stats.spAttack >= 0, `${monster.id}: spAttack must be >= 0`);
+    ensure(monster.stats.spDefense >= 0, `${monster.id}: spDefense must be >= 0`);
     ensure(monster.stats.speed >= 0, `${monster.id}: speed must be >= 0`);
   }
 }
@@ -2222,6 +2285,8 @@ function clone_monster(monster) {
     level: monster.level,
     attack: monster.attack,
     defense: monster.defense,
+    spAttack: monster.spAttack,
+    spDefense: monster.spDefense,
     speed: monster.speed,
     possibleMoves: monster.possibleMoves.slice(),
     possiblePassives: monster.possiblePassives.slice(),
@@ -3188,26 +3253,58 @@ function build_actions(intents, state) {
   return actions;
 }
 function create_initial_state(teams, names) {
-  const normalize_stats = (stats) => ({
-    level: normalize_int(stats.level, 1, 1),
-    maxHp: normalize_int(stats.maxHp, 1, 1),
-    attack: normalize_int(stats.attack, 0, 0),
-    defense: normalize_int(stats.defense, 0, 0),
-    speed: normalize_int(stats.speed, 0, 0)
-  });
+  const read_ev_component = (source, key) => {
+    const raw = source[key];
+    if (raw === undefined) {
+      return 0;
+    }
+    return typeof raw === "number" ? raw : Number.NaN;
+  };
+  const normalize_ev = (value) => {
+    const source = typeof value === "object" && value !== null ? value : {};
+    return {
+      hp: read_ev_component(source, "hp"),
+      atk: read_ev_component(source, "atk"),
+      def: read_ev_component(source, "def"),
+      spa: read_ev_component(source, "spa"),
+      spd: read_ev_component(source, "spd"),
+      spe: read_ev_component(source, "spe")
+    };
+  };
   const build_player = (slot) => {
     const selection = teams[slot];
     const team = selection.monsters.map((monster) => {
-      const stats = normalize_stats(monster.stats);
+      const spec = MONSTER_BY_ID.get(monster.id);
+      if (!spec) {
+        throw new Error(`team invalid: unknown monster id ${monster.id}`);
+      }
+      const level_input = typeof monster.stats?.level === "number" ? monster.stats.level : spec.stats.level;
+      const normalized_level = normalize_int(level_input, spec.stats.level, LEVEL_MIN);
+      const level = Math.min(LEVEL_MAX, normalized_level);
+      const ev = normalize_ev(monster.ev);
+      const ev_error = validate_ev_spread(ev);
+      if (ev_error) {
+        throw new Error(`team invalid (${monster.id}): ${ev_error}`);
+      }
+      const final_stats = calc_final_stats({
+        hp: spec.stats.maxHp,
+        atk: spec.stats.attack,
+        def: spec.stats.defense,
+        spa: spec.stats.spAttack,
+        spd: spec.stats.spDefense,
+        spe: spec.stats.speed
+      }, level, ev);
       return {
         id: monster.id,
         name: monster.id,
-        hp: stats.maxHp,
-        maxHp: stats.maxHp,
-        level: stats.level,
-        attack: stats.attack,
-        defense: stats.defense,
-        speed: stats.speed,
+        hp: final_stats.hpMax,
+        maxHp: final_stats.hpMax,
+        level,
+        attack: final_stats.atk,
+        defense: final_stats.def,
+        spAttack: final_stats.spa,
+        spDefense: final_stats.spd,
+        speed: final_stats.spe,
         possibleMoves: monster.moves.slice(),
         possiblePassives: [monster.passive],
         chosenMoves: monster.moves.slice(0, 4),
@@ -3388,6 +3485,7 @@ function validate_intent(state, slot, intent) {
 }
 
 // vibishowdown/index.ts
+var EV_KEYS = ["hp", "atk", "def", "spa", "spd", "spe"];
 var PLAYER_SLOTS = ["player1", "player2"];
 var LAST_ROOM_KEY = "vibi_showdown_last_room";
 var LAST_PLAYER_NAME_KEY = "vibi_showdown_last_player_name";
@@ -3488,7 +3586,6 @@ var slot_bench_a_img = document.getElementById("slot-bench-a-img");
 var slot_bench_b_img = document.getElementById("slot-bench-b-img");
 var monster_tabs = document.getElementById("monster-tabs");
 var moves_grid = document.getElementById("moves-grid");
-var passive_grid = document.getElementById("passive-grid");
 var stats_grid = document.getElementById("stats-grid");
 var config_warning = document.getElementById("config-warning");
 var player_bench_slots = [
@@ -3744,13 +3841,19 @@ function relay_start_match_if_ready() {
     return;
   }
   const names = relay_names_by_slot();
-  relay_state = create_initial_state({
-    player1: p1_team,
-    player2: p2_team
-  }, {
-    player1: names.player1 || "player1",
-    player2: names.player2 || "player2"
-  });
+  try {
+    relay_state = create_initial_state({
+      player1: p1_team,
+      player2: p2_team
+    }, {
+      player1: names.player1 || "player1",
+      player2: names.player2 || "player2"
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid team";
+    append_chat(`team error: ${message}`);
+    return;
+  }
   relay_state.status = "running";
   relay_turn = 0;
   emit_local_post({ $: "state", turn: 0, state: relay_state, log: [] });
@@ -3993,6 +4096,10 @@ function stat_label(value) {
     return "ATK";
   if (value === "defense")
     return "DEF";
+  if (value === "spAttack" || value === "spa")
+    return "SPA";
+  if (value === "spDefense" || value === "spd")
+    return "SPD";
   if (value === "speed")
     return "SPE";
   if (value === "hp" || value === "maxHp")
@@ -4029,21 +4136,24 @@ function stat_mod_feedback(entry) {
   }
   return `modificador aplicado: ${target_name} ${label}${multiplier_text} (${before} -> ${after})`;
 }
-function base_stats_for(monster_id) {
+function base_stats_for(monster_id, level) {
   const spec = MONSTER_BY_ID.get(monster_id);
   if (!spec) {
     return { maxHp: 1, attack: 0, defense: 0, speed: 0 };
   }
+  const base_stats = normalize_stats(spec.stats, spec.stats);
+  const resolved_level = normalize_stat_value("level", level, base_stats.level);
+  const baseline = stats_from_base_level_ev(base_stats, resolved_level, empty_ev_spread());
   return {
-    maxHp: spec.stats.maxHp,
-    attack: spec.stats.attack,
-    defense: spec.stats.defense,
-    speed: spec.stats.speed
+    maxHp: baseline.maxHp,
+    attack: baseline.attack,
+    defense: baseline.defense,
+    speed: baseline.speed
   };
 }
 function tooltip_from_config(monster_id) {
   const config = get_config(monster_id);
-  const base = base_stats_for(monster_id);
+  const base = base_stats_for(monster_id, config.stats.level);
   return {
     id: monster_id,
     name: monster_label(monster_id),
@@ -4060,7 +4170,7 @@ function tooltip_from_config(monster_id) {
   };
 }
 function tooltip_from_state(mon) {
-  const base = base_stats_for(mon.id);
+  const base = base_stats_for(mon.id, mon.level);
   return {
     id: mon.id,
     name: monster_label(mon.id),
@@ -4322,10 +4432,62 @@ function save_team_selection() {
 }
 function normalize_stat_value(key, value, fallback) {
   const candidate = typeof value === "number" ? value : fallback;
-  if (key === "level" || key === "maxHp") {
+  if (key === "level") {
+    return Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, normalize_int(candidate, fallback, LEVEL_MIN)));
+  }
+  if (key === "maxHp") {
     return normalize_int(candidate, fallback, 1);
   }
   return normalize_int(candidate, fallback, 0);
+}
+function read_ev_value(value, fallback) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+function ev_total(ev) {
+  return EV_KEYS.reduce((sum, key) => sum + ev[key], 0);
+}
+function normalize_ev_spread(value, fallback = empty_ev_spread()) {
+  const source = typeof value === "object" && value !== null ? value : {};
+  return {
+    hp: read_ev_value(source.hp, fallback.hp),
+    atk: read_ev_value(source.atk, fallback.atk),
+    def: read_ev_value(source.def, fallback.def),
+    spa: read_ev_value(source.spa, fallback.spa),
+    spd: read_ev_value(source.spd, fallback.spd),
+    spe: read_ev_value(source.spe, fallback.spe)
+  };
+}
+function normalize_legacy_ev_from_stat_alloc(value) {
+  const source = typeof value === "object" && value !== null ? value : null;
+  if (!source)
+    return null;
+  return {
+    hp: read_ev_value(source.maxHp, 0),
+    atk: read_ev_value(source.attack, 0),
+    def: read_ev_value(source.defense, 0),
+    spa: 0,
+    spd: 0,
+    spe: read_ev_value(source.speed, 0)
+  };
+}
+function stats_from_base_level_ev(base, level, ev) {
+  const final = calc_final_stats({
+    hp: base.maxHp,
+    atk: base.attack,
+    def: base.defense,
+    spa: base.spAttack,
+    spd: base.spDefense,
+    spe: base.speed
+  }, level, ev);
+  return {
+    level,
+    maxHp: final.hpMax,
+    attack: final.atk,
+    defense: final.def,
+    spAttack: final.spa,
+    spDefense: final.spd,
+    speed: final.spe
+  };
 }
 function normalize_stats(value, fallback) {
   const source = value ?? {};
@@ -4334,17 +4496,26 @@ function normalize_stats(value, fallback) {
     maxHp: normalize_stat_value("maxHp", source.maxHp, fallback.maxHp),
     attack: normalize_stat_value("attack", source.attack, fallback.attack),
     defense: normalize_stat_value("defense", source.defense, fallback.defense),
+    spAttack: normalize_stat_value("spAttack", source.spAttack, fallback.spAttack),
+    spDefense: normalize_stat_value("spDefense", source.spDefense, fallback.spDefense),
     speed: normalize_stat_value("speed", source.speed, fallback.speed)
   };
 }
 function stats_equal(left, right) {
-  return left.level === right.level && left.maxHp === right.maxHp && left.attack === right.attack && left.defense === right.defense && left.speed === right.speed;
+  return left.level === right.level && left.maxHp === right.maxHp && left.attack === right.attack && left.defense === right.defense && left.spAttack === right.spAttack && left.spDefense === right.spDefense && left.speed === right.speed;
+}
+function ev_equal(left, right) {
+  return left.hp === right.hp && left.atk === right.atk && left.def === right.def && left.spa === right.spa && left.spd === right.spd && left.spe === right.spe;
 }
 function coerce_config(spec, value) {
+  const base_stats = normalize_stats(spec.stats, spec.stats);
+  const base_level = normalize_stat_value("level", base_stats.level, 1);
+  const base_ev = empty_ev_spread();
   const base = {
     moves: spec.defaultMoves.slice(0, 4),
     passive: spec.defaultPassive,
-    stats: normalize_stats(spec.stats, spec.stats)
+    stats: stats_from_base_level_ev(base_stats, base_level, base_ev),
+    ev: base_ev
   };
   if (!value) {
     return base;
@@ -4365,10 +4536,15 @@ function coerce_config(spec, value) {
   if (!allowed_passives.has(passive)) {
     passive = allowed_passives.has(fallback_passive) ? fallback_passive : "none";
   }
+  const level = normalize_stat_value("level", value.stats?.level, base.stats.level);
+  const legacy_ev = normalize_legacy_ev_from_stat_alloc(value.statAlloc);
+  const ev = normalize_ev_spread(value.ev ?? legacy_ev ?? base.ev, base.ev);
+  const stats = stats_from_base_level_ev(base_stats, level, ev);
   return {
     moves,
     passive,
-    stats: normalize_stats(value.stats, base.stats)
+    stats,
+    ev
   };
 }
 function get_config(monster_id) {
@@ -4385,14 +4561,20 @@ function reset_profile_stats_to_defaults() {
   let changed = false;
   for (const spec of MONSTER_ROSTER) {
     const config = coerce_config(spec, profile.monsters[spec.id]);
-    const default_stats = normalize_stats(spec.stats, spec.stats);
+    const base_stats = normalize_stats(spec.stats, spec.stats);
+    const default_ev = empty_ev_spread();
+    const default_stats = stats_from_base_level_ev(base_stats, base_stats.level, default_ev);
     if (!stats_equal(config.stats, default_stats)) {
+      changed = true;
+    }
+    if (!ev_equal(config.ev, default_ev)) {
       changed = true;
     }
     profile.monsters[spec.id] = {
       moves: config.moves.slice(0, 4),
       passive: config.passive,
-      stats: default_stats
+      stats: default_stats,
+      ev: default_ev
     };
   }
   save_profile();
@@ -4453,7 +4635,6 @@ function render_tabs() {
 }
 function render_config() {
   moves_grid.innerHTML = "";
-  passive_grid.innerHTML = "";
   stats_grid.innerHTML = "";
   if (!active_tab) {
     show_warning("Select 3 monsters to configure.");
@@ -4466,6 +4647,8 @@ function render_config() {
     return;
   }
   const config = get_config(active_tab);
+  const base_stats = normalize_stats(spec.stats, spec.stats);
+  config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
   for (let i = 0;i < 4; i++) {
     const label = document.createElement("label");
     label.textContent = `Move ${i + 1}`;
@@ -4505,6 +4688,31 @@ function render_config() {
     label.appendChild(select);
     moves_grid.appendChild(label);
   }
+  const level_label = document.createElement("label");
+  level_label.textContent = "Lv";
+  const level_input = document.createElement("input");
+  level_input.type = "number";
+  level_input.min = `${LEVEL_MIN}`;
+  level_input.max = `${LEVEL_MAX}`;
+  level_input.value = `${config.stats.level}`;
+  level_input.disabled = is_ready && !match_started;
+  level_input.addEventListener("change", () => {
+    if (is_ready && !match_started)
+      return;
+    const value = Number(level_input.value);
+    if (!Number.isFinite(value)) {
+      level_input.value = `${config.stats.level}`;
+      return;
+    }
+    const normalized = normalize_stat_value("level", value, config.stats.level);
+    config.stats = stats_from_base_level_ev(base_stats, normalized, config.ev);
+    level_input.value = `${normalized}`;
+    clear_warning();
+    save_profile();
+    render_config();
+  });
+  level_label.appendChild(level_input);
+  moves_grid.appendChild(level_label);
   const passive_label2 = document.createElement("label");
   passive_label2.textContent = "Passive";
   const passive_select = document.createElement("select");
@@ -4523,36 +4731,125 @@ function render_config() {
     save_profile();
   });
   passive_label2.appendChild(passive_select);
-  passive_grid.appendChild(passive_label2);
-  const stat_fields = [
-    ["level", "Level"],
-    ["maxHp", "Max HP"],
-    ["attack", "Attack"],
-    ["defense", "Defense"],
-    ["speed", "Speed"]
+  moves_grid.appendChild(passive_label2);
+  const points_summary = document.createElement("div");
+  points_summary.className = "stat-points-summary";
+  stats_grid.appendChild(points_summary);
+  const update_points_summary = () => {
+    const used = ev_total(config.ev);
+    const remaining = EV_TOTAL_MAX - used;
+    points_summary.textContent = `EVs: ${used}/${EV_TOTAL_MAX} (restante: ${Math.max(0, remaining)})`;
+  };
+  const stat_rows = [
+    ["hp", "HP"],
+    ["atk", "ATK"],
+    ["def", "DEF"],
+    ["spa", "SPA"],
+    ["spd", "SPD"],
+    ["spe", "SPE"]
   ];
-  for (const [key, label_text] of stat_fields) {
-    const label = document.createElement("label");
-    label.textContent = label_text;
-    const input = document.createElement("input");
-    input.type = "number";
-    input.value = `${config.stats[key]}`;
-    input.disabled = is_ready && !match_started;
-    input.addEventListener("change", () => {
-      if (is_ready && !match_started)
-        return;
-      const value = Number(input.value);
-      if (!Number.isFinite(value)) {
+  const stat_key_by_ev = {
+    hp: "maxHp",
+    atk: "attack",
+    def: "defense",
+    spa: "spAttack",
+    spd: "spDefense",
+    spe: "speed"
+  };
+  const controls = [];
+  const sync_ev_limits = () => {
+    for (const control of controls) {
+      const current = config.ev[control.key];
+      const used_without_current = ev_total(config.ev) - current;
+      const max_for_key = Math.min(EV_PER_STAT_MAX, Math.max(0, EV_TOTAL_MAX - used_without_current));
+      control.input.max = `${max_for_key}`;
+      control.slider.max = `${max_for_key}`;
+    }
+  };
+  const sync_total_inputs = () => {
+    for (const control of controls) {
+      const stat_key = stat_key_by_ev[control.key];
+      control.totalInput.value = `${config.stats[stat_key]}`;
+    }
+  };
+  for (const [key, label_text] of stat_rows) {
+    const row = document.createElement("div");
+    row.className = "stat-alloc-row";
+    const stat_name = document.createElement("span");
+    stat_name.className = "stat-alloc-name";
+    stat_name.textContent = label_text;
+    const base_input = document.createElement("input");
+    base_input.type = "number";
+    base_input.className = "stat-base-input";
+    base_input.value = `${config.stats[stat_key_by_ev[key]]}`;
+    base_input.disabled = true;
+    const alloc_input = document.createElement("input");
+    alloc_input.type = "number";
+    alloc_input.className = "stat-alloc-input";
+    alloc_input.min = "0";
+    alloc_input.max = `${EV_PER_STAT_MAX}`;
+    alloc_input.step = "1";
+    alloc_input.value = `${config.ev[key]}`;
+    alloc_input.disabled = is_ready && !match_started;
+    const alloc_slider = document.createElement("input");
+    alloc_slider.type = "range";
+    alloc_slider.className = "stat-alloc-slider";
+    alloc_slider.min = "0";
+    alloc_slider.max = `${EV_PER_STAT_MAX}`;
+    alloc_slider.value = `${config.ev[key]}`;
+    alloc_slider.disabled = is_ready && !match_started;
+    const apply_allocation_value = (next_raw) => {
+      const current = config.ev[key];
+      if (!Number.isInteger(next_raw)) {
+        show_warning(`EV ${key} must be integer.`);
+        alloc_input.value = `${current}`;
+        alloc_slider.value = `${current}`;
         return;
       }
-      const normalized = normalize_stat_value(key, value, config.stats[key]);
-      config.stats[key] = normalized;
-      input.value = `${normalized}`;
+      const candidate = { ...config.ev, [key]: next_raw };
+      const ev_error = validate_ev_spread(candidate);
+      if (ev_error) {
+        show_warning(ev_error);
+        alloc_input.value = `${current}`;
+        alloc_slider.value = `${current}`;
+        return;
+      }
+      config.ev = candidate;
+      config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
+      alloc_input.value = `${next_raw}`;
+      alloc_slider.value = `${next_raw}`;
+      base_input.value = `${config.stats[stat_key_by_ev[key]]}`;
+      clear_warning();
+      update_points_summary();
+      sync_ev_limits();
+      sync_total_inputs();
       save_profile();
+    };
+    alloc_input.addEventListener("change", () => {
+      if (is_ready && !match_started)
+        return;
+      const value = Number(alloc_input.value);
+      if (!Number.isFinite(value)) {
+        alloc_input.value = `${config.ev[key]}`;
+        return;
+      }
+      apply_allocation_value(value);
     });
-    label.appendChild(input);
-    stats_grid.appendChild(label);
+    alloc_slider.addEventListener("input", () => {
+      if (is_ready && !match_started)
+        return;
+      apply_allocation_value(Number(alloc_slider.value));
+    });
+    row.appendChild(stat_name);
+    row.appendChild(base_input);
+    row.appendChild(alloc_input);
+    row.appendChild(alloc_slider);
+    stats_grid.appendChild(row);
+    controls.push({ key, totalInput: base_input, input: alloc_input, slider: alloc_slider });
   }
+  update_points_summary();
+  sync_ev_limits();
+  sync_total_inputs();
 }
 function set_edit_target(index) {
   if (is_ready && !match_started) {
@@ -4836,15 +5133,33 @@ function build_team_selection() {
     show_warning("Select exactly 3 monsters before ready.");
     return null;
   }
-  const monsters = selected.map((id) => {
+  const monsters = [];
+  for (const id of selected) {
+    const spec = MONSTER_BY_ID.get(id);
+    if (!spec) {
+      show_warning(`Unknown monster: ${id}`);
+      return null;
+    }
+    const base_stats = normalize_stats(spec.stats, spec.stats);
     const config = get_config(id);
-    return {
+    const ev_error = validate_ev_spread(config.ev);
+    if (ev_error) {
+      show_warning(`${monster_label(id)}: ${ev_error}`);
+      return null;
+    }
+    const level = normalize_stat_value("level", config.stats.level, base_stats.level);
+    const stats = stats_from_base_level_ev(base_stats, level, config.ev);
+    config.stats = stats;
+    monsters.push({
       id,
       moves: config.moves.slice(0, 4),
       passive: config.passive,
-      stats: { ...config.stats }
-    };
-  });
+      stats: { ...stats },
+      ev: { ...config.ev }
+    });
+  }
+  clear_warning();
+  save_profile();
   return { monsters, activeIndex: 0 };
 }
 function send_ready(next_ready) {

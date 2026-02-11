@@ -9,6 +9,7 @@ import {
 import type { MonsterCatalogEntry } from "../src/game_default/index.ts";
 import { apply_forced_switch, create_initial_state, resolve_turn, validate_intent } from "../src/engine.ts";
 import type {
+  EVSpread,
   EventLog,
   GameState,
   MonsterState,
@@ -19,16 +20,29 @@ import type {
   TeamSelection
 } from "../src/shared.ts";
 import { normalize_int } from "../src/int_math.ts";
+import {
+  EV_PER_STAT_MAX,
+  EV_TOTAL_MAX,
+  LEVEL_MAX,
+  LEVEL_MIN,
+  calc_final_stats,
+  empty_ev_spread,
+  validate_ev_spread
+} from "../src/stats_calc.ts";
 
 type MonsterConfig = {
   moves: string[];
   passive: string;
   stats: Stats;
+  ev: EVSpread;
 };
 
 type Profile = {
   monsters: Record<string, MonsterConfig>;
 };
+
+type EVStatKey = keyof EVSpread;
+const EV_KEYS: EVStatKey[] = ["hp", "atk", "def", "spa", "spd", "spe"];
 
 type TooltipValueState = "up" | "down" | "neutral";
 
@@ -158,7 +172,6 @@ const slot_bench_a_img = document.getElementById("slot-bench-a-img") as HTMLImag
 const slot_bench_b_img = document.getElementById("slot-bench-b-img") as HTMLImageElement;
 const monster_tabs = document.getElementById("monster-tabs");
 const moves_grid = document.getElementById("moves-grid")!;
-const passive_grid = document.getElementById("passive-grid")!;
 const stats_grid = document.getElementById("stats-grid")!;
 const config_warning = document.getElementById("config-warning")!;
 const player_bench_slots = [
@@ -444,16 +457,22 @@ function relay_start_match_if_ready(): void {
     return;
   }
   const names = relay_names_by_slot();
-  relay_state = create_initial_state(
-    {
-      player1: p1_team,
-      player2: p2_team
-    },
-    {
-      player1: names.player1 || "player1",
-      player2: names.player2 || "player2"
-    }
-  );
+  try {
+    relay_state = create_initial_state(
+      {
+        player1: p1_team,
+        player2: p2_team
+      },
+      {
+        player1: names.player1 || "player1",
+        player2: names.player2 || "player2"
+      }
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid team";
+    append_chat(`team error: ${message}`);
+    return;
+  }
   relay_state.status = "running";
   relay_turn = 0;
   emit_local_post({ $: "state", turn: 0, state: relay_state, log: [] });
@@ -708,6 +727,8 @@ function passive_label(id: string): string {
 function stat_label(value: unknown): string {
   if (value === "attack") return "ATK";
   if (value === "defense") return "DEF";
+  if (value === "spAttack" || value === "spa") return "SPA";
+  if (value === "spDefense" || value === "spd") return "SPD";
   if (value === "speed") return "SPE";
   if (value === "hp" || value === "maxHp") return "HP";
   if (typeof value === "string" && value.trim()) return value.trim().toUpperCase();
@@ -754,22 +775,25 @@ function stat_mod_feedback(entry: EventLog): string | null {
   return `modificador aplicado: ${target_name} ${label}${multiplier_text} (${before} -> ${after})`;
 }
 
-function base_stats_for(monster_id: string): { maxHp: number; attack: number; defense: number; speed: number } {
+function base_stats_for(monster_id: string, level?: number): { maxHp: number; attack: number; defense: number; speed: number } {
   const spec = roster_by_id.get(monster_id);
   if (!spec) {
     return { maxHp: 1, attack: 0, defense: 0, speed: 0 };
   }
+  const base_stats = normalize_stats(spec.stats, spec.stats);
+  const resolved_level = normalize_stat_value("level", level, base_stats.level);
+  const baseline = stats_from_base_level_ev(base_stats, resolved_level, empty_ev_spread());
   return {
-    maxHp: spec.stats.maxHp,
-    attack: spec.stats.attack,
-    defense: spec.stats.defense,
-    speed: spec.stats.speed
+    maxHp: baseline.maxHp,
+    attack: baseline.attack,
+    defense: baseline.defense,
+    speed: baseline.speed
   };
 }
 
 function tooltip_from_config(monster_id: string): MonsterTooltipPayload {
   const config = get_config(monster_id);
-  const base = base_stats_for(monster_id);
+  const base = base_stats_for(monster_id, config.stats.level);
   return {
     id: monster_id,
     name: monster_label(monster_id),
@@ -787,7 +811,7 @@ function tooltip_from_config(monster_id: string): MonsterTooltipPayload {
 }
 
 function tooltip_from_state(mon: MonsterState): MonsterTooltipPayload {
-  const base = base_stats_for(mon.id);
+  const base = base_stats_for(mon.id, mon.level);
   return {
     id: mon.id,
     name: monster_label(mon.id),
@@ -1076,10 +1100,73 @@ function save_team_selection(): void {
 
 function normalize_stat_value(key: keyof Stats, value: unknown, fallback: number): number {
   const candidate = typeof value === "number" ? value : fallback;
-  if (key === "level" || key === "maxHp") {
+  if (key === "level") {
+    return Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, normalize_int(candidate, fallback, LEVEL_MIN)));
+  }
+  if (key === "maxHp") {
     return normalize_int(candidate, fallback, 1);
   }
   return normalize_int(candidate, fallback, 0);
+}
+
+function read_ev_value(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function ev_total(ev: EVSpread): number {
+  return EV_KEYS.reduce((sum, key) => sum + ev[key], 0);
+}
+
+function normalize_ev_spread(value: unknown, fallback: EVSpread = empty_ev_spread()): EVSpread {
+  const source = (typeof value === "object" && value !== null ? value : {}) as Partial<EVSpread>;
+  return {
+    hp: read_ev_value(source.hp, fallback.hp),
+    atk: read_ev_value(source.atk, fallback.atk),
+    def: read_ev_value(source.def, fallback.def),
+    spa: read_ev_value(source.spa, fallback.spa),
+    spd: read_ev_value(source.spd, fallback.spd),
+    spe: read_ev_value(source.spe, fallback.spe)
+  };
+}
+
+function normalize_legacy_ev_from_stat_alloc(value: unknown): EVSpread | null {
+  const source =
+    typeof value === "object" && value !== null
+      ? (value as Partial<Record<"maxHp" | "attack" | "defense" | "speed", unknown>>)
+      : null;
+  if (!source) return null;
+  return {
+    hp: read_ev_value(source.maxHp, 0),
+    atk: read_ev_value(source.attack, 0),
+    def: read_ev_value(source.defense, 0),
+    spa: 0,
+    spd: 0,
+    spe: read_ev_value(source.speed, 0)
+  };
+}
+
+function stats_from_base_level_ev(base: Stats, level: number, ev: EVSpread): Stats {
+  const final = calc_final_stats(
+    {
+      hp: base.maxHp,
+      atk: base.attack,
+      def: base.defense,
+      spa: base.spAttack,
+      spd: base.spDefense,
+      spe: base.speed
+    },
+    level,
+    ev
+  );
+  return {
+    level,
+    maxHp: final.hpMax,
+    attack: final.atk,
+    defense: final.def,
+    spAttack: final.spa,
+    spDefense: final.spd,
+    speed: final.spe
+  };
 }
 
 function normalize_stats(value: Partial<Stats> | undefined, fallback: Stats): Stats {
@@ -1089,6 +1176,8 @@ function normalize_stats(value: Partial<Stats> | undefined, fallback: Stats): St
     maxHp: normalize_stat_value("maxHp", source.maxHp, fallback.maxHp),
     attack: normalize_stat_value("attack", source.attack, fallback.attack),
     defense: normalize_stat_value("defense", source.defense, fallback.defense),
+    spAttack: normalize_stat_value("spAttack", source.spAttack, fallback.spAttack),
+    spDefense: normalize_stat_value("spDefense", source.spDefense, fallback.spDefense),
     speed: normalize_stat_value("speed", source.speed, fallback.speed)
   };
 }
@@ -1099,15 +1188,32 @@ function stats_equal(left: Stats, right: Stats): boolean {
     left.maxHp === right.maxHp &&
     left.attack === right.attack &&
     left.defense === right.defense &&
+    left.spAttack === right.spAttack &&
+    left.spDefense === right.spDefense &&
     left.speed === right.speed
   );
 }
 
+function ev_equal(left: EVSpread, right: EVSpread): boolean {
+  return (
+    left.hp === right.hp &&
+    left.atk === right.atk &&
+    left.def === right.def &&
+    left.spa === right.spa &&
+    left.spd === right.spd &&
+    left.spe === right.spe
+  );
+}
+
 function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): MonsterConfig {
+  const base_stats = normalize_stats(spec.stats, spec.stats);
+  const base_level = normalize_stat_value("level", base_stats.level, 1);
+  const base_ev = empty_ev_spread();
   const base: MonsterConfig = {
     moves: spec.defaultMoves.slice(0, 4),
     passive: spec.defaultPassive,
-    stats: normalize_stats(spec.stats, spec.stats)
+    stats: stats_from_base_level_ev(base_stats, base_level, base_ev),
+    ev: base_ev
   };
 
   if (!value) {
@@ -1131,10 +1237,16 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
     passive = allowed_passives.has(fallback_passive) ? fallback_passive : "none";
   }
 
+  const level = normalize_stat_value("level", value.stats?.level, base.stats.level);
+  const legacy_ev = normalize_legacy_ev_from_stat_alloc((value as { statAlloc?: unknown }).statAlloc);
+  const ev = normalize_ev_spread(value.ev ?? legacy_ev ?? base.ev, base.ev);
+  const stats = stats_from_base_level_ev(base_stats, level, ev);
+
   return {
     moves,
     passive,
-    stats: normalize_stats(value.stats, base.stats)
+    stats,
+    ev
   };
 }
 
@@ -1153,14 +1265,20 @@ function reset_profile_stats_to_defaults(): void {
   let changed = false;
   for (const spec of roster) {
     const config = coerce_config(spec, profile.monsters[spec.id]);
-    const default_stats = normalize_stats(spec.stats, spec.stats);
+    const base_stats = normalize_stats(spec.stats, spec.stats);
+    const default_ev = empty_ev_spread();
+    const default_stats = stats_from_base_level_ev(base_stats, base_stats.level, default_ev);
     if (!stats_equal(config.stats, default_stats)) {
+      changed = true;
+    }
+    if (!ev_equal(config.ev, default_ev)) {
       changed = true;
     }
     profile.monsters[spec.id] = {
       moves: config.moves.slice(0, 4),
       passive: config.passive,
-      stats: default_stats
+      stats: default_stats,
+      ev: default_ev
     };
   }
 
@@ -1233,7 +1351,6 @@ function render_tabs(): void {
 
 function render_config(): void {
   moves_grid.innerHTML = "";
-  passive_grid.innerHTML = "";
   stats_grid.innerHTML = "";
 
   if (!active_tab) {
@@ -1249,6 +1366,8 @@ function render_config(): void {
   }
 
   const config = get_config(active_tab);
+  const base_stats = normalize_stats(spec.stats, spec.stats);
+  config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
 
   for (let i = 0; i < 4; i++) {
     const label = document.createElement("label");
@@ -1290,6 +1409,31 @@ function render_config(): void {
     moves_grid.appendChild(label);
   }
 
+  const level_label = document.createElement("label");
+  level_label.textContent = "Lv";
+  const level_input = document.createElement("input");
+  level_input.type = "number";
+  level_input.min = `${LEVEL_MIN}`;
+  level_input.max = `${LEVEL_MAX}`;
+  level_input.value = `${config.stats.level}`;
+  level_input.disabled = is_ready && !match_started;
+  level_input.addEventListener("change", () => {
+    if (is_ready && !match_started) return;
+    const value = Number(level_input.value);
+    if (!Number.isFinite(value)) {
+      level_input.value = `${config.stats.level}`;
+      return;
+    }
+    const normalized = normalize_stat_value("level", value, config.stats.level);
+    config.stats = stats_from_base_level_ev(base_stats, normalized, config.ev);
+    level_input.value = `${normalized}`;
+    clear_warning();
+    save_profile();
+    render_config();
+  });
+  level_label.appendChild(level_input);
+  moves_grid.appendChild(level_label);
+
   const passive_label = document.createElement("label");
   passive_label.textContent = "Passive";
   const passive_select = document.createElement("select");
@@ -1307,36 +1451,139 @@ function render_config(): void {
     save_profile();
   });
   passive_label.appendChild(passive_select);
-  passive_grid.appendChild(passive_label);
+  moves_grid.appendChild(passive_label);
 
-  const stat_fields: Array<[keyof Stats, string]> = [
-    ["level", "Level"],
-    ["maxHp", "Max HP"],
-    ["attack", "Attack"],
-    ["defense", "Defense"],
-    ["speed", "Speed"]
+  const points_summary = document.createElement("div");
+  points_summary.className = "stat-points-summary";
+  stats_grid.appendChild(points_summary);
+
+  const update_points_summary = (): void => {
+    const used = ev_total(config.ev);
+    const remaining = EV_TOTAL_MAX - used;
+    points_summary.textContent = `EVs: ${used}/${EV_TOTAL_MAX} (restante: ${Math.max(0, remaining)})`;
+  };
+
+  const stat_rows: Array<[EVStatKey, string]> = [
+    ["hp", "HP"],
+    ["atk", "ATK"],
+    ["def", "DEF"],
+    ["spa", "SPA"],
+    ["spd", "SPD"],
+    ["spe", "SPE"]
   ];
-  for (const [key, label_text] of stat_fields) {
-    const label = document.createElement("label");
-    label.textContent = label_text;
-    const input = document.createElement("input");
-    input.type = "number";
-    input.value = `${config.stats[key]}`;
-    input.disabled = is_ready && !match_started;
-    input.addEventListener("change", () => {
-      if (is_ready && !match_started) return;
-      const value = Number(input.value);
-      if (!Number.isFinite(value)) {
+  const stat_key_by_ev: Record<EVStatKey, keyof Stats> = {
+    hp: "maxHp",
+    atk: "attack",
+    def: "defense",
+    spa: "spAttack",
+    spd: "spDefense",
+    spe: "speed"
+  };
+  const controls: Array<{ key: EVStatKey; totalInput: HTMLInputElement; input: HTMLInputElement; slider: HTMLInputElement }> =
+    [];
+
+  const sync_ev_limits = (): void => {
+    for (const control of controls) {
+      const current = config.ev[control.key];
+      const used_without_current = ev_total(config.ev) - current;
+      const max_for_key = Math.min(EV_PER_STAT_MAX, Math.max(0, EV_TOTAL_MAX - used_without_current));
+      control.input.max = `${max_for_key}`;
+      control.slider.max = `${max_for_key}`;
+    }
+  };
+
+  const sync_total_inputs = (): void => {
+    for (const control of controls) {
+      const stat_key = stat_key_by_ev[control.key];
+      control.totalInput.value = `${config.stats[stat_key]}`;
+    }
+  };
+
+  for (const [key, label_text] of stat_rows) {
+    const row = document.createElement("div");
+    row.className = "stat-alloc-row";
+
+    const stat_name = document.createElement("span");
+    stat_name.className = "stat-alloc-name";
+    stat_name.textContent = label_text;
+
+    const base_input = document.createElement("input");
+    base_input.type = "number";
+    base_input.className = "stat-base-input";
+    base_input.value = `${config.stats[stat_key_by_ev[key]]}`;
+    base_input.disabled = true;
+
+    const alloc_input = document.createElement("input");
+    alloc_input.type = "number";
+    alloc_input.className = "stat-alloc-input";
+    alloc_input.min = "0";
+    alloc_input.max = `${EV_PER_STAT_MAX}`;
+    alloc_input.step = "1";
+    alloc_input.value = `${config.ev[key]}`;
+    alloc_input.disabled = is_ready && !match_started;
+
+    const alloc_slider = document.createElement("input");
+    alloc_slider.type = "range";
+    alloc_slider.className = "stat-alloc-slider";
+    alloc_slider.min = "0";
+    alloc_slider.max = `${EV_PER_STAT_MAX}`;
+    alloc_slider.value = `${config.ev[key]}`;
+    alloc_slider.disabled = is_ready && !match_started;
+
+    const apply_allocation_value = (next_raw: number): void => {
+      const current = config.ev[key];
+      if (!Number.isInteger(next_raw)) {
+        show_warning(`EV ${key} must be integer.`);
+        alloc_input.value = `${current}`;
+        alloc_slider.value = `${current}`;
         return;
       }
-      const normalized = normalize_stat_value(key, value, config.stats[key]);
-      config.stats[key] = normalized;
-      input.value = `${normalized}`;
+      const candidate: EVSpread = { ...config.ev, [key]: next_raw };
+      const ev_error = validate_ev_spread(candidate);
+      if (ev_error) {
+        show_warning(ev_error);
+        alloc_input.value = `${current}`;
+        alloc_slider.value = `${current}`;
+        return;
+      }
+      config.ev = candidate;
+      config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
+      alloc_input.value = `${next_raw}`;
+      alloc_slider.value = `${next_raw}`;
+      base_input.value = `${config.stats[stat_key_by_ev[key]]}`;
+      clear_warning();
+      update_points_summary();
+      sync_ev_limits();
+      sync_total_inputs();
       save_profile();
+    };
+
+    alloc_input.addEventListener("change", () => {
+      if (is_ready && !match_started) return;
+      const value = Number(alloc_input.value);
+      if (!Number.isFinite(value)) {
+        alloc_input.value = `${config.ev[key]}`;
+        return;
+      }
+      apply_allocation_value(value);
     });
-    label.appendChild(input);
-    stats_grid.appendChild(label);
+
+    alloc_slider.addEventListener("input", () => {
+      if (is_ready && !match_started) return;
+      apply_allocation_value(Number(alloc_slider.value));
+    });
+
+    row.appendChild(stat_name);
+    row.appendChild(base_input);
+    row.appendChild(alloc_input);
+    row.appendChild(alloc_slider);
+    stats_grid.appendChild(row);
+    controls.push({ key, totalInput: base_input, input: alloc_input, slider: alloc_slider });
   }
+
+  update_points_summary();
+  sync_ev_limits();
+  sync_total_inputs();
 }
 
 function set_edit_target(index: number): void {
@@ -1648,16 +1895,34 @@ function build_team_selection(): TeamSelection | null {
     return null;
   }
 
-  const monsters = selected.map((id) => {
+  const monsters: TeamSelection["monsters"] = [];
+  for (const id of selected) {
+    const spec = roster_by_id.get(id);
+    if (!spec) {
+      show_warning(`Unknown monster: ${id}`);
+      return null;
+    }
+    const base_stats = normalize_stats(spec.stats, spec.stats);
     const config = get_config(id);
-    return {
+    const ev_error = validate_ev_spread(config.ev);
+    if (ev_error) {
+      show_warning(`${monster_label(id)}: ${ev_error}`);
+      return null;
+    }
+    const level = normalize_stat_value("level", config.stats.level, base_stats.level);
+    const stats = stats_from_base_level_ev(base_stats, level, config.ev);
+    config.stats = stats;
+    monsters.push({
       id,
       moves: config.moves.slice(0, 4),
       passive: config.passive,
-      stats: { ...config.stats }
-    };
-  });
+      stats: { ...stats },
+      ev: { ...config.ev }
+    });
+  }
 
+  clear_warning();
+  save_profile();
   return { monsters, activeIndex: 0 };
 }
 

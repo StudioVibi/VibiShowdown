@@ -5,11 +5,22 @@ export type PlayerSlot = "player1" | "player2";
 export type MoveId = "basic_attack" | "none" | "protect" | string;
 export type PassiveId = "none" | "leftovers" | "choice_band" | "regen_5pct" | string;
 
+export type EVSpread = {
+  hp: number;
+  atk: number;
+  def: number;
+  spa: number;
+  spd: number;
+  spe: number;
+};
+
 export type Stats = {
   level: number;
   maxHp: number;
   attack: number;
   defense: number;
+  spAttack: number;
+  spDefense: number;
   speed: number;
 };
 
@@ -18,6 +29,7 @@ export type MonsterConfig = {
   moves: MoveId[];
   passive: PassiveId;
   stats: Stats;
+  ev: EVSpread;
 };
 
 export type TeamSelection = {
@@ -33,6 +45,8 @@ export type MonsterState = {
   level: number;
   attack: number;
   defense: number;
+  spAttack: number;
+  spDefense: number;
   speed: number;
   possibleMoves: MoveId[];
   possiblePassives: PassiveId[];

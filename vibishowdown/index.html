@@ -1099,10 +1099,9 @@
         display: grid;
         gap: 10px;
         min-height: 0;
-        --moves-h: 140px;
-        --passive-h: 80px;
-        --stats-h: 150px;
-        grid-template-rows: auto var(--moves-h) var(--passive-h) var(--stats-h) auto;
+        --moves-h: 170px;
+        --stats-h: 190px;
+        grid-template-rows: auto var(--moves-h) var(--stats-h) auto;
       }
 
       .tabs {
@@ -1179,6 +1178,47 @@
         background: rgba(10, 12, 18, 0.8);
         color: var(--text);
         padding: 5px 8px;
+      }
+
+      #stats-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .stat-points-summary {
+        font-size: 11px;
+        color: var(--accent);
+        font-family: "Space Mono", monospace;
+      }
+
+      .stat-alloc-row {
+        display: grid;
+        grid-template-columns: 36px 76px 76px minmax(90px, 1fr);
+        align-items: center;
+        gap: 6px;
+      }
+
+      .stat-alloc-name {
+        font-size: 11px;
+        color: var(--muted);
+        font-family: "Space Mono", monospace;
+        text-transform: uppercase;
+      }
+
+      .stat-base-input,
+      .stat-alloc-input {
+        width: 100%;
+      }
+
+      .stat-base-input {
+        opacity: 0.72;
+        cursor: not-allowed;
+      }
+
+      .stat-alloc-slider {
+        width: 100%;
+        accent-color: #6ed6ff;
       }
 
       .status-pill {
@@ -1355,6 +1395,16 @@
           grid-template-columns: 1fr;
         }
 
+        .config {
+          --moves-h: 190px;
+          --stats-h: 220px;
+        }
+
+        .stat-alloc-row {
+          grid-template-columns: 34px 60px 60px minmax(80px, 1fr);
+          gap: 4px;
+        }
+
         .action-grid {
           grid-template-columns: 1fr;
         }
@@ -1484,12 +1534,8 @@
                   <div class="config">
                     <h5>Monster Builder</h5>
                     <div class="config-group moves">
-                      <h6>Moves (4)</h6>
+                      <h6>Moves / Lv / Passive</h6>
                       <div class="config-grid" id="moves-grid"></div>
-                    </div>
-                    <div class="config-group passive">
-                      <h6>Passive</h6>
-                      <div class="config-grid" id="passive-grid"></div>
                     </div>
                     <div class="config-group stats">
                       <h6>Stats</h6>
