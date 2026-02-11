@@ -444,6 +444,98 @@
         font-size: 11px;
       }
 
+      .stat-tooltip {
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 80;
+        min-width: 220px;
+        max-width: 280px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(7, 10, 15, 0.95);
+        box-shadow: 0 16px 30px rgba(0, 0, 0, 0.45);
+        padding: 10px;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(4px);
+        transition: opacity 0.12s ease, transform 0.12s ease;
+      }
+
+      .stat-tooltip.is-open {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .stat-tooltip-title {
+        font-family: "Sora", system-ui, sans-serif;
+        font-size: 13px;
+        font-weight: 700;
+        color: #f5f7ff;
+        margin-bottom: 6px;
+      }
+
+      .stat-tooltip-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px 8px;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+      }
+
+      .stat-tooltip-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border-radius: 7px;
+        padding: 3px 5px;
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .stat-tooltip-label {
+        color: #9aa5b1;
+      }
+
+      .stat-tooltip-value {
+        font-weight: 700;
+      }
+
+      .stat-tooltip-value.up {
+        color: #6ff7b0;
+      }
+
+      .stat-tooltip-value.down {
+        color: #ff8e8e;
+      }
+
+      .stat-tooltip-value.neutral {
+        color: #dbe3ff;
+      }
+
+      .stat-tooltip-hp {
+        margin-top: 6px;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: #9aa5b1;
+      }
+
+      .stat-tooltip-passive {
+        margin-top: 6px;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        color: #ffd76e;
+      }
+
+      .stat-tooltip-moves {
+        margin-top: 6px;
+        display: grid;
+        gap: 2px;
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        color: #c6d0ec;
+      }
+
       .side-panel {
         width: var(--side-chat-width);
         height: min(var(--game-size), 780px);
@@ -1299,6 +1391,7 @@
           </div>
         </div>
       </div>
+      <div id="stat-tooltip" class="stat-tooltip" aria-hidden="true"></div>
     </div>
     <script type="module" src="./dist/index.js"></script>
   </body>

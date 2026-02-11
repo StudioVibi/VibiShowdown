@@ -2935,6 +2935,7 @@ var log_list = document.getElementById("log-list") ?? chat_messages;
 var chat_input = document.getElementById("chat-input");
 var chat_send = document.getElementById("chat-send");
 var participants_list = document.getElementById("participants-list");
+var stat_tooltip = document.getElementById("stat-tooltip");
 var player_title = document.getElementById("player-name");
 var player_meta = document.getElementById("player-meta");
 var enemy_title = document.getElementById("enemy-name");
@@ -3021,6 +3022,8 @@ var animation_timers = [];
 var sprite_fx_classes = ["jump", "hit", "heal", "shield-on", "shield-hit"];
 var selected = [];
 var active_tab = null;
+var tooltip_payload_by_element = new WeakMap;
+var active_tooltip_target = null;
 var relay_server_managed = false;
 var relay_ended = false;
 var relay_turn = 0;
@@ -3513,34 +3516,164 @@ function stat_mod_feedback(entry) {
   }
   return `modificador aplicado: ${target_name} ${label}${multiplier_text} (${before} -> ${after})`;
 }
-function build_monster_tooltip(name, stats, passive, moves) {
-  const move_lines = (moves.length > 0 ? moves : ["none", "none", "none", "none"]).slice(0, 4).map((move, index) => `${index + 1}. ${move_label(move)}`);
-  return [
-    name,
-    `ATK ${stats.attack} | DEF ${stats.defense} | SPE ${stats.speed} | HP ${stats.hp}`,
-    `Passive: ${passive_label(passive)}`,
-    "",
-    "Moves:",
-    ...move_lines
-  ].join(`
-`);
+function base_stats_for(monster_id) {
+  const spec = MONSTER_BY_ID.get(monster_id);
+  if (!spec) {
+    return { maxHp: 1, attack: 0, defense: 0, speed: 0 };
+  }
+  return {
+    maxHp: spec.stats.maxHp,
+    attack: spec.stats.attack,
+    defense: spec.stats.defense,
+    speed: spec.stats.speed
+  };
 }
 function tooltip_from_config(monster_id) {
   const config = get_config(monster_id);
-  return build_monster_tooltip(monster_label(monster_id), {
-    attack: config.stats.attack,
-    defense: config.stats.defense,
-    speed: config.stats.speed,
-    hp: `${config.stats.maxHp}`
-  }, config.passive, config.moves);
+  const base = base_stats_for(monster_id);
+  return {
+    id: monster_id,
+    name: monster_label(monster_id),
+    passive: config.passive,
+    moves: config.moves.slice(0, 4),
+    current: {
+      hp: config.stats.maxHp,
+      maxHp: config.stats.maxHp,
+      attack: config.stats.attack,
+      defense: config.stats.defense,
+      speed: config.stats.speed
+    },
+    base
+  };
 }
 function tooltip_from_state(mon) {
-  return build_monster_tooltip(monster_label(mon.id), {
-    attack: mon.attack,
-    defense: mon.defense,
-    speed: mon.speed,
-    hp: `${Math.max(0, mon.hp)}/${mon.maxHp}`
-  }, mon.chosenPassive, mon.chosenMoves);
+  const base = base_stats_for(mon.id);
+  return {
+    id: mon.id,
+    name: monster_label(mon.id),
+    passive: mon.chosenPassive,
+    moves: mon.chosenMoves.slice(0, 4),
+    current: {
+      hp: Math.max(0, mon.hp),
+      maxHp: mon.maxHp,
+      attack: mon.attack,
+      defense: mon.defense,
+      speed: mon.speed
+    },
+    base
+  };
+}
+function tooltip_value_state(current, base) {
+  if (current > base)
+    return "up";
+  if (current < base)
+    return "down";
+  return "neutral";
+}
+function set_monster_tooltip(target, payload) {
+  if (!target)
+    return;
+  tooltip_payload_by_element.delete(target);
+  target.removeAttribute("data-monster-tooltip");
+  target.removeAttribute("title");
+  if (!payload) {
+    return;
+  }
+  tooltip_payload_by_element.set(target, payload);
+  target.dataset.monsterTooltip = "1";
+}
+function tooltip_stat_row(label, current, base) {
+  const row = document.createElement("div");
+  row.className = "stat-tooltip-row";
+  const label_el = document.createElement("span");
+  label_el.className = "stat-tooltip-label";
+  label_el.textContent = label;
+  const value_el = document.createElement("span");
+  value_el.className = `stat-tooltip-value ${tooltip_value_state(current, base)}`;
+  value_el.textContent = `${current}`;
+  row.appendChild(label_el);
+  row.appendChild(value_el);
+  return row;
+}
+function render_monster_tooltip(payload) {
+  if (!stat_tooltip)
+    return;
+  stat_tooltip.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "stat-tooltip-title";
+  title.textContent = payload.name;
+  stat_tooltip.appendChild(title);
+  const stats_grid2 = document.createElement("div");
+  stats_grid2.className = "stat-tooltip-grid";
+  stats_grid2.appendChild(tooltip_stat_row("ATK", payload.current.attack, payload.base.attack));
+  stats_grid2.appendChild(tooltip_stat_row("DEF", payload.current.defense, payload.base.defense));
+  stats_grid2.appendChild(tooltip_stat_row("SPE", payload.current.speed, payload.base.speed));
+  stats_grid2.appendChild(tooltip_stat_row("HP", payload.current.maxHp, payload.base.maxHp));
+  stat_tooltip.appendChild(stats_grid2);
+  const hp_line = document.createElement("div");
+  hp_line.className = "stat-tooltip-hp";
+  hp_line.textContent = `Vida atual: ${payload.current.hp}/${payload.current.maxHp}`;
+  stat_tooltip.appendChild(hp_line);
+  const passive_line = document.createElement("div");
+  passive_line.className = "stat-tooltip-passive";
+  passive_line.textContent = `Passive: ${passive_label(payload.passive)}`;
+  stat_tooltip.appendChild(passive_line);
+  const moves_box = document.createElement("div");
+  moves_box.className = "stat-tooltip-moves";
+  const moves = payload.moves.slice(0, 4);
+  while (moves.length < 4) {
+    moves.push("none");
+  }
+  moves.forEach((move, index) => {
+    const row = document.createElement("div");
+    row.textContent = `${index + 1}. ${move_label(move)}`;
+    moves_box.appendChild(row);
+  });
+  stat_tooltip.appendChild(moves_box);
+}
+function position_tooltip(client_x, client_y) {
+  if (!stat_tooltip)
+    return;
+  const offset = 14;
+  const margin = 10;
+  const rect = stat_tooltip.getBoundingClientRect();
+  let left = client_x + offset;
+  let top = client_y + offset;
+  if (left + rect.width > window.innerWidth - margin) {
+    left = client_x - rect.width - offset;
+  }
+  if (top + rect.height > window.innerHeight - margin) {
+    top = client_y - rect.height - offset;
+  }
+  left = Math.max(margin, left);
+  top = Math.max(margin, top);
+  stat_tooltip.style.left = `${left}px`;
+  stat_tooltip.style.top = `${top}px`;
+}
+function tooltip_target_from_event(target) {
+  if (!(target instanceof HTMLElement))
+    return null;
+  const found = target.closest("[data-monster-tooltip='1']");
+  return found instanceof HTMLElement ? found : null;
+}
+function open_tooltip(target, client_x, client_y) {
+  if (!stat_tooltip)
+    return;
+  const payload = tooltip_payload_by_element.get(target);
+  if (!payload)
+    return;
+  active_tooltip_target = target;
+  render_monster_tooltip(payload);
+  stat_tooltip.classList.add("is-open");
+  stat_tooltip.setAttribute("aria-hidden", "false");
+  position_tooltip(client_x, client_y);
+}
+function close_tooltip() {
+  active_tooltip_target = null;
+  if (!stat_tooltip)
+    return;
+  stat_tooltip.classList.remove("is-open");
+  stat_tooltip.setAttribute("aria-hidden", "true");
 }
 function append_log(line) {
   append_line(log_list, line);
@@ -3738,22 +3871,20 @@ function set_slot_card(index, card, img, name_el) {
   if (!id) {
     card.classList.add("empty");
     card.classList.remove("active");
-    card.title = "";
+    set_monster_tooltip(card, null);
     img.classList.add("hidden");
     img.removeAttribute("src");
     img.alt = "";
-    img.title = "";
     name_el.textContent = "empty";
     return;
   }
   card.classList.remove("empty");
   card.classList.toggle("active", id === active_tab);
   const tooltip = tooltip_from_config(id);
-  card.title = tooltip;
+  set_monster_tooltip(card, tooltip);
   img.classList.remove("hidden");
   img.src = icon_path(id);
   img.alt = monster_label(id);
-  img.title = tooltip;
   name_el.textContent = monster_label(id);
 }
 function update_slots() {
@@ -3932,7 +4063,7 @@ function render_roster() {
     const is_disabled = !is_selected && selected.length >= 3 || is_ready && !match_started;
     const tooltip = tooltip_from_config(entry.id);
     card.className = `roster-card${is_selected ? " active" : ""}${is_disabled ? " disabled" : ""}`;
-    card.title = tooltip;
+    set_monster_tooltip(card, tooltip);
     card.innerHTML = `
       <div class="sprite" style="width:24px;height:24px;">
         <img src="${icon_path(entry.id)}" alt="${entry.name}" />
@@ -3942,10 +4073,6 @@ function render_roster() {
         <p>${entry.role}</p>
       </div>
     `;
-    const card_img = card.querySelector("img");
-    if (card_img) {
-      card_img.title = tooltip;
-    }
     card.addEventListener("click", () => {
       if (is_disabled)
         return;
@@ -3959,21 +4086,19 @@ function set_bench_slot(slot2, mon, index, enabled) {
     slot2.btn.classList.add("empty");
     slot2.btn.disabled = true;
     slot2.btn.removeAttribute("data-index");
-    slot2.btn.title = "";
+    set_monster_tooltip(slot2.btn, null);
     slot2.img.removeAttribute("src");
     slot2.img.alt = "";
-    slot2.img.title = "";
     slot2.img.style.display = "none";
     return;
   }
   const tooltip = tooltip_from_state(mon);
   slot2.btn.classList.remove("empty");
   slot2.btn.dataset.index = `${index}`;
-  slot2.btn.title = tooltip;
+  set_monster_tooltip(slot2.btn, tooltip);
   slot2.btn.disabled = !enabled || mon.hp <= 0;
   slot2.img.src = icon_path(mon.id);
   slot2.img.alt = monster_label(mon.id);
-  slot2.img.title = tooltip;
   slot2.img.style.display = "";
 }
 function update_bench(state, viewer_slot) {
@@ -4297,7 +4422,7 @@ function update_panels(state, opts) {
   }
   player_sprite.src = icon_path(my_active.id);
   player_sprite.alt = monster_label(my_active.id);
-  player_sprite.title = tooltip_from_state(my_active);
+  set_monster_tooltip(player_sprite_wrap, tooltip_from_state(my_active));
   enemy_title.textContent = opp.name || "Opponent";
   if (!opts?.skipMeta?.enemy) {
     enemy_meta.textContent = `Lv ${opp_active.level} · HP ${opp_active.hp}/${opp_active.maxHp}`;
@@ -4307,7 +4432,7 @@ function update_panels(state, opts) {
   }
   enemy_sprite.src = icon_path(opp_active.id);
   enemy_sprite.alt = monster_label(opp_active.id);
-  enemy_sprite.title = tooltip_from_state(opp_active);
+  set_monster_tooltip(enemy_sprite_wrap, tooltip_from_state(opp_active));
   update_bench(state, viewer_slot);
 }
 function animate_hp_text(side, level, from, to, maxHp, delay = 180) {
@@ -4689,6 +4814,43 @@ player_bench_slots.forEach((slot_el) => {
       return;
     send_switch_intent(index);
   });
+});
+document.addEventListener("mouseover", (event) => {
+  const target = tooltip_target_from_event(event.target);
+  if (!target) {
+    return;
+  }
+  const mouse = event;
+  open_tooltip(target, mouse.clientX, mouse.clientY);
+});
+document.addEventListener("mousemove", (event) => {
+  if (!active_tooltip_target) {
+    return;
+  }
+  const target = tooltip_target_from_event(event.target);
+  if (target !== active_tooltip_target) {
+    close_tooltip();
+    return;
+  }
+  const mouse = event;
+  position_tooltip(mouse.clientX, mouse.clientY);
+});
+document.addEventListener("mouseout", (event) => {
+  if (!active_tooltip_target) {
+    return;
+  }
+  const from_target = tooltip_target_from_event(event.target);
+  if (from_target !== active_tooltip_target) {
+    return;
+  }
+  const related_target = tooltip_target_from_event(event.relatedTarget);
+  if (related_target === active_tooltip_target) {
+    return;
+  }
+  close_tooltip();
+});
+window.addEventListener("blur", () => {
+  close_tooltip();
 });
 setInterval(update_deadline, 1000);
 setInterval(() => {

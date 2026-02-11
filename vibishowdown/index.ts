@@ -30,6 +30,17 @@ type Profile = {
   monsters: Record<string, MonsterConfig>;
 };
 
+type TooltipValueState = "up" | "down" | "neutral";
+
+type MonsterTooltipPayload = {
+  id: string;
+  name: string;
+  passive: string;
+  moves: string[];
+  current: { hp: number; maxHp: number; attack: number; defense: number; speed: number };
+  base: { maxHp: number; attack: number; defense: number; speed: number };
+};
+
 const PLAYER_SLOTS: PlayerSlot[] = ["player1", "player2"];
 
 const LAST_ROOM_KEY = "vibi_showdown_last_room";
@@ -104,6 +115,7 @@ const log_list = (document.getElementById("log-list") as HTMLElement | null) ?? 
 const chat_input = document.getElementById("chat-input") as HTMLInputElement | null;
 const chat_send = document.getElementById("chat-send") as HTMLButtonElement | null;
 const participants_list = document.getElementById("participants-list")!;
+const stat_tooltip = document.getElementById("stat-tooltip") as HTMLDivElement | null;
 
 const player_title = document.getElementById("player-name")!;
 const player_meta = document.getElementById("player-meta")!;
@@ -197,6 +209,8 @@ const sprite_fx_classes = ["jump", "hit", "heal", "shield-on", "shield-hit"];
 
 const selected: string[] = [];
 let active_tab: string | null = null;
+const tooltip_payload_by_element = new WeakMap<HTMLElement, MonsterTooltipPayload>();
+let active_tooltip_target: HTMLElement | null = null;
 
 let relay_server_managed = false;
 let relay_ended = false;
@@ -739,52 +753,175 @@ function stat_mod_feedback(entry: EventLog): string | null {
   return `modificador aplicado: ${target_name} ${label}${multiplier_text} (${before} -> ${after})`;
 }
 
-function build_monster_tooltip(
-  name: string,
-  stats: { attack: number; defense: number; speed: number; hp: string },
-  passive: string,
-  moves: string[]
-): string {
-  const move_lines = (moves.length > 0 ? moves : ["none", "none", "none", "none"])
-    .slice(0, 4)
-    .map((move, index) => `${index + 1}. ${move_label(move)}`);
-  return [
-    name,
-    `ATK ${stats.attack} | DEF ${stats.defense} | SPE ${stats.speed} | HP ${stats.hp}`,
-    `Passive: ${passive_label(passive)}`,
-    "",
-    "Moves:",
-    ...move_lines
-  ].join("\n");
+function base_stats_for(monster_id: string): { maxHp: number; attack: number; defense: number; speed: number } {
+  const spec = roster_by_id.get(monster_id);
+  if (!spec) {
+    return { maxHp: 1, attack: 0, defense: 0, speed: 0 };
+  }
+  return {
+    maxHp: spec.stats.maxHp,
+    attack: spec.stats.attack,
+    defense: spec.stats.defense,
+    speed: spec.stats.speed
+  };
 }
 
-function tooltip_from_config(monster_id: string): string {
+function tooltip_from_config(monster_id: string): MonsterTooltipPayload {
   const config = get_config(monster_id);
-  return build_monster_tooltip(
-    monster_label(monster_id),
-    {
+  const base = base_stats_for(monster_id);
+  return {
+    id: monster_id,
+    name: monster_label(monster_id),
+    passive: config.passive,
+    moves: config.moves.slice(0, 4),
+    current: {
+      hp: config.stats.maxHp,
+      maxHp: config.stats.maxHp,
       attack: config.stats.attack,
       defense: config.stats.defense,
-      speed: config.stats.speed,
-      hp: `${config.stats.maxHp}`
+      speed: config.stats.speed
     },
-    config.passive,
-    config.moves
-  );
+    base
+  };
 }
 
-function tooltip_from_state(mon: MonsterState): string {
-  return build_monster_tooltip(
-    monster_label(mon.id),
-    {
+function tooltip_from_state(mon: MonsterState): MonsterTooltipPayload {
+  const base = base_stats_for(mon.id);
+  return {
+    id: mon.id,
+    name: monster_label(mon.id),
+    passive: mon.chosenPassive,
+    moves: mon.chosenMoves.slice(0, 4),
+    current: {
+      hp: Math.max(0, mon.hp),
+      maxHp: mon.maxHp,
       attack: mon.attack,
       defense: mon.defense,
-      speed: mon.speed,
-      hp: `${Math.max(0, mon.hp)}/${mon.maxHp}`
+      speed: mon.speed
     },
-    mon.chosenPassive,
-    mon.chosenMoves
-  );
+    base
+  };
+}
+
+function tooltip_value_state(current: number, base: number): TooltipValueState {
+  if (current > base) return "up";
+  if (current < base) return "down";
+  return "neutral";
+}
+
+function set_monster_tooltip(target: HTMLElement | null, payload: MonsterTooltipPayload | null): void {
+  if (!target) return;
+  tooltip_payload_by_element.delete(target);
+  target.removeAttribute("data-monster-tooltip");
+  target.removeAttribute("title");
+  if (!payload) {
+    return;
+  }
+  tooltip_payload_by_element.set(target, payload);
+  target.dataset.monsterTooltip = "1";
+}
+
+function tooltip_stat_row(label: string, current: number, base: number): HTMLDivElement {
+  const row = document.createElement("div");
+  row.className = "stat-tooltip-row";
+
+  const label_el = document.createElement("span");
+  label_el.className = "stat-tooltip-label";
+  label_el.textContent = label;
+
+  const value_el = document.createElement("span");
+  value_el.className = `stat-tooltip-value ${tooltip_value_state(current, base)}`;
+  value_el.textContent = `${current}`;
+
+  row.appendChild(label_el);
+  row.appendChild(value_el);
+  return row;
+}
+
+function render_monster_tooltip(payload: MonsterTooltipPayload): void {
+  if (!stat_tooltip) return;
+  stat_tooltip.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.className = "stat-tooltip-title";
+  title.textContent = payload.name;
+  stat_tooltip.appendChild(title);
+
+  const stats_grid = document.createElement("div");
+  stats_grid.className = "stat-tooltip-grid";
+  stats_grid.appendChild(tooltip_stat_row("ATK", payload.current.attack, payload.base.attack));
+  stats_grid.appendChild(tooltip_stat_row("DEF", payload.current.defense, payload.base.defense));
+  stats_grid.appendChild(tooltip_stat_row("SPE", payload.current.speed, payload.base.speed));
+  stats_grid.appendChild(tooltip_stat_row("HP", payload.current.maxHp, payload.base.maxHp));
+  stat_tooltip.appendChild(stats_grid);
+
+  const hp_line = document.createElement("div");
+  hp_line.className = "stat-tooltip-hp";
+  hp_line.textContent = `Vida atual: ${payload.current.hp}/${payload.current.maxHp}`;
+  stat_tooltip.appendChild(hp_line);
+
+  const passive_line = document.createElement("div");
+  passive_line.className = "stat-tooltip-passive";
+  passive_line.textContent = `Passive: ${passive_label(payload.passive)}`;
+  stat_tooltip.appendChild(passive_line);
+
+  const moves_box = document.createElement("div");
+  moves_box.className = "stat-tooltip-moves";
+  const moves = payload.moves.slice(0, 4);
+  while (moves.length < 4) {
+    moves.push("none");
+  }
+  moves.forEach((move, index) => {
+    const row = document.createElement("div");
+    row.textContent = `${index + 1}. ${move_label(move)}`;
+    moves_box.appendChild(row);
+  });
+  stat_tooltip.appendChild(moves_box);
+}
+
+function position_tooltip(client_x: number, client_y: number): void {
+  if (!stat_tooltip) return;
+  const offset = 14;
+  const margin = 10;
+  const rect = stat_tooltip.getBoundingClientRect();
+  let left = client_x + offset;
+  let top = client_y + offset;
+
+  if (left + rect.width > window.innerWidth - margin) {
+    left = client_x - rect.width - offset;
+  }
+  if (top + rect.height > window.innerHeight - margin) {
+    top = client_y - rect.height - offset;
+  }
+  left = Math.max(margin, left);
+  top = Math.max(margin, top);
+
+  stat_tooltip.style.left = `${left}px`;
+  stat_tooltip.style.top = `${top}px`;
+}
+
+function tooltip_target_from_event(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof HTMLElement)) return null;
+  const found = target.closest("[data-monster-tooltip='1']");
+  return found instanceof HTMLElement ? found : null;
+}
+
+function open_tooltip(target: HTMLElement, client_x: number, client_y: number): void {
+  if (!stat_tooltip) return;
+  const payload = tooltip_payload_by_element.get(target);
+  if (!payload) return;
+  active_tooltip_target = target;
+  render_monster_tooltip(payload);
+  stat_tooltip.classList.add("is-open");
+  stat_tooltip.setAttribute("aria-hidden", "false");
+  position_tooltip(client_x, client_y);
+}
+
+function close_tooltip(): void {
+  active_tooltip_target = null;
+  if (!stat_tooltip) return;
+  stat_tooltip.classList.remove("is-open");
+  stat_tooltip.setAttribute("aria-hidden", "true");
 }
 
 function append_log(line: string): void {
@@ -1012,22 +1149,20 @@ function set_slot_card(
   if (!id) {
     card.classList.add("empty");
     card.classList.remove("active");
-    card.title = "";
+    set_monster_tooltip(card, null);
     img.classList.add("hidden");
     img.removeAttribute("src");
     img.alt = "";
-    img.title = "";
     name_el.textContent = "empty";
     return;
   }
   card.classList.remove("empty");
   card.classList.toggle("active", id === active_tab);
   const tooltip = tooltip_from_config(id);
-  card.title = tooltip;
+  set_monster_tooltip(card, tooltip);
   img.classList.remove("hidden");
   img.src = icon_path(id);
   img.alt = monster_label(id);
-  img.title = tooltip;
   name_el.textContent = monster_label(id);
 }
 
@@ -1219,7 +1354,7 @@ function render_roster(): void {
     const is_disabled = (!is_selected && selected.length >= 3) || (is_ready && !match_started);
     const tooltip = tooltip_from_config(entry.id);
     card.className = `roster-card${is_selected ? " active" : ""}${is_disabled ? " disabled" : ""}`;
-    card.title = tooltip;
+    set_monster_tooltip(card, tooltip);
     card.innerHTML = `
       <div class="sprite" style="width:24px;height:24px;">
         <img src="${icon_path(entry.id)}" alt="${entry.name}" />
@@ -1229,10 +1364,6 @@ function render_roster(): void {
         <p>${entry.role}</p>
       </div>
     `;
-    const card_img = card.querySelector("img");
-    if (card_img) {
-      card_img.title = tooltip;
-    }
     card.addEventListener("click", () => {
       if (is_disabled) return;
       toggle_selection(entry.id);
@@ -1248,21 +1379,19 @@ function set_bench_slot(slot: BenchSlotEl, mon: MonsterState | null, index: numb
     slot.btn.classList.add("empty");
     slot.btn.disabled = true;
     slot.btn.removeAttribute("data-index");
-    slot.btn.title = "";
+    set_monster_tooltip(slot.btn, null);
     slot.img.removeAttribute("src");
     slot.img.alt = "";
-    slot.img.title = "";
     slot.img.style.display = "none";
     return;
   }
   const tooltip = tooltip_from_state(mon);
   slot.btn.classList.remove("empty");
   slot.btn.dataset.index = `${index}`;
-  slot.btn.title = tooltip;
+  set_monster_tooltip(slot.btn, tooltip);
   slot.btn.disabled = !enabled || mon.hp <= 0;
   slot.img.src = icon_path(mon.id);
   slot.img.alt = monster_label(mon.id);
-  slot.img.title = tooltip;
   slot.img.style.display = "";
 }
 
@@ -1617,7 +1746,7 @@ function update_panels(
   }
   player_sprite.src = icon_path(my_active.id);
   player_sprite.alt = monster_label(my_active.id);
-  player_sprite.title = tooltip_from_state(my_active);
+  set_monster_tooltip(player_sprite_wrap, tooltip_from_state(my_active));
 
   enemy_title.textContent = opp.name || "Opponent";
   if (!opts?.skipMeta?.enemy) {
@@ -1628,7 +1757,7 @@ function update_panels(
   }
   enemy_sprite.src = icon_path(opp_active.id);
   enemy_sprite.alt = monster_label(opp_active.id);
-  enemy_sprite.title = tooltip_from_state(opp_active);
+  set_monster_tooltip(enemy_sprite_wrap, tooltip_from_state(opp_active));
   update_bench(state, viewer_slot);
 }
 
@@ -2037,6 +2166,47 @@ player_bench_slots.forEach((slot_el) => {
     if (!Number.isFinite(index)) return;
     send_switch_intent(index);
   });
+});
+
+document.addEventListener("mouseover", (event) => {
+  const target = tooltip_target_from_event(event.target);
+  if (!target) {
+    return;
+  }
+  const mouse = event as MouseEvent;
+  open_tooltip(target, mouse.clientX, mouse.clientY);
+});
+
+document.addEventListener("mousemove", (event) => {
+  if (!active_tooltip_target) {
+    return;
+  }
+  const target = tooltip_target_from_event(event.target);
+  if (target !== active_tooltip_target) {
+    close_tooltip();
+    return;
+  }
+  const mouse = event as MouseEvent;
+  position_tooltip(mouse.clientX, mouse.clientY);
+});
+
+document.addEventListener("mouseout", (event) => {
+  if (!active_tooltip_target) {
+    return;
+  }
+  const from_target = tooltip_target_from_event(event.target);
+  if (from_target !== active_tooltip_target) {
+    return;
+  }
+  const related_target = tooltip_target_from_event((event as MouseEvent).relatedTarget);
+  if (related_target === active_tooltip_target) {
+    return;
+  }
+  close_tooltip();
+});
+
+window.addEventListener("blur", () => {
+  close_tooltip();
 });
 
 setInterval(update_deadline, 1000);
