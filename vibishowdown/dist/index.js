@@ -1835,6 +1835,7 @@ var MOVE_CATALOG = [
   { id: "basic_attack", label: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 100 },
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "bells_drum", label: "Bells Drum", phaseId: "attack_01", attackMultiplier100: 0 },
   {
     id: "return",
     label: "Return",
@@ -2431,6 +2432,55 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
       phase: spec.phaseId,
       summary: "Agility: pending (applies at end of turn)",
       data: { move: spec.id, slot: player_slot, target: attacker.id }
+    });
+    return;
+  }
+  if (spec.id === "bells_drum") {
+    const before_hp = attacker.hp;
+    const before_attack = attacker.attack;
+    const after_hp = Math.max(1, mul_div_floor(before_hp, 1, 2));
+    const after_attack = Math.max(0, mul_div_round(before_attack, 2, 1));
+    attacker.hp = after_hp;
+    attacker.attack = after_attack;
+    const hp_spent = Math.max(0, before_hp - after_hp);
+    if (hp_spent > 0) {
+      hp_changed.add(attacker);
+      log.push({
+        type: "recoil",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `${attacker.name} paid ${hp_spent} HP for Bells Drum`,
+        data: { slot: player_slot, damage: hp_spent, target: attacker.id, move: spec.id }
+      });
+    }
+    log.push({
+      type: "stat_mod",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} used Bells Drum on ${attacker.name} (ATK ${before_attack} -> ${after_attack})`,
+      data: {
+        slot: player_slot,
+        target: attacker.id,
+        stat: "attack",
+        multiplier: 2,
+        before: before_attack,
+        after: after_attack
+      }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Bells Drum: user HP x0.5 (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        target: attacker.id,
+        hpBefore: before_hp,
+        hpAfter: after_hp,
+        attackBefore: before_attack,
+        attackAfter: after_attack
+      }
     });
     return;
   }
