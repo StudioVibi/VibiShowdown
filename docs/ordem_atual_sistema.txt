@@ -57,15 +57,16 @@ Ordem exata atual:
    - se houver duas actions, resolve iniciativa
    - executa action por action
    - valida fim de partida apos cada action
-5. Fases finais (sempre nesta ordem):
-   - end_turn_passive (passivas de fim de turno, ex: Leftovers)
-   - end_turn (efeitos de fim de turno de combate, ex: Leech Life)
+5. Fase final unica:
+   - end_turn (ordem fixa por lista interna, sem iniciativa por atributos):
+     Wish -> Leftovers -> Leech Life
+   - apos cada bloco dessa lista, o engine valida fim de partida (KO no fim do turno).
 6. Encerramento do turno:
    - decrement_cooldowns
    - reset_protect_flags no fim do turno
 
 Importante sobre passivas:
-- A ordem de chamada continua no engine (passo 5, antes de end_turn).
+- Passivas de item (ex: Leftovers) acontecem dentro da fase end_turn.
 - A logica da passiva fica no modulo de passivas:
   src/game_default/passives.ts
 - O engine chama apply_passive_turn_effect(...) para cada player ativo.

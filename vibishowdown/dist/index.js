@@ -2158,8 +2158,8 @@ var PHASES = [
   { id: "guard", name: "Guard", order: 1, initiative: INITIATIVE_DEFAULT },
   { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT }
 ];
-var END_PHASE_PASSIVE_ID = "end_turn_passive";
 var END_PHASE_ID = "end_turn";
+var END_TURN_EFFECT_ORDER = ["wish", "leftovers", "leech_life"];
 var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "none",
   "agility",
@@ -2187,11 +2187,9 @@ function compare_action_initiative(state, phase, a, b) {
   return compare_initiative(a_active, b_active, phase.initiative);
 }
 function action_type_order(action) {
-  if (action.type === "wish")
-    return 0;
   if (action.type === "move")
-    return 1;
-  return 2;
+    return 0;
+  return 1;
 }
 function compare_actions_for_phase(state, phase, a, b) {
   const cmp = compare_action_initiative(state, phase, a, b);
@@ -2354,7 +2352,7 @@ function apply_passives(state, log, hp_changed) {
       slot: player.slot,
       monster: active,
       turn: state.turn,
-      phase: END_PHASE_PASSIVE_ID,
+      phase: END_PHASE_ID,
       log,
       hp_changed
     });
@@ -2375,7 +2373,7 @@ function apply_pending_wish(state, log, slot, hp_changed) {
     log.push({
       type: "wish_heal",
       turn: state.turn,
-      phase: "attack_01",
+      phase: END_PHASE_ID,
       summary: `${target.name} recebeu Wish (${before_hp} -> ${after_hp})`,
       data: { slot, target: target.id, before: before_hp, after: after_hp }
     });
@@ -2383,7 +2381,7 @@ function apply_pending_wish(state, log, slot, hp_changed) {
     log.push({
       type: "wish_heal",
       turn: state.turn,
-      phase: "attack_01",
+      phase: END_PHASE_ID,
       summary: `${target.name} recebeu Wish (sem efeito: ${before_hp} -> ${after_hp})`,
       data: { slot, target: target.id, before: before_hp, after: after_hp }
     });
@@ -2502,11 +2500,54 @@ function apply_leech_seed_end_turn(state, log, hp_changed) {
     handle_faint(state, log, target_slot);
   }
 }
-function apply_end_turn_passive_phase(state, log, hp_changed) {
-  apply_passives(state, log, hp_changed);
+function check_match_end(state, log) {
+  if (!any_alive(state.players.player1)) {
+    state.status = "ended";
+    state.winner = "player2";
+    log.push({
+      type: "match_end",
+      turn: state.turn,
+      summary: "player2 wins (all monsters down)",
+      data: { winner: "player2" }
+    });
+    return true;
+  }
+  if (!any_alive(state.players.player2)) {
+    state.status = "ended";
+    state.winner = "player1";
+    log.push({
+      type: "match_end",
+      turn: state.turn,
+      summary: "player1 wins (all monsters down)",
+      data: { winner: "player1" }
+    });
+    return true;
+  }
+  return false;
+}
+function apply_end_turn_effect(state, log, hp_changed, effect_id) {
+  if (effect_id === "wish") {
+    for (const slot of ["player1", "player2"]) {
+      apply_pending_wish(state, log, slot, hp_changed);
+    }
+    return;
+  }
+  if (effect_id === "leftovers") {
+    apply_passives(state, log, hp_changed);
+    return;
+  }
+  apply_leech_seed_end_turn(state, log, hp_changed);
 }
 function apply_end_turn_phase(state, log, hp_changed) {
-  apply_leech_seed_end_turn(state, log, hp_changed);
+  for (const effect_id of END_TURN_EFFECT_ORDER) {
+    if (state.status === "ended") {
+      break;
+    }
+    apply_end_turn_effect(state, log, hp_changed, effect_id);
+    if (check_match_end(state, log)) {
+      break;
+    }
+  }
 }
 function handle_faint(state, log, slot) {
   const player = state.players[slot];
@@ -2704,7 +2745,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed) {
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Wish: no turno ${trigger_turn}, o ativo de ${player_slot} recebe HP x1.5 (max ${attacker.maxHp})`,
+      summary: `Wish: no turno ${trigger_turn}, no inicio do end_turn, o ativo de ${player_slot} recebe HP x1.5 (max ${attacker.maxHp})`,
       data: { move: spec.id, slot: player_slot, triggerTurn: trigger_turn }
     });
     return;
@@ -2783,7 +2824,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed) {
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Leech Life: target drains 12.5% at turn start; caster heals same while caster source remains active; seed ends when target switches",
+      summary: "Leech Life: target drains 12.5% at end_turn; caster heals same while caster source remains active; seed ends when target switches",
       data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot }
     });
     return;
@@ -3042,9 +3083,6 @@ function apply_switch(state, log, player_slot, targetIndex) {
 function build_actions(intents, state) {
   const actions = [];
   for (const slot of ["player1", "player2"]) {
-    if ((state.pendingWish?.[slot] ?? null) === state.turn) {
-      actions.push({ player: slot, type: "wish", phase: "attack_01" });
-    }
     const intent = intents[slot];
     if (!intent)
       continue;
@@ -3143,6 +3181,7 @@ function resolve_turn(state, intents) {
   reset_protect_flags(next);
   const actions = build_actions(intents, next);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
+  let match_ended_in_main_phases = false;
   for (const phase of phases) {
     const phase_actions = actions.filter((action) => action.phase === phase.id);
     if (phase_actions.length === 0) {
@@ -3173,40 +3212,21 @@ function resolve_turn(state, intents) {
           continue;
         }
         apply_switch(next, log, action.player, action.targetIndex);
-      } else if (action.type === "wish") {
-        apply_pending_wish(next, log, action.player, hp_changed_this_turn);
       } else {
         apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn);
       }
-      if (!any_alive(next.players.player1)) {
-        next.status = "ended";
-        next.winner = "player2";
-        log.push({
-          type: "match_end",
-          turn: next.turn,
-          summary: "player2 wins (all monsters down)",
-          data: { winner: "player2" }
-        });
-        break;
-      }
-      if (!any_alive(next.players.player2)) {
-        next.status = "ended";
-        next.winner = "player1";
-        log.push({
-          type: "match_end",
-          turn: next.turn,
-          summary: "player1 wins (all monsters down)",
-          data: { winner: "player1" }
-        });
+      if (check_match_end(next, log)) {
+        match_ended_in_main_phases = true;
         break;
       }
     }
-    if (next.status === "ended") {
+    if (match_ended_in_main_phases) {
       break;
     }
   }
-  apply_end_turn_passive_phase(next, log, hp_changed_this_turn);
-  apply_end_turn_phase(next, log, hp_changed_this_turn);
+  if (!match_ended_in_main_phases) {
+    apply_end_turn_phase(next, log, hp_changed_this_turn);
+  }
   decrement_cooldowns(next);
   reset_protect_flags(next);
   return { state: next, log };
