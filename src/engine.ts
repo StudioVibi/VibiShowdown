@@ -6,10 +6,12 @@ import type {
   PlayerIntent,
   PlayerSlot,
   PlayerState,
+  Stats,
   TeamSelection
 } from "./shared.ts";
 import { move_spec } from "./game_default/moves.ts";
 import { apply_passive_turn_effect, passive_spec } from "./game_default/passives.ts";
+import { mul_div_ceil, mul_div_floor, mul_div_round, normalize_int } from "./int_math.ts";
 
 type Phase = {
   id: string;
@@ -199,7 +201,7 @@ function handle_faint(state: GameState, log: EventLog[], slot: PlayerSlot): void
 }
 
 function minimum_endure_hp(monster: MonsterState): number {
-  return Math.max(1, Math.ceil(monster.maxHp * 0.01));
+  return Math.max(1, mul_div_ceil(monster.maxHp, 1, 100));
 }
 
 function apply_damage_with_endure(
@@ -223,7 +225,7 @@ function apply_damage_with_endure(
     monster.endureActiveThisTurn = false;
 
     const speed_before = monster.speed;
-    monster.speed = Math.max(1, Math.round(speed_before * 1.5));
+    monster.speed = Math.max(1, mul_div_round(speed_before, 3, 2));
     log.push({
       type: "endure_trigger",
       turn: state.turn,
@@ -380,7 +382,7 @@ function apply_move(
 
   if (spec.id === "screech") {
     const before_defense = defender.defense;
-    const after_defense = Math.max(1, Math.floor(before_defense * 0.5));
+    const after_defense = Math.max(1, mul_div_floor(before_defense, 1, 2));
     defender.defense = after_defense;
     log.push({
       type: "stat_mod",
@@ -406,7 +408,7 @@ function apply_move(
     return;
   }
 
-  const effective_attack = choice_band_active ? Math.max(0, Math.round(attacker.attack * 1.5)) : attacker.attack;
+  const effective_attack = choice_band_active ? Math.max(0, mul_div_round(attacker.attack, 3, 2)) : attacker.attack;
   const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
@@ -414,9 +416,9 @@ function apply_move(
   if (damage_type === "flat") {
     raw_damage = spec.flatDamage ?? 0;
   } else if (damage_type === "true") {
-    raw_damage = Math.round((effective_attack * multiplier100) / 100);
+    raw_damage = mul_div_round(effective_attack, multiplier100, 100);
   } else {
-    raw_damage = Math.round((effective_attack * multiplier100) / effective_defense);
+    raw_damage = mul_div_round(effective_attack, multiplier100, effective_defense);
   }
   let damage = Math.max(0, raw_damage);
   const was_blocked = defender.protectActiveThisTurn;
@@ -464,7 +466,7 @@ function apply_move(
   let recoil_damage = 0;
   let recoil_before = attacker.hp;
   if (recoil_num > 0 && recoil_den > 0 && final_damage > 0) {
-    const recoil_attempt = Math.max(0, Math.round((final_damage * recoil_num) / recoil_den));
+    const recoil_attempt = Math.max(0, mul_div_round(final_damage, recoil_num, recoil_den));
     recoil_damage = recoil_attempt;
     if (recoil_damage > 0) {
       const recoil_result = apply_damage_with_endure(
@@ -557,8 +559,7 @@ function apply_move(
 function resolve_agility(
   state: GameState,
   log: EventLog[],
-  pending_agility: AgilityPending[],
-  hp_changed: WeakSet<MonsterState>
+  pending_agility: AgilityPending[]
 ): void {
   for (const pending of pending_agility) {
     const monster = pending.monster;
@@ -666,26 +667,37 @@ export function create_initial_state(
   teams: Record<PlayerSlot, TeamSelection>,
   names: Record<PlayerSlot, string>
 ): GameState {
+  const normalize_stats = (stats: Stats): Stats => ({
+    level: normalize_int(stats.level, 1, 1),
+    maxHp: normalize_int(stats.maxHp, 1, 1),
+    attack: normalize_int(stats.attack, 0, 0),
+    defense: normalize_int(stats.defense, 0, 0),
+    speed: normalize_int(stats.speed, 0, 0)
+  });
+
   const build_player = (slot: PlayerSlot): PlayerState => {
     const selection = teams[slot];
-    const team = selection.monsters.map((monster) => ({
-      id: monster.id,
-      name: monster.id,
-      hp: monster.stats.maxHp,
-      maxHp: monster.stats.maxHp,
-      level: monster.stats.level,
-      attack: monster.stats.attack,
-      defense: monster.stats.defense,
-      speed: monster.stats.speed,
-      possibleMoves: monster.moves.slice(),
-      possiblePassives: [monster.passive],
-      chosenMoves: monster.moves.slice(0, 4),
-      chosenPassive: monster.passive,
-      protectActiveThisTurn: false,
-      endureActiveThisTurn: false,
-      choiceBandLockedMoveIndex: null,
-      protectCooldownTurns: 0
-    }));
+    const team = selection.monsters.map((monster) => {
+      const stats = normalize_stats(monster.stats);
+      return {
+        id: monster.id,
+        name: monster.id,
+        hp: stats.maxHp,
+        maxHp: stats.maxHp,
+        level: stats.level,
+        attack: stats.attack,
+        defense: stats.defense,
+        speed: stats.speed,
+        possibleMoves: monster.moves.slice(),
+        possiblePassives: [monster.passive],
+        chosenMoves: monster.moves.slice(0, 4),
+        chosenPassive: monster.passive,
+        protectActiveThisTurn: false,
+        endureActiveThisTurn: false,
+        choiceBandLockedMoveIndex: null,
+        protectCooldownTurns: 0
+      };
+    });
     return {
       slot,
       name: names[slot],
@@ -789,7 +801,7 @@ export function resolve_turn(
   }
 
   apply_passives(next, log, hp_changed_this_turn);
-  resolve_agility(next, log, pending_agility, hp_changed_this_turn);
+  resolve_agility(next, log, pending_agility);
   decrement_cooldowns(next);
   // Clear protect after the turn resolves (so next turn starts unprotected).
   reset_protect_flags(next);

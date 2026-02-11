@@ -1871,6 +1871,75 @@ function move_spec(move_id) {
   return MOVE_BY_ID_INTERNAL.get(move_id) ?? MOVE_BY_ID_INTERNAL.get("none");
 }
 
+// src/int_math.ts
+var MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+function to_bigint_trunc(value) {
+  if (!Number.isFinite(value)) {
+    return 0n;
+  }
+  return BigInt(Math.trunc(value));
+}
+function clamp_bigint_to_safe(value) {
+  if (value > MAX_SAFE_BIGINT) {
+    return MAX_SAFE_BIGINT;
+  }
+  if (value < -MAX_SAFE_BIGINT) {
+    return -MAX_SAFE_BIGINT;
+  }
+  return value;
+}
+function to_safe_number(value) {
+  return Number(clamp_bigint_to_safe(value));
+}
+function floor_div(numerator, denominator) {
+  if (denominator === 0n) {
+    return 0n;
+  }
+  let quotient = numerator / denominator;
+  const remainder = numerator % denominator;
+  if (remainder !== 0n && remainder > 0n !== denominator > 0n) {
+    quotient -= 1n;
+  }
+  return quotient;
+}
+function ceil_div(numerator, denominator) {
+  if (denominator === 0n) {
+    return 0n;
+  }
+  let quotient = numerator / denominator;
+  const remainder = numerator % denominator;
+  if (remainder !== 0n && remainder > 0n === denominator > 0n) {
+    quotient += 1n;
+  }
+  return quotient;
+}
+function normalize_int(value, fallback, min = Number.MIN_SAFE_INTEGER) {
+  const base = Number.isFinite(value) ? Math.round(value) : Math.round(fallback);
+  return Math.max(min, base);
+}
+function mul_div_floor(a, b, d) {
+  const numerator = to_bigint_trunc(a) * to_bigint_trunc(b);
+  const denominator = to_bigint_trunc(d);
+  return to_safe_number(floor_div(numerator, denominator));
+}
+function mul_div_ceil(a, b, d) {
+  const numerator = to_bigint_trunc(a) * to_bigint_trunc(b);
+  const denominator = to_bigint_trunc(d);
+  return to_safe_number(ceil_div(numerator, denominator));
+}
+function mul_div_round(a, b, d) {
+  const numerator = to_bigint_trunc(a) * to_bigint_trunc(b);
+  const denominator = to_bigint_trunc(d);
+  if (denominator === 0n) {
+    return 0;
+  }
+  const negative = numerator < 0n !== denominator < 0n;
+  const abs_num = numerator < 0n ? -numerator : numerator;
+  const abs_den = denominator < 0n ? -denominator : denominator;
+  const rounded = (abs_num + abs_den / 2n) / abs_den;
+  return to_safe_number(negative ? -rounded : rounded);
+}
+
 // src/game_default/passives.ts
 var PASSIVE_CATALOG = [
   { id: "none", label: "none" },
@@ -1901,7 +1970,7 @@ function passive_spec(passive_id) {
 }
 function apply_leftovers(context) {
   const { monster } = context;
-  const heal = Math.floor(monster.maxHp * 0.06);
+  const heal = mul_div_floor(monster.maxHp, 6, 100);
   if (heal <= 0) {
     return;
   }
@@ -2028,6 +2097,9 @@ function ensure(condition, message) {
     throw new Error(`[game_default] ${message}`);
   }
 }
+function ensure_int(value, message) {
+  ensure(Number.isInteger(value), message);
+}
 function assert_monster_integrity(monsters) {
   const monster_ids = new Set;
   for (const monster of monsters) {
@@ -2057,6 +2129,11 @@ function assert_monster_integrity(monsters) {
     const normalized_default = normalize_passive_id(monster.defaultPassive);
     ensure(PASSIVE_BY_ID.has(monster.defaultPassive), `${monster.id}: unknown default passive: ${monster.defaultPassive}`);
     ensure(possible_passives.has(normalized_default), `${monster.id}: default passive not allowed: ${monster.defaultPassive}`);
+    ensure_int(monster.stats.level, `${monster.id}: level must be integer`);
+    ensure_int(monster.stats.maxHp, `${monster.id}: maxHp must be integer`);
+    ensure_int(monster.stats.attack, `${monster.id}: attack must be integer`);
+    ensure_int(monster.stats.defense, `${monster.id}: defense must be integer`);
+    ensure_int(monster.stats.speed, `${monster.id}: speed must be integer`);
     ensure(monster.stats.level > 0, `${monster.id}: level must be > 0`);
     ensure(monster.stats.maxHp > 0, `${monster.id}: maxHp must be > 0`);
     ensure(monster.stats.attack >= 0, `${monster.id}: attack must be >= 0`);
@@ -2218,7 +2295,7 @@ function handle_faint(state, log, slot) {
   });
 }
 function minimum_endure_hp(monster) {
-  return Math.max(1, Math.ceil(monster.maxHp * 0.01));
+  return Math.max(1, mul_div_ceil(monster.maxHp, 1, 100));
 }
 function apply_damage_with_endure(state, log, phase, slot, monster, attempted_damage, hp_changed) {
   const before = monster.hp;
@@ -2231,7 +2308,7 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
     after = survive_hp;
     monster.endureActiveThisTurn = false;
     const speed_before = monster.speed;
-    monster.speed = Math.max(1, Math.round(speed_before * 1.5));
+    monster.speed = Math.max(1, mul_div_round(speed_before, 3, 2));
     log.push({
       type: "endure_trigger",
       turn: state.turn,
@@ -2369,7 +2446,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
   }
   if (spec.id === "screech") {
     const before_defense = defender.defense;
-    const after_defense = Math.max(1, Math.floor(before_defense * 0.5));
+    const after_defense = Math.max(1, mul_div_floor(before_defense, 1, 2));
     defender.defense = after_defense;
     log.push({
       type: "stat_mod",
@@ -2394,7 +2471,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
     });
     return;
   }
-  const effective_attack = choice_band_active ? Math.max(0, Math.round(attacker.attack * 1.5)) : attacker.attack;
+  const effective_attack = choice_band_active ? Math.max(0, mul_div_round(attacker.attack, 3, 2)) : attacker.attack;
   const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
@@ -2402,9 +2479,9 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
   if (damage_type === "flat") {
     raw_damage = spec.flatDamage ?? 0;
   } else if (damage_type === "true") {
-    raw_damage = Math.round(effective_attack * multiplier100 / 100);
+    raw_damage = mul_div_round(effective_attack, multiplier100, 100);
   } else {
-    raw_damage = Math.round(effective_attack * multiplier100 / effective_defense);
+    raw_damage = mul_div_round(effective_attack, multiplier100, effective_defense);
   }
   let damage = Math.max(0, raw_damage);
   const was_blocked = defender.protectActiveThisTurn;
@@ -2441,7 +2518,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
   let recoil_damage = 0;
   let recoil_before = attacker.hp;
   if (recoil_num > 0 && recoil_den > 0 && final_damage > 0) {
-    const recoil_attempt = Math.max(0, Math.round(final_damage * recoil_num / recoil_den));
+    const recoil_attempt = Math.max(0, mul_div_round(final_damage, recoil_num, recoil_den));
     recoil_damage = recoil_attempt;
     if (recoil_damage > 0) {
       const recoil_result = apply_damage_with_endure(state, log, spec.phaseId, player_slot, attacker, recoil_damage, hp_changed);
@@ -2508,7 +2585,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
     handle_faint(state, log, player_slot);
   }
 }
-function resolve_agility(state, log, pending_agility, hp_changed) {
+function resolve_agility(state, log, pending_agility) {
   for (const pending of pending_agility) {
     const monster = pending.monster;
     if (!is_alive(monster)) {
@@ -2610,26 +2687,36 @@ function build_actions(intents, state) {
   return actions;
 }
 function create_initial_state(teams, names) {
+  const normalize_stats = (stats) => ({
+    level: normalize_int(stats.level, 1, 1),
+    maxHp: normalize_int(stats.maxHp, 1, 1),
+    attack: normalize_int(stats.attack, 0, 0),
+    defense: normalize_int(stats.defense, 0, 0),
+    speed: normalize_int(stats.speed, 0, 0)
+  });
   const build_player = (slot) => {
     const selection = teams[slot];
-    const team = selection.monsters.map((monster) => ({
-      id: monster.id,
-      name: monster.id,
-      hp: monster.stats.maxHp,
-      maxHp: monster.stats.maxHp,
-      level: monster.stats.level,
-      attack: monster.stats.attack,
-      defense: monster.stats.defense,
-      speed: monster.stats.speed,
-      possibleMoves: monster.moves.slice(),
-      possiblePassives: [monster.passive],
-      chosenMoves: monster.moves.slice(0, 4),
-      chosenPassive: monster.passive,
-      protectActiveThisTurn: false,
-      endureActiveThisTurn: false,
-      choiceBandLockedMoveIndex: null,
-      protectCooldownTurns: 0
-    }));
+    const team = selection.monsters.map((monster) => {
+      const stats = normalize_stats(monster.stats);
+      return {
+        id: monster.id,
+        name: monster.id,
+        hp: stats.maxHp,
+        maxHp: stats.maxHp,
+        level: stats.level,
+        attack: stats.attack,
+        defense: stats.defense,
+        speed: stats.speed,
+        possibleMoves: monster.moves.slice(),
+        possiblePassives: [monster.passive],
+        chosenMoves: monster.moves.slice(0, 4),
+        chosenPassive: monster.passive,
+        protectActiveThisTurn: false,
+        endureActiveThisTurn: false,
+        choiceBandLockedMoveIndex: null,
+        protectCooldownTurns: 0
+      };
+    });
     return {
       slot,
       name: names[slot],
@@ -2719,7 +2806,7 @@ function resolve_turn(state, intents) {
     }
   }
   apply_passives(next, log, hp_changed_this_turn);
-  resolve_agility(next, log, pending_agility, hp_changed_this_turn);
+  resolve_agility(next, log, pending_agility);
   decrement_cooldowns(next);
   reset_protect_flags(next);
   return { state: next, log };
@@ -3584,11 +3671,28 @@ function load_team_selection() {
 function save_team_selection() {
   save_json(team_key, { selected: selected.slice() });
 }
+function normalize_stat_value(key, value, fallback) {
+  const candidate = typeof value === "number" ? value : fallback;
+  if (key === "level" || key === "maxHp") {
+    return normalize_int(candidate, fallback, 1);
+  }
+  return normalize_int(candidate, fallback, 0);
+}
+function normalize_stats(value, fallback) {
+  const source = value ?? {};
+  return {
+    level: normalize_stat_value("level", source.level, fallback.level),
+    maxHp: normalize_stat_value("maxHp", source.maxHp, fallback.maxHp),
+    attack: normalize_stat_value("attack", source.attack, fallback.attack),
+    defense: normalize_stat_value("defense", source.defense, fallback.defense),
+    speed: normalize_stat_value("speed", source.speed, fallback.speed)
+  };
+}
 function coerce_config(spec, value) {
   const base = {
     moves: spec.defaultMoves.slice(0, 4),
     passive: spec.defaultPassive,
-    stats: { ...spec.stats }
+    stats: normalize_stats(spec.stats, spec.stats)
   };
   if (!value) {
     return base;
@@ -3612,7 +3716,7 @@ function coerce_config(spec, value) {
   return {
     moves,
     passive,
-    stats: { ...base.stats, ...value.stats || {} }
+    stats: normalize_stats(value.stats, base.stats)
   };
 }
 function get_config(monster_id) {
@@ -3765,7 +3869,9 @@ function render_config() {
       if (!Number.isFinite(value)) {
         return;
       }
-      config.stats[key] = value;
+      const normalized = normalize_stat_value(key, value, config.stats[key]);
+      config.stats[key] = normalized;
+      input.value = `${normalized}`;
       save_profile();
     });
     label.appendChild(input);

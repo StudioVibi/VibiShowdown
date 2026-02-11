@@ -1,0 +1,52 @@
+PADRAO DE DETERMINISMO NUMERICO (ENGINE)
+
+Objetivo
+- Evitar dessync entre clientes em jogo deterministico.
+- Garantir que a simulacao produza o mesmo estado em qualquer maquina.
+
+Escopo
+- Vale para calculos de combate em `src/engine.ts` e regras em `src/game_default/*`.
+- UI pode ler valor decimal do usuario, mas o estado de batalha deve ser inteiro.
+
+Estado atual (implementado)
+- Stats de combate (`level`, `maxHp`, `attack`, `defense`, `speed`) sao normalizados para inteiro.
+- A normalizacao acontece na borda (config/UI) e novamente em `create_initial_state`.
+- O engine usa helpers de aritmetica inteira em `src/int_math.ts`.
+- Nao existe mais escala `def*100` para defesa.
+
+Regras obrigatorias
+1) Nao usar float no estado de batalha.
+2) Nao introduzir formulas com multiplicacao decimal direta no engine.
+3) Toda multiplicacao/divisao com arredondamento deve usar helper de `src/int_math.ts`.
+4) Ordem de eventos deve continuar estavel (sem fonte nao deterministica).
+5) `Math.random()` e `Date.now()` nao podem participar da simulacao.
+
+Helpers canonicos
+- `normalize_int(value, fallback, min)`:
+  - converte para inteiro e aplica minimo.
+- `mul_div_round(a, b, d)`:
+  - calcula `round(a*b/d)` com inteiro (BigInt internamente).
+- `mul_div_floor(a, b, d)`:
+  - calcula `floor(a*b/d)` com inteiro.
+- `mul_div_ceil(a, b, d)`:
+  - calcula `ceil(a*b/d)` com inteiro.
+
+Politica de arredondamento
+- Conversao de input para inteiro: `normalize_int`.
+- Formulas de combate: somente `mul_div_round/floor/ceil`.
+- Evitar espalhar `Math.round/floor/ceil` fora dos helpers.
+
+Checklist de PR
+1) Mudanca introduz numero decimal no estado de batalha? Se sim, bloquear.
+2) Algum stat entrou sem normalizacao de inteiro? Se sim, corrigir.
+3) Nova formula usou divisao fora de `src/int_math.ts`? Se sim, refatorar.
+4) Replay igual (mesmos posts) segue gerando mesmo estado por turno? Validar.
+
+Anti-patterns
+- Reintroduzir escala ad-hoc (`*100`, `/100`) em partes isoladas da formula.
+- Misturar parte da regra com inteiro e parte com decimal.
+- Arredondar em lugares diferentes para movimentos equivalentes.
+
+Governanca
+- Se codigo atual divergir deste documento, novas PRs devem convergir para este padrao.
+- Se o padrao mudar, atualizar este arquivo na mesma PR.

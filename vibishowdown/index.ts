@@ -18,6 +18,7 @@ import type {
   Stats,
   TeamSelection
 } from "../src/shared.ts";
+import { normalize_int } from "../src/int_math.ts";
 
 type MonsterConfig = {
   moves: string[];
@@ -931,11 +932,30 @@ function save_team_selection(): void {
   save_json(team_key, { selected: selected.slice() });
 }
 
+function normalize_stat_value(key: keyof Stats, value: unknown, fallback: number): number {
+  const candidate = typeof value === "number" ? value : fallback;
+  if (key === "level" || key === "maxHp") {
+    return normalize_int(candidate, fallback, 1);
+  }
+  return normalize_int(candidate, fallback, 0);
+}
+
+function normalize_stats(value: Partial<Stats> | undefined, fallback: Stats): Stats {
+  const source = value ?? {};
+  return {
+    level: normalize_stat_value("level", source.level, fallback.level),
+    maxHp: normalize_stat_value("maxHp", source.maxHp, fallback.maxHp),
+    attack: normalize_stat_value("attack", source.attack, fallback.attack),
+    defense: normalize_stat_value("defense", source.defense, fallback.defense),
+    speed: normalize_stat_value("speed", source.speed, fallback.speed)
+  };
+}
+
 function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): MonsterConfig {
   const base: MonsterConfig = {
     moves: spec.defaultMoves.slice(0, 4),
     passive: spec.defaultPassive,
-    stats: { ...spec.stats }
+    stats: normalize_stats(spec.stats, spec.stats)
   };
 
   if (!value) {
@@ -962,7 +982,7 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
   return {
     moves,
     passive,
-    stats: { ...base.stats, ...(value.stats || {}) }
+    stats: normalize_stats(value.stats, base.stats)
   };
 }
 
@@ -1131,7 +1151,9 @@ function render_config(): void {
       if (!Number.isFinite(value)) {
         return;
       }
-      config.stats[key] = value;
+      const normalized = normalize_stat_value(key, value, config.stats[key]);
+      config.stats[key] = normalized;
+      input.value = `${normalized}`;
       save_profile();
     });
     label.appendChild(input);

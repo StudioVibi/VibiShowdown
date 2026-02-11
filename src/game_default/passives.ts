@@ -1,5 +1,6 @@
 import type { PassiveCatalogEntry } from "./types.ts";
 import type { EventLog, MonsterState, PlayerSlot } from "../shared.ts";
+import { mul_div_floor } from "../int_math.ts";
 
 export const PASSIVE_CATALOG: readonly PassiveCatalogEntry[] = [
   { id: "none", label: "none" },
@@ -49,7 +50,7 @@ type PassiveTurnEffect = (context: PassiveTurnEffectContext) => void;
 
 function apply_leftovers(context: PassiveTurnEffectContext): void {
   const { monster } = context;
-  const heal = Math.floor(monster.maxHp * 0.06);
+  const heal = mul_div_floor(monster.maxHp, 6, 100);
   if (heal <= 0) {
     return;
   }

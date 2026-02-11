@@ -8,6 +8,10 @@ function ensure(condition: unknown, message: string): void {
   }
 }
 
+function ensure_int(value: number, message: string): void {
+  ensure(Number.isInteger(value), message);
+}
+
 export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[]): void {
   const monster_ids = new Set<string>();
 
@@ -49,6 +53,11 @@ export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[
       `${monster.id}: default passive not allowed: ${monster.defaultPassive}`
     );
 
+    ensure_int(monster.stats.level, `${monster.id}: level must be integer`);
+    ensure_int(monster.stats.maxHp, `${monster.id}: maxHp must be integer`);
+    ensure_int(monster.stats.attack, `${monster.id}: attack must be integer`);
+    ensure_int(monster.stats.defense, `${monster.id}: defense must be integer`);
+    ensure_int(monster.stats.speed, `${monster.id}: speed must be integer`);
     ensure(monster.stats.level > 0, `${monster.id}: level must be > 0`);
     ensure(monster.stats.maxHp > 0, `${monster.id}: maxHp must be > 0`);
     ensure(monster.stats.attack >= 0, `${monster.id}: attack must be >= 0`);
