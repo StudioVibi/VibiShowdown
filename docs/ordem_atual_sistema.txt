@@ -47,25 +47,25 @@ Funcao central: resolve_turn(state, intents)
 
 Ordem exata atual:
 1. clone_state do estado recebido.
-2. reset_protect_flags no inicio do turno.
-3. build_actions a partir dos intents.
-4. Ordena fases por "order":
+2. build_actions a partir dos intents.
+3. Ordena fases por "order":
    - switch (0)
    - guard (1)
    - attack_01 (2)
-5. Para cada fase:
+4. Para cada fase:
    - filtra actions da fase
    - se houver duas actions, resolve iniciativa
    - executa action por action
    - valida fim de partida apos cada action
-6. Apos fases (se nao encerrou):
-   - apply_passives (motor decide QUANDO chamar)
-   - resolve_agility
+5. Fases finais (sempre nesta ordem):
+   - end_turn_passive (passivas de fim de turno, ex: Leftovers)
+   - end_turn (efeitos de fim de turno de combate, ex: Leech Life)
+6. Encerramento do turno:
    - decrement_cooldowns
    - reset_protect_flags no fim do turno
 
 Importante sobre passivas:
-- A ordem de chamada continua no engine (passo 6).
+- A ordem de chamada continua no engine (passo 5, antes de end_turn).
 - A logica da passiva fica no modulo de passivas:
   src/game_default/passives.ts
 - O engine chama apply_passive_turn_effect(...) para cada player ativo.

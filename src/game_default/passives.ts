@@ -42,6 +42,7 @@ export type PassiveTurnEffectContext = {
   slot: PlayerSlot;
   monster: MonsterState;
   turn: number;
+  phase?: string;
   log: EventLog[];
   hp_changed: WeakSet<MonsterState>;
 };
@@ -64,6 +65,7 @@ function apply_leftovers(context: PassiveTurnEffectContext): void {
   context.log.push({
     type: "passive_heal",
     turn: context.turn,
+    phase: context.phase,
     summary: `${context.slot} Leftovers +${gained} HP`,
     data: { slot: context.slot, amount: gained, passive: "leftovers" }
   });

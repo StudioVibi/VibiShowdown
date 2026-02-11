@@ -1797,13 +1797,15 @@ function render_effects(
 ): void {
   const player_seeded_by = state.leechSeedSourceByTarget?.[player_slot] ?? null;
   const enemy_seeded_by = state.leechSeedSourceByTarget?.[enemy_slot] ?? null;
+  const player_seeded = state.leechSeedActiveByTarget?.[player_slot] ?? !!player_seeded_by;
+  const enemy_seeded = state.leechSeedActiveByTarget?.[enemy_slot] ?? !!enemy_seeded_by;
 
-  player_sprite_wrap.classList.toggle("seeded", !!player_seeded_by);
-  enemy_sprite_wrap.classList.toggle("seeded", !!enemy_seeded_by);
+  player_sprite_wrap.classList.toggle("seeded", player_seeded);
+  enemy_sprite_wrap.classList.toggle("seeded", enemy_seeded);
 
   if (player_effects) {
     player_effects.innerHTML = "";
-    if (player_seeded_by) {
+    if (player_seeded) {
       player_effects.appendChild(effect_chip("Seeded", "seeded"));
     }
     if (enemy_seeded_by === viewer_slot) {
@@ -1813,7 +1815,7 @@ function render_effects(
 
   if (enemy_effects) {
     enemy_effects.innerHTML = "";
-    if (enemy_seeded_by) {
+    if (enemy_seeded) {
       enemy_effects.appendChild(effect_chip("Seeded", "seeded"));
     }
     if (player_seeded_by === enemy_slot) {

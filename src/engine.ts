@@ -28,6 +28,9 @@ const PHASES: Phase[] = [
   { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT }
 ];
 
+const END_PHASE_PASSIVE_ID = "end_turn_passive";
+const END_PHASE_ID = "end_turn";
+
 const TAUNT_BLOCKED_MOVE_IDS = new Set([
   "none",
   "agility",
@@ -124,6 +127,10 @@ function empty_taunt_until_turn(): Record<PlayerSlot, number> {
   return { player1: 0, player2: 0 };
 }
 
+function empty_leech_seed_active(): Record<PlayerSlot, boolean> {
+  return { player1: false, player2: false };
+}
+
 function empty_leech_seed_sources(): Record<PlayerSlot, PlayerSlot | null> {
   return { player1: null, player2: null };
 }
@@ -165,6 +172,10 @@ export function clone_state(state: GameState): GameState {
     tauntUntilTurn: {
       player1: state.tauntUntilTurn?.player1 ?? 0,
       player2: state.tauntUntilTurn?.player2 ?? 0
+    },
+    leechSeedActiveByTarget: {
+      player1: state.leechSeedActiveByTarget?.player1 ?? false,
+      player2: state.leechSeedActiveByTarget?.player2 ?? false
     },
     leechSeedSourceByTarget: {
       player1: state.leechSeedSourceByTarget?.player1 ?? null,
@@ -245,6 +256,7 @@ function apply_passives(state: GameState, log: EventLog[], hp_changed: WeakSet<M
       slot: player.slot,
       monster: active,
       turn: state.turn,
+      phase: END_PHASE_PASSIVE_ID,
       log,
       hp_changed
     });
@@ -283,33 +295,55 @@ function apply_pending_wish(state: GameState, log: EventLog[], slot: PlayerSlot,
   }
 }
 
-function clear_leech_seed_on_switch(state: GameState, log: EventLog[], slot: PlayerSlot): void {
-  const source = state.leechSeedSourceByTarget?.[slot] ?? null;
-  if (!source) {
+function clear_leech_seed_on_target_switch(state: GameState, log: EventLog[], target_slot: PlayerSlot): void {
+  const was_active = state.leechSeedActiveByTarget?.[target_slot] ?? false;
+  const source = state.leechSeedSourceByTarget?.[target_slot] ?? null;
+  if (!was_active && !source) {
     return;
   }
-  state.leechSeedSourceByTarget[slot] = null;
+  state.leechSeedActiveByTarget[target_slot] = false;
+  state.leechSeedSourceByTarget[target_slot] = null;
   log.push({
     type: "leech_end",
     turn: state.turn,
-    summary: `Leech Life ended on ${slot} after switch`,
-    data: { slot, source }
+    summary: `Leech Life ended on ${target_slot} after switch`,
+    data: { slot: target_slot, source }
   });
 }
 
-function apply_leech_seed_turn_start(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
+function clear_leech_heal_on_source_switch(state: GameState, log: EventLog[], source_slot: PlayerSlot): void {
+  for (const target_slot of ["player1", "player2"] as const) {
+    if ((state.leechSeedSourceByTarget?.[target_slot] ?? null) !== source_slot) {
+      continue;
+    }
+    state.leechSeedSourceByTarget[target_slot] = null;
+    if (!(state.leechSeedActiveByTarget?.[target_slot] ?? false)) {
+      continue;
+    }
+    log.push({
+      type: "leech_heal_end",
+      turn: state.turn,
+      summary: `Leech Life heal ended for ${source_slot} after switch`,
+      data: { slot: source_slot, targetSlot: target_slot }
+    });
+  }
+}
+
+function apply_leech_seed_end_turn(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
+  const active_targets = state.leechSeedActiveByTarget;
   const sources = state.leechSeedSourceByTarget;
-  if (!sources) {
+  if (!active_targets) {
     return;
   }
   for (const target_slot of ["player1", "player2"] as const) {
-    const source_slot = sources[target_slot];
-    if (!source_slot) {
+    if (!(active_targets[target_slot] ?? false)) {
       continue;
     }
+    const source_slot = sources?.[target_slot] ?? null;
     const target_player = state.players[target_slot];
     const target = active_monster(target_player);
     if (!is_alive(target)) {
+      state.leechSeedActiveByTarget[target_slot] = false;
       state.leechSeedSourceByTarget[target_slot] = null;
       continue;
     }
@@ -325,10 +359,10 @@ function apply_leech_seed_turn_start(state: GameState, log: EventLog[], hp_chang
     log.push({
       type: "leech_drain",
       turn: state.turn,
-      phase: "attack_01",
+      phase: END_PHASE_ID,
       summary: `${target.name} lost ${drained} HP from Leech Life`,
       data: {
-        slot: source_slot,
+        slot: source_slot ?? other_slot(target_slot),
         targetSlot: target_slot,
         source: source_slot,
         target: target.id,
@@ -338,30 +372,32 @@ function apply_leech_seed_turn_start(state: GameState, log: EventLog[], hp_chang
       }
     });
 
-    const source_player = state.players[source_slot];
-    const receiver = active_monster(source_player);
-    if (is_alive(receiver)) {
-      const heal_before = receiver.hp;
-      const heal_after = Math.min(receiver.maxHp, receiver.hp + drained);
-      const healed = Math.max(0, heal_after - heal_before);
-      if (healed > 0) {
-        receiver.hp = heal_after;
-        hp_changed.add(receiver);
-        log.push({
-          type: "leech_heal",
-          turn: state.turn,
-          phase: "attack_01",
-          summary: `${receiver.name} healed ${healed} HP from Leech Life`,
-          data: {
-            slot: source_slot,
-            source: source_slot,
-            targetSlot: target_slot,
-            target: target.id,
-            heal: healed,
-            before: heal_before,
-            after: heal_after
-          }
-        });
+    if (source_slot) {
+      const source_player = state.players[source_slot];
+      const receiver = active_monster(source_player);
+      if (is_alive(receiver)) {
+        const heal_before = receiver.hp;
+        const heal_after = Math.min(receiver.maxHp, receiver.hp + drained);
+        const healed = Math.max(0, heal_after - heal_before);
+        if (healed > 0) {
+          receiver.hp = heal_after;
+          hp_changed.add(receiver);
+          log.push({
+            type: "leech_heal",
+            turn: state.turn,
+            phase: END_PHASE_ID,
+            summary: `${receiver.name} healed ${healed} HP from Leech Life`,
+            data: {
+              slot: source_slot,
+              source: source_slot,
+              targetSlot: target_slot,
+              target: target.id,
+              heal: healed,
+              before: heal_before,
+              after: heal_after
+            }
+          });
+        }
       }
     }
 
@@ -369,13 +405,21 @@ function apply_leech_seed_turn_start(state: GameState, log: EventLog[], hp_chang
       log.push({
         type: "faint",
         turn: state.turn,
-        phase: "attack_01",
+        phase: END_PHASE_ID,
         summary: `${target.name} fainted`,
         data: { slot: target_slot, target: target.id }
       });
     }
     handle_faint(state, log, target_slot);
   }
+}
+
+function apply_end_turn_passive_phase(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
+  apply_passives(state, log, hp_changed);
+}
+
+function apply_end_turn_phase(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
+  apply_leech_seed_end_turn(state, log, hp_changed);
 }
 
 function handle_faint(state: GameState, log: EventLog[], slot: PlayerSlot): void {
@@ -675,6 +719,7 @@ function apply_move(
 
   if (spec.id === "leech_life") {
     const target_slot = other_slot(player_slot);
+    state.leechSeedActiveByTarget[target_slot] = true;
     state.leechSeedSourceByTarget[target_slot] = player_slot;
     log.push({
       type: "leech_apply",
@@ -687,7 +732,7 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Leech Life: at start of each turn, target loses 12.5% current HP and caster side heals the same until target switches",
+      summary: "Leech Life: target drains 12.5% at turn start; caster heals same while caster source remains active; seed ends when target switches",
       data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot }
     });
     return;
@@ -972,7 +1017,8 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
     });
     return;
   }
-  clear_leech_seed_on_switch(state, log, player_slot);
+  clear_leech_seed_on_target_switch(state, log, player_slot);
+  clear_leech_heal_on_source_switch(state, log, player_slot);
   player.team[activeIndex].choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   log.push({
@@ -1063,6 +1109,7 @@ export function create_initial_state(
     pendingSwitch: empty_pending(),
     pendingWish: empty_pending_wish(),
     tauntUntilTurn: empty_taunt_until_turn(),
+    leechSeedActiveByTarget: empty_leech_seed_active(),
     leechSeedSourceByTarget: empty_leech_seed_sources()
   };
 }
@@ -1088,11 +1135,13 @@ export function resolve_turn(
   if (!next.tauntUntilTurn) {
     next.tauntUntilTurn = empty_taunt_until_turn();
   }
+  if (!next.leechSeedActiveByTarget) {
+    next.leechSeedActiveByTarget = empty_leech_seed_active();
+  }
   if (!next.leechSeedSourceByTarget) {
     next.leechSeedSourceByTarget = empty_leech_seed_sources();
   }
 
-  apply_leech_seed_turn_start(next, log, hp_changed_this_turn);
   reset_protect_flags(next);
   const actions = build_actions(intents, next);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
@@ -1164,7 +1213,8 @@ export function resolve_turn(
     }
   }
 
-  apply_passives(next, log, hp_changed_this_turn);
+  apply_end_turn_passive_phase(next, log, hp_changed_this_turn);
+  apply_end_turn_phase(next, log, hp_changed_this_turn);
   decrement_cooldowns(next);
   // Clear protect after the turn resolves (so next turn starts unprotected).
   reset_protect_flags(next);
@@ -1193,7 +1243,8 @@ export function apply_forced_switch(
     return { state: next, log, error: "target fainted" };
   }
   const from = player.activeIndex;
-  clear_leech_seed_on_switch(next, log, slot);
+  clear_leech_seed_on_target_switch(next, log, slot);
+  clear_leech_heal_on_source_switch(next, log, slot);
   player.team[from].choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   next.pendingSwitch[slot] = false;

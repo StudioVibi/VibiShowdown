@@ -59,6 +59,7 @@ export type GameState = {
   pendingSwitch: Record<PlayerSlot, boolean>;
   pendingWish: Record<PlayerSlot, number | null>;
   tauntUntilTurn: Record<PlayerSlot, number>;
+  leechSeedActiveByTarget: Record<PlayerSlot, boolean>;
   leechSeedSourceByTarget: Record<PlayerSlot, PlayerSlot | null>;
 };
 

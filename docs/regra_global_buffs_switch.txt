@@ -1,0 +1,19 @@
+REGRAS GLOBAIS - BUFFS E SWITCH
+================================
+
+Regra base
+- Qualquer buff/debuff vinculado ao mon ativo e perdido quando ele troca.
+
+Leech Life (decisao de design)
+- Quando aplicado, cria:
+  - debuff no alvo (perde HP por turno)
+  - buff no caster (ganha HP com base no alvo)
+- O tick acontece no fim do turno e ja pode procar no turno de aplicacao.
+- Se o alvo trocar: os dois efeitos acabam.
+- Se o caster trocar: so o buff de cura do caster acaba.
+- Com caster trocado, o alvo continua perdendo HP ate ele mesmo trocar.
+- Se o mon alvo voltar depois, volta sem semente.
+
+Objetivo
+- Evitar snowball permanente por efeitos de status entre trocas.
+- Manter switch como ferramenta de reset tatico.
