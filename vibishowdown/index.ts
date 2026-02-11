@@ -924,7 +924,7 @@ function close_tooltip(): void {
 }
 
 function append_log(line: string): void {
-  append_line(log_list, line);
+  append_line(log_list, compact_slot_labels(line));
 }
 
 function append_chat(line: string): void {
@@ -937,6 +937,10 @@ function append_chat_user(name: string, message: string): void {
 
 function append_turn_marker(turn: number): void {
   append_line(log_list, `turno ${turn}`, "log-turn");
+}
+
+function compact_slot_labels(text: string): string {
+  return text.replace(/\bplayer1\b/g, "P1").replace(/\bplayer2\b/g, "P2");
 }
 
 function try_post(data: RoomPost): boolean {
@@ -2045,11 +2049,11 @@ function handle_post(message: any): void {
       slot = data.slot;
       is_spectator = false;
       set_player_name(data.slot, data.name);
-      if (status_slot) status_slot.textContent = data.slot;
+      if (status_slot) status_slot.textContent = data.slot === "player1" ? "P1" : "P2";
       if (status_conn) status_conn.textContent = "synced";
-      player_meta.textContent = `Slot ${data.slot}`;
+      player_meta.textContent = `Slot ${data.slot === "player1" ? "P1" : "P2"}`;
       append_log(`assigned ${data.slot}`);
-      append_chat(`${data.name} assigned to ${data.slot}`);
+      append_chat(`${data.name} assigned to ${data.slot === "player1" ? "P1" : "P2"}`);
       render_participants();
       return;
     case "ready_state": {
@@ -2111,8 +2115,7 @@ function handle_post(message: any): void {
       return;
     case "surrender":
       if ("loser" in data) {
-        append_log(`surrender: ${data.loser}`);
-        append_chat(`${data.loser} surrendered`);
+        append_chat(`${data.loser === "player1" ? "P1" : "P2"} surrendered`);
       } else {
         append_log("surrender");
       }
