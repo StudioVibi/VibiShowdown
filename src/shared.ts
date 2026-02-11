@@ -58,6 +58,7 @@ export type GameState = {
   players: Record<PlayerSlot, PlayerState>;
   pendingSwitch: Record<PlayerSlot, boolean>;
   pendingWish: Record<PlayerSlot, number | null>;
+  tauntUntilTurn: Record<PlayerSlot, number>;
 };
 
 export type PlayerIntent =

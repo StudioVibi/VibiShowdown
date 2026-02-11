@@ -29,7 +29,9 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
     damageType: "flat",
     flatDamage: 35
   },
+  { id: "pain_split", label: "Pain Split", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "screech", label: "Screech", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "taunt", label: "Taunt", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },
   { id: "protect", label: "Protect", phaseId: "guard", attackMultiplier100: 100 },
   { id: "none", label: "none", phaseId: "attack_01", attackMultiplier100: 100 }

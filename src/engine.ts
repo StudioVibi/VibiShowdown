@@ -28,6 +28,8 @@ const PHASES: Phase[] = [
   { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT }
 ];
 
+const TAUNT_BLOCKED_MOVE_IDS = new Set(["none", "agility", "wish", "bells_drum", "screech", "taunt", "pain_split"]);
+
 type Action =
   | { player: PlayerSlot; type: "switch"; phase: string; targetIndex: number }
   | { player: PlayerSlot; type: "move"; phase: string; moveId: MoveId; moveIndex: number }
@@ -109,6 +111,21 @@ function empty_pending_wish(): Record<PlayerSlot, number | null> {
   return { player1: null, player2: null };
 }
 
+function empty_taunt_until_turn(): Record<PlayerSlot, number> {
+  return { player1: 0, player2: 0 };
+}
+
+function is_slot_taunted(state: GameState, slot: PlayerSlot): boolean {
+  return (state.tauntUntilTurn?.[slot] ?? 0) >= state.turn;
+}
+
+function is_attack_move(spec: { id: string; phaseId: string }): boolean {
+  if (spec.phaseId !== "attack_01") {
+    return false;
+  }
+  return !TAUNT_BLOCKED_MOVE_IDS.has(spec.id);
+}
+
 function clone_player(player: PlayerState): PlayerState {
   return {
     slot: player.slot,
@@ -131,6 +148,10 @@ export function clone_state(state: GameState): GameState {
     pendingWish: {
       player1: state.pendingWish?.player1 ?? null,
       player2: state.pendingWish?.player2 ?? null
+    },
+    tauntUntilTurn: {
+      player1: state.tauntUntilTurn?.player1 ?? 0,
+      player2: state.tauntUntilTurn?.player2 ?? 0
     }
   };
 }
@@ -351,6 +372,21 @@ function apply_move(
   }
 
   const spec = move_spec(move_id);
+  if (is_slot_taunted(state, player_slot) && !is_attack_move(spec)) {
+    log.push({
+      type: "taunt_blocked",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} is taunted and cannot use ${spec.label}`,
+      data: {
+        slot: player_slot,
+        move: spec.id,
+        untilTurn: state.tauntUntilTurn?.[player_slot] ?? state.turn
+      }
+    });
+    return;
+  }
+
   const passive = passive_spec(attacker.chosenPassive);
   const choice_band_active = passive.id === "choice_band";
 
@@ -549,6 +585,79 @@ function apply_move(
       phase: spec.phaseId,
       summary: `Screech: target DEF x0.5 (${before_defense} -> ${after_defense})`,
       data: { move: spec.id, target: defender.id, before: before_defense, after: after_defense }
+    });
+    return;
+  }
+
+  if (spec.id === "taunt") {
+    const target_slot = other_slot(player_slot);
+    const before_until = state.tauntUntilTurn?.[target_slot] ?? 0;
+    const until_turn = Math.max(before_until, state.turn + 1);
+    state.tauntUntilTurn[target_slot] = until_turn;
+    log.push({
+      type: "taunt",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} used Taunt on ${defender.name}`,
+      data: { slot: player_slot, target: defender.id, targetSlot: target_slot, beforeUntil: before_until, untilTurn: until_turn }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Taunt: ${target_slot} non-attack actions blocked on turns ${state.turn} and ${state.turn + 1}`,
+      data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot, untilTurn: until_turn }
+    });
+    return;
+  }
+
+  if (spec.id === "pain_split") {
+    const before_user_hp = attacker.hp;
+    const before_target_hp = defender.hp;
+    const shared_hp = Math.max(1, mul_div_floor(before_user_hp + before_target_hp, 1, 2));
+    const after_user_hp = Math.min(attacker.maxHp, shared_hp);
+    const after_target_hp = Math.min(defender.maxHp, shared_hp);
+
+    attacker.hp = after_user_hp;
+    defender.hp = after_target_hp;
+    if (after_user_hp !== before_user_hp) {
+      hp_changed.add(attacker);
+    }
+    if (after_target_hp !== before_target_hp) {
+      hp_changed.add(defender);
+    }
+
+    log.push({
+      type: "pain_split",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} used Pain Split (${attacker.name}: ${before_user_hp} -> ${after_user_hp}; ${defender.name}: ${before_target_hp} -> ${after_target_hp})`,
+      data: {
+        slot: player_slot,
+        user: attacker.id,
+        target: defender.id,
+        userBefore: before_user_hp,
+        userAfter: after_user_hp,
+        targetBefore: before_target_hp,
+        targetAfter: after_target_hp
+      }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Pain Split: both HP set to floor((userHP + targetHP)/2) = ${shared_hp}`,
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        user: attacker.id,
+        target: defender.id,
+        sharedHp: shared_hp,
+        userBefore: before_user_hp,
+        userAfter: after_user_hp,
+        targetBefore: before_target_hp,
+        targetAfter: after_target_hp
+      }
     });
     return;
   }
@@ -819,7 +928,8 @@ export function create_initial_state(
       player2: build_player("player2")
     },
     pendingSwitch: empty_pending(),
-    pendingWish: empty_pending_wish()
+    pendingWish: empty_pending_wish(),
+    tauntUntilTurn: empty_taunt_until_turn()
   };
 }
 
@@ -840,6 +950,9 @@ export function resolve_turn(
   }
   if (!next.pendingWish) {
     next.pendingWish = empty_pending_wish();
+  }
+  if (!next.tauntUntilTurn) {
+    next.tauntUntilTurn = empty_taunt_until_turn();
   }
 
   reset_protect_flags(next);
@@ -867,6 +980,16 @@ export function resolve_turn(
 
     for (const action of phase_actions) {
       if (action.type === "switch") {
+        if (is_slot_taunted(next, action.player)) {
+          log.push({
+            type: "taunt_blocked",
+            turn: next.turn,
+            phase: phase.id,
+            summary: `${action.player} is taunted and cannot switch`,
+            data: { slot: action.player, action: "switch", untilTurn: next.tauntUntilTurn[action.player] }
+          });
+          continue;
+        }
         apply_switch(next, log, action.player, action.targetIndex);
       } else if (action.type === "wish") {
         apply_pending_wish(next, log, action.player, hp_changed_this_turn);
@@ -953,7 +1076,11 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
     return "pending switch";
   }
   const active = active_monster(player);
+  const taunted = is_slot_taunted(state, slot);
   if (intent.action === "switch") {
+    if (taunted) {
+      return "taunted: must use attack";
+    }
     if (intent.targetIndex < 0 || intent.targetIndex >= player.team.length) {
       return "invalid switch target";
     }
@@ -979,7 +1106,10 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
     return "choice band locked";
   }
 
-  const moveId = active.chosenMoves[intent.moveIndex];
+  const moveId = active.chosenMoves[intent.moveIndex] ?? "none";
+  if (taunted && !is_attack_move(move_spec(moveId))) {
+    return "taunted: must use attack";
+  }
   if (moveId === "protect" && active.protectCooldownTurns > 0) {
     return "protect on cooldown";
   }
