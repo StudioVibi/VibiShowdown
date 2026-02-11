@@ -2949,6 +2949,7 @@ var enemy_sprite_wrap = document.getElementById("enemy-sprite-wrap");
 var prematch = document.getElementById("prematch");
 var prematch_hint = document.getElementById("prematch-hint");
 var ready_btn = document.getElementById("ready-btn");
+var reset_status_btn = document.getElementById("reset-status-btn");
 var move_buttons = [
   document.getElementById("move-btn-0"),
   document.getElementById("move-btn-1"),
@@ -3016,7 +3017,8 @@ var is_spectator = false;
 var last_ready_snapshot = null;
 var participants = null;
 var ready_order = [];
-var intent_locked = false;
+var selected_intent = null;
+var selected_intent_turn = 0;
 var hp_animation = {};
 var animation_timers = [];
 var sprite_fx_classes = ["jump", "hit", "heal", "shield-on", "shield-hit"];
@@ -3299,15 +3301,11 @@ function relay_handle_intent(data) {
   if (data.turn !== relay_turn) {
     return;
   }
-  if (relay_intents[slot_id]) {
-    return;
-  }
   const validation = validate_intent(relay_state, slot_id, data.intent);
   if (validation) {
     return;
   }
   relay_intents[slot_id] = data.intent;
-  emit_local_post({ $: "intent_locked", slot: slot_id, turn: relay_turn });
   if (!relay_intents.player1 || !relay_intents.player2) {
     return;
   }
@@ -3821,6 +3819,9 @@ function normalize_stats(value, fallback) {
     speed: normalize_stat_value("speed", source.speed, fallback.speed)
   };
 }
+function stats_equal(left, right) {
+  return left.level === right.level && left.maxHp === right.maxHp && left.attack === right.attack && left.defense === right.defense && left.speed === right.speed;
+}
 function coerce_config(spec, value) {
   const base = {
     moves: spec.defaultMoves.slice(0, 4),
@@ -3861,6 +3862,32 @@ function get_config(monster_id) {
   profile.monsters[monster_id] = config;
   save_profile();
   return config;
+}
+function reset_profile_stats_to_defaults() {
+  let changed = false;
+  for (const spec of MONSTER_ROSTER) {
+    const config = coerce_config(spec, profile.monsters[spec.id]);
+    const default_stats = normalize_stats(spec.stats, spec.stats);
+    if (!stats_equal(config.stats, default_stats)) {
+      changed = true;
+    }
+    profile.monsters[spec.id] = {
+      moves: config.moves.slice(0, 4),
+      passive: config.passive,
+      stats: default_stats
+    };
+  }
+  save_profile();
+  clear_warning();
+  if (changed) {
+    append_log("status reset to default values");
+  }
+  render_roster();
+  render_tabs();
+  render_config();
+  update_roster_count();
+  update_slots();
+  update_action_controls();
 }
 function update_roster_count() {
   roster_count.textContent = `${selected.length}/3`;
@@ -4106,7 +4133,7 @@ function update_bench(state, viewer_slot) {
   const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
   const my_bench = me.team.map((_, idx) => idx).filter((idx) => idx !== me.activeIndex);
   const opp_bench = opp.team.map((_, idx) => idx).filter((idx) => idx !== opp.activeIndex);
-  const can_switch = !!slot && slot === viewer_slot && match_started && !is_spectator && (!!has_pending_switch() || !intent_locked && current_turn > 0);
+  const can_switch = !!slot && slot === viewer_slot && match_started && !is_spectator && (!!has_pending_switch() || current_turn > 0);
   player_bench_slots.forEach((slot_el, i) => {
     const idx = my_bench[i] ?? null;
     const mon = idx !== null ? me.team[idx] : null;
@@ -4121,11 +4148,12 @@ function update_bench(state, viewer_slot) {
 function update_action_controls() {
   const has_team = selected.length === 3;
   const pending_switch = has_pending_switch();
-  const controls_disabled = !match_started || !slot || is_spectator || intent_locked || current_turn <= 0 || pending_switch;
+  const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || pending_switch;
   if (!has_team) {
     move_buttons.forEach((btn, index) => {
       btn.textContent = `Move ${index + 1}`;
       btn.disabled = true;
+      btn.classList.remove("selected-intent");
     });
     if (switch_btn)
       switch_btn.disabled = true;
@@ -4159,9 +4187,11 @@ function update_action_controls() {
       btn.textContent = is_locked_slot ? `${index + 1}. ${label} (locked)` : `${index + 1}. ${label}`;
       btn.disabled = controls_disabled;
     }
+    const is_selected_move = selected_intent_turn === current_turn && selected_intent?.action === "use_move" && selected_intent.moveIndex === index;
+    btn.classList.toggle("selected-intent", is_selected_move && !btn.disabled);
   });
   if (switch_btn) {
-    const switch_disabled = !match_started || !slot || is_spectator || !pending_switch && intent_locked || !pending_switch && current_turn <= 0;
+    const switch_disabled = !match_started || !slot || is_spectator || !pending_switch && current_turn <= 0;
     switch_btn.disabled = switch_disabled;
   }
   const show_surrender = match_started && !!slot && !is_spectator;
@@ -4189,10 +4219,6 @@ function can_send_intent() {
   if (is_spectator) {
     return false;
   }
-  if (intent_locked) {
-    append_log("intent already locked");
-    return false;
-  }
   if (has_pending_switch()) {
     append_log("pending switch");
     return false;
@@ -4205,9 +4231,11 @@ function send_move_intent(moveIndex) {
   if (!try_post({ $: "intent", turn: current_turn, intent: { action: "use_move", moveIndex }, player_id })) {
     return;
   }
-  intent_locked = true;
+  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
+  selected_intent = { action: "use_move", moveIndex };
+  selected_intent_turn = current_turn;
   update_action_controls();
-  append_log("intent sent");
+  append_log(was_selected ? "intent updated" : "intent sent");
 }
 function send_switch_intent(targetIndex) {
   if (has_pending_switch()) {
@@ -4221,9 +4249,11 @@ function send_switch_intent(targetIndex) {
   if (!try_post({ $: "intent", turn: current_turn, intent: { action: "switch", targetIndex }, player_id })) {
     return;
   }
-  intent_locked = true;
+  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
+  selected_intent = { action: "switch", targetIndex };
+  selected_intent_turn = current_turn;
   update_action_controls();
-  append_log("intent sent");
+  append_log(was_selected ? "intent updated" : "intent sent");
 }
 function send_surrender() {
   if (!match_started || is_spectator || !slot)
@@ -4266,9 +4296,11 @@ function open_switch_modal(mode = "intent") {
           })) {
             return;
           }
-          intent_locked = true;
+          const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
+          selected_intent = { action: "switch", targetIndex: entry.index };
+          selected_intent_turn = current_turn;
           update_action_controls();
-          append_log("intent sent");
+          append_log(was_selected ? "intent updated" : "intent sent");
           close_switch_modal();
           return;
         }
@@ -4321,6 +4353,9 @@ function update_ready_ui() {
   }
   ready_btn.textContent = is_ready ? "Unready" : "Ready";
   ready_btn.disabled = match_started;
+  if (reset_status_btn) {
+    reset_status_btn.disabled = match_started || is_ready;
+  }
   if (match_started) {
     prematch_hint.textContent = "Match started.";
     return;
@@ -4360,7 +4395,8 @@ function reset_to_lobby_view() {
   latest_state = null;
   current_turn = 0;
   deadline_at = 0;
-  intent_locked = false;
+  selected_intent = null;
+  selected_intent_turn = 0;
   close_switch_modal();
   match_end.classList.remove("open");
   prematch.style.display = "";
@@ -4372,7 +4408,8 @@ function reset_to_lobby_view() {
 function handle_turn_start(data) {
   current_turn = data.turn;
   deadline_at = data.deadline_at;
-  intent_locked = false;
+  selected_intent = null;
+  selected_intent_turn = 0;
   status_turn.textContent = `${current_turn}`;
   update_deadline();
   append_turn_marker(current_turn);
@@ -4712,10 +4749,7 @@ function handle_post(message) {
       return;
     case "intent_locked":
       append_log(`${data.slot} locked intent for turn ${data.turn}`);
-      if (slot && data.slot === slot) {
-        intent_locked = true;
-        update_action_controls();
-      }
+      update_action_controls();
       return;
     case "state":
       handle_state(data);
@@ -4795,6 +4829,18 @@ ready_btn.addEventListener("click", () => {
     send_ready(true);
   }
 });
+if (reset_status_btn) {
+  reset_status_btn.addEventListener("click", () => {
+    if (match_started) {
+      return;
+    }
+    if (is_ready) {
+      show_warning("Click Unready before resetting status.");
+      return;
+    }
+    reset_profile_stats_to_defaults();
+  });
+}
 match_end_btn.addEventListener("click", () => {
   reset_to_lobby_view();
 });

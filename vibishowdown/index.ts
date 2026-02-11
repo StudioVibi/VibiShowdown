@@ -131,6 +131,7 @@ const enemy_sprite_wrap = document.getElementById("enemy-sprite-wrap") as HTMLDi
 const prematch = document.getElementById("prematch")!;
 const prematch_hint = document.getElementById("prematch-hint")!;
 const ready_btn = document.getElementById("ready-btn") as HTMLButtonElement;
+const reset_status_btn = document.getElementById("reset-status-btn") as HTMLButtonElement | null;
 const move_buttons = [
   document.getElementById("move-btn-0") as HTMLButtonElement,
   document.getElementById("move-btn-1") as HTMLButtonElement,
@@ -202,7 +203,8 @@ let is_spectator = false;
 let last_ready_snapshot: Record<PlayerSlot, boolean> | null = null;
 let participants: { players: Record<PlayerSlot, string | null>; spectators: string[] } | null = null;
 let ready_order: PlayerSlot[] = [];
-let intent_locked = false;
+let selected_intent: PlayerIntent | null = null;
+let selected_intent_turn = 0;
 const hp_animation: { player?: number; enemy?: number } = {};
 const animation_timers: number[] = [];
 const sprite_fx_classes = ["jump", "hit", "heal", "shield-on", "shield-hit"];
@@ -518,15 +520,12 @@ function relay_handle_intent(data: Extract<RoomPost, { $: "intent" }>): void {
   if (data.turn !== relay_turn) {
     return;
   }
-  if (relay_intents[slot_id]) {
-    return;
-  }
   const validation = validate_intent(relay_state, slot_id, data.intent);
   if (validation) {
     return;
   }
+  // Last selection in the turn wins for the same slot.
   relay_intents[slot_id] = data.intent;
-  emit_local_post({ $: "intent_locked", slot: slot_id, turn: relay_turn });
   if (!relay_intents.player1 || !relay_intents.player2) {
     return;
   }
@@ -1088,6 +1087,16 @@ function normalize_stats(value: Partial<Stats> | undefined, fallback: Stats): St
   };
 }
 
+function stats_equal(left: Stats, right: Stats): boolean {
+  return (
+    left.level === right.level &&
+    left.maxHp === right.maxHp &&
+    left.attack === right.attack &&
+    left.defense === right.defense &&
+    left.speed === right.speed
+  );
+}
+
 function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): MonsterConfig {
   const base: MonsterConfig = {
     moves: spec.defaultMoves.slice(0, 4),
@@ -1132,6 +1141,34 @@ function get_config(monster_id: string): MonsterConfig {
   profile.monsters[monster_id] = config;
   save_profile();
   return config;
+}
+
+function reset_profile_stats_to_defaults(): void {
+  let changed = false;
+  for (const spec of roster) {
+    const config = coerce_config(spec, profile.monsters[spec.id]);
+    const default_stats = normalize_stats(spec.stats, spec.stats);
+    if (!stats_equal(config.stats, default_stats)) {
+      changed = true;
+    }
+    profile.monsters[spec.id] = {
+      moves: config.moves.slice(0, 4),
+      passive: config.passive,
+      stats: default_stats
+    };
+  }
+
+  save_profile();
+  clear_warning();
+  if (changed) {
+    append_log("status reset to default values");
+  }
+  render_roster();
+  render_tabs();
+  render_config();
+  update_roster_count();
+  update_slots();
+  update_action_controls();
 }
 
 function update_roster_count(): void {
@@ -1405,7 +1442,7 @@ function update_bench(state: GameState, viewer_slot: PlayerSlot): void {
     slot === viewer_slot &&
     match_started &&
     !is_spectator &&
-    (!!has_pending_switch() || (!intent_locked && current_turn > 0));
+    (!!has_pending_switch() || current_turn > 0);
 
   player_bench_slots.forEach((slot_el, i) => {
     const idx = my_bench[i] ?? null;
@@ -1422,11 +1459,12 @@ function update_bench(state: GameState, viewer_slot: PlayerSlot): void {
 function update_action_controls(): void {
   const has_team = selected.length === 3;
   const pending_switch = has_pending_switch();
-  const controls_disabled = !match_started || !slot || is_spectator || intent_locked || current_turn <= 0 || pending_switch;
+  const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || pending_switch;
   if (!has_team) {
     move_buttons.forEach((btn, index) => {
       btn.textContent = `Move ${index + 1}`;
       btn.disabled = true;
+      btn.classList.remove("selected-intent");
     });
     if (switch_btn) switch_btn.disabled = true;
     return;
@@ -1461,13 +1499,15 @@ function update_action_controls(): void {
       btn.textContent = is_locked_slot ? `${index + 1}. ${label} (locked)` : `${index + 1}. ${label}`;
       btn.disabled = controls_disabled;
     }
+    const is_selected_move =
+      selected_intent_turn === current_turn && selected_intent?.action === "use_move" && selected_intent.moveIndex === index;
+    btn.classList.toggle("selected-intent", is_selected_move && !btn.disabled);
   });
   if (switch_btn) {
     const switch_disabled =
       !match_started ||
       !slot ||
       is_spectator ||
-      (!pending_switch && intent_locked) ||
       (!pending_switch && current_turn <= 0);
     switch_btn.disabled = switch_disabled;
   }
@@ -1498,10 +1538,6 @@ function can_send_intent(): boolean {
   if (is_spectator) {
     return false;
   }
-  if (intent_locked) {
-    append_log("intent already locked");
-    return false;
-  }
   if (has_pending_switch()) {
     append_log("pending switch");
     return false;
@@ -1514,9 +1550,11 @@ function send_move_intent(moveIndex: number): void {
   if (!try_post({ $: "intent", turn: current_turn, intent: { action: "use_move", moveIndex }, player_id })) {
     return;
   }
-  intent_locked = true;
+  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
+  selected_intent = { action: "use_move", moveIndex };
+  selected_intent_turn = current_turn;
   update_action_controls();
-  append_log("intent sent");
+  append_log(was_selected ? "intent updated" : "intent sent");
 }
 
 function send_switch_intent(targetIndex: number): void {
@@ -1530,9 +1568,11 @@ function send_switch_intent(targetIndex: number): void {
   if (!try_post({ $: "intent", turn: current_turn, intent: { action: "switch", targetIndex }, player_id })) {
     return;
   }
-  intent_locked = true;
+  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
+  selected_intent = { action: "switch", targetIndex };
+  selected_intent_turn = current_turn;
   update_action_controls();
-  append_log("intent sent");
+  append_log(was_selected ? "intent updated" : "intent sent");
 }
 
 function send_surrender(): void {
@@ -1578,9 +1618,11 @@ function open_switch_modal(mode: "intent" | "forced" = "intent"): void {
           ) {
             return;
           }
-          intent_locked = true;
+          const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
+          selected_intent = { action: "switch", targetIndex: entry.index };
+          selected_intent_turn = current_turn;
           update_action_controls();
-          append_log("intent sent");
+          append_log(was_selected ? "intent updated" : "intent sent");
           close_switch_modal();
           return;
         }
@@ -1638,6 +1680,9 @@ function update_ready_ui(): void {
   }
   ready_btn.textContent = is_ready ? "Unready" : "Ready";
   ready_btn.disabled = match_started;
+  if (reset_status_btn) {
+    reset_status_btn.disabled = match_started || is_ready;
+  }
   if (match_started) {
     prematch_hint.textContent = "Match started.";
     return;
@@ -1678,7 +1723,8 @@ function reset_to_lobby_view(): void {
   latest_state = null;
   current_turn = 0;
   deadline_at = 0;
-  intent_locked = false;
+  selected_intent = null;
+  selected_intent_turn = 0;
   close_switch_modal();
   match_end.classList.remove("open");
   prematch.style.display = "";
@@ -1691,7 +1737,8 @@ function reset_to_lobby_view(): void {
 function handle_turn_start(data: { turn: number; deadline_at: number }): void {
   current_turn = data.turn;
   deadline_at = data.deadline_at;
-  intent_locked = false;
+  selected_intent = null;
+  selected_intent_turn = 0;
   status_turn.textContent = `${current_turn}`;
   update_deadline();
   append_turn_marker(current_turn);
@@ -2057,10 +2104,7 @@ function handle_post(message: any): void {
       return;
     case "intent_locked":
       append_log(`${data.slot} locked intent for turn ${data.turn}`);
-      if (slot && data.slot === slot) {
-        intent_locked = true;
-        update_action_controls();
-      }
+      update_action_controls();
       return;
     case "state":
       handle_state(data);
@@ -2145,6 +2189,19 @@ ready_btn.addEventListener("click", () => {
     send_ready(true);
   }
 });
+
+if (reset_status_btn) {
+  reset_status_btn.addEventListener("click", () => {
+    if (match_started) {
+      return;
+    }
+    if (is_ready) {
+      show_warning("Click Unready before resetting status.");
+      return;
+    }
+    reset_profile_stats_to_defaults();
+  });
+}
 
 match_end_btn.addEventListener("click", () => {
   reset_to_lobby_view();
