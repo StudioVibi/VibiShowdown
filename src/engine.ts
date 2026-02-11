@@ -29,6 +29,7 @@ const PHASES: Phase[] = [
 ];
 
 const END_PHASE_ID = "end_turn";
+const SLOT_ORDER = ["player1", "player2"] as const;
 const END_TURN_EFFECT_ORDER = ["wish", "leftovers", "leech_life"] as const;
 type EndTurnEffectId = (typeof END_TURN_EFFECT_ORDER)[number];
 
@@ -224,8 +225,9 @@ function first_alive_bench(player: PlayerState): number | null {
 }
 
 function for_each_player(state: GameState, fn: (player: PlayerState) => void): void {
-  fn(state.players.player1);
-  fn(state.players.player2);
+  for (const slot of SLOT_ORDER) {
+    fn(state.players[slot]);
+  }
 }
 
 function reset_protect_flags(state: GameState): void {
@@ -311,7 +313,7 @@ function clear_leech_seed_on_target_switch(state: GameState, log: EventLog[], ta
 }
 
 function clear_leech_heal_on_source_switch(state: GameState, log: EventLog[], source_slot: PlayerSlot): void {
-  for (const target_slot of ["player1", "player2"] as const) {
+  for (const target_slot of SLOT_ORDER) {
     if ((state.leechSeedSourceByTarget?.[target_slot] ?? null) !== source_slot) {
       continue;
     }
@@ -334,7 +336,7 @@ function apply_leech_seed_end_turn(state: GameState, log: EventLog[], hp_changed
   if (!active_targets) {
     return;
   }
-  for (const target_slot of ["player1", "player2"] as const) {
+  for (const target_slot of SLOT_ORDER) {
     if (!(active_targets[target_slot] ?? false)) {
       continue;
     }
@@ -446,7 +448,7 @@ function apply_end_turn_effect(
   effect_id: EndTurnEffectId
 ): void {
   if (effect_id === "wish") {
-    for (const slot of ["player1", "player2"] as const) {
+    for (const slot of SLOT_ORDER) {
       apply_pending_wish(state, log, slot, hp_changed);
     }
     return;
@@ -1079,7 +1081,7 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
 
 function build_actions(intents: Record<PlayerSlot, PlayerIntent | null>, state: GameState): Action[] {
   const actions: Action[] = [];
-  for (const slot of ["player1", "player2"] as const) {
+  for (const slot of SLOT_ORDER) {
     const intent = intents[slot];
     if (!intent) continue;
     if (intent.action === "switch") {

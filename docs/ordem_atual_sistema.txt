@@ -60,6 +60,8 @@ Ordem exata atual:
 5. Fase final unica:
    - end_turn (ordem fixa por lista interna, sem iniciativa por atributos):
      Wish -> Leftovers -> Leech Life
+   - em cada item da lista, quando precisar iterar os dois lados, desempate fixo:
+     player1 -> player2.
    - apos cada bloco dessa lista, o engine valida fim de partida (KO no fim do turno).
 6. Encerramento do turno:
    - decrement_cooldowns

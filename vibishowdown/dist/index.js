@@ -2159,6 +2159,7 @@ var PHASES = [
   { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT }
 ];
 var END_PHASE_ID = "end_turn";
+var SLOT_ORDER = ["player1", "player2"];
 var END_TURN_EFFECT_ORDER = ["wish", "leftovers", "leech_life"];
 var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "none",
@@ -2323,8 +2324,9 @@ function first_alive_bench(player) {
   return null;
 }
 function for_each_player(state, fn) {
-  fn(state.players.player1);
-  fn(state.players.player2);
+  for (const slot of SLOT_ORDER) {
+    fn(state.players[slot]);
+  }
 }
 function reset_protect_flags(state) {
   for_each_player(state, (player) => {
@@ -2403,7 +2405,7 @@ function clear_leech_seed_on_target_switch(state, log, target_slot) {
   });
 }
 function clear_leech_heal_on_source_switch(state, log, source_slot) {
-  for (const target_slot of ["player1", "player2"]) {
+  for (const target_slot of SLOT_ORDER) {
     if ((state.leechSeedSourceByTarget?.[target_slot] ?? null) !== source_slot) {
       continue;
     }
@@ -2425,7 +2427,7 @@ function apply_leech_seed_end_turn(state, log, hp_changed) {
   if (!active_targets) {
     return;
   }
-  for (const target_slot of ["player1", "player2"]) {
+  for (const target_slot of SLOT_ORDER) {
     if (!(active_targets[target_slot] ?? false)) {
       continue;
     }
@@ -2527,7 +2529,7 @@ function check_match_end(state, log) {
 }
 function apply_end_turn_effect(state, log, hp_changed, effect_id) {
   if (effect_id === "wish") {
-    for (const slot of ["player1", "player2"]) {
+    for (const slot of SLOT_ORDER) {
       apply_pending_wish(state, log, slot, hp_changed);
     }
     return;
@@ -3082,7 +3084,7 @@ function apply_switch(state, log, player_slot, targetIndex) {
 }
 function build_actions(intents, state) {
   const actions = [];
-  for (const slot of ["player1", "player2"]) {
+  for (const slot of SLOT_ORDER) {
     const intent = intents[slot];
     if (!intent)
       continue;
