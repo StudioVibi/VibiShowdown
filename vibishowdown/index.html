@@ -183,6 +183,49 @@
         transition-delay: 0.18s;
       }
 
+      .effects-row {
+        min-height: 18px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .panel.enemy .effects-row {
+        justify-content: flex-end;
+      }
+
+      .effect-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 7px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-family: "Space Mono", monospace;
+        letter-spacing: 0.03em;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.08);
+        color: #e9f9ff;
+      }
+
+      .effect-chip.seeded {
+        background: rgba(44, 84, 51, 0.75);
+        border-color: rgba(143, 242, 166, 0.55);
+      }
+
+      .effect-chip.drain {
+        background: rgba(27, 70, 83, 0.75);
+        border-color: rgba(111, 214, 255, 0.55);
+      }
+
+      .effect-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 1px;
+        background: #9df27b;
+      }
+
       .sprite {
         width: 100%;
         height: 100%;
@@ -236,6 +279,50 @@
         filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.45));
         position: relative;
         z-index: 1;
+      }
+
+      .seed-sprout {
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        width: 16px;
+        height: 16px;
+        opacity: 0;
+        transform: translateY(2px) scale(0.92);
+        transition: opacity 0.15s ease, transform 0.15s ease;
+        pointer-events: none;
+        z-index: 5;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+      }
+
+      .seed-sprout::before {
+        content: "";
+        position: absolute;
+        width: 3px;
+        height: 3px;
+        left: 7px;
+        top: 9px;
+        background: #7f5838;
+        box-shadow: 0 3px #7f5838;
+      }
+
+      .seed-sprout::after {
+        content: "";
+        position: absolute;
+        width: 3px;
+        height: 3px;
+        left: 5px;
+        top: 4px;
+        background: #72d45d;
+        box-shadow:
+          3px -2px #9bf47c,
+          3px 1px #4ea84d,
+          6px -1px #66c65d;
+      }
+
+      .sprite.seeded .seed-sprout {
+        opacity: 1;
+        transform: translateY(0) scale(1);
       }
 
       .shield {
@@ -1288,6 +1375,7 @@
                 <div class="panel-name" id="enemy-name">Enemy</div>
                 <div class="panel-sub" id="enemy-meta">Lv 10 · HP 40/40</div>
                 <div class="hp-bar"><span id="enemy-hp"></span></div>
+                <div class="effects-row" id="enemy-effects"></div>
                 <div class="bench-row">
                   <div class="bench" id="enemy-bench">
                     <button class="bench-slot empty" id="enemy-bench-0" type="button" disabled>
@@ -1301,6 +1389,7 @@
               </div>
             <div class="sprite" id="enemy-sprite-wrap">
               <div class="shield"></div>
+              <div class="seed-sprout" aria-hidden="true"></div>
               <img id="enemy-sprite" src="./icons/unit_harpy.png" alt="Enemy" />
             </div>
             </section>
@@ -1330,12 +1419,14 @@
             <section class="panel player">
             <div class="sprite" id="player-sprite-wrap">
               <div class="shield"></div>
+              <div class="seed-sprout" aria-hidden="true"></div>
               <img id="player-sprite" src="./icons/unit_knight.png" alt="Player" />
             </div>
               <div class="panel-info">
                 <div class="panel-name" id="player-name">Player</div>
                 <div class="panel-sub" id="player-meta">Lv 10 · HP 40/40</div>
                 <div class="hp-bar"><span id="player-hp"></span></div>
+                <div class="effects-row" id="player-effects"></div>
                 <div class="bench-row">
                   <div class="bench" id="player-bench">
                     <button class="bench-slot empty" id="player-bench-0" type="button">

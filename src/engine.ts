@@ -28,7 +28,16 @@ const PHASES: Phase[] = [
   { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT }
 ];
 
-const TAUNT_BLOCKED_MOVE_IDS = new Set(["none", "agility", "wish", "bells_drum", "screech", "taunt", "pain_split"]);
+const TAUNT_BLOCKED_MOVE_IDS = new Set([
+  "none",
+  "agility",
+  "wish",
+  "bells_drum",
+  "screech",
+  "taunt",
+  "pain_split",
+  "leech_life"
+]);
 
 type Action =
   | { player: PlayerSlot; type: "switch"; phase: string; targetIndex: number }
@@ -115,6 +124,10 @@ function empty_taunt_until_turn(): Record<PlayerSlot, number> {
   return { player1: 0, player2: 0 };
 }
 
+function empty_leech_seed_sources(): Record<PlayerSlot, PlayerSlot | null> {
+  return { player1: null, player2: null };
+}
+
 function is_slot_taunted(state: GameState, slot: PlayerSlot): boolean {
   return (state.tauntUntilTurn?.[slot] ?? 0) >= state.turn;
 }
@@ -152,6 +165,10 @@ export function clone_state(state: GameState): GameState {
     tauntUntilTurn: {
       player1: state.tauntUntilTurn?.player1 ?? 0,
       player2: state.tauntUntilTurn?.player2 ?? 0
+    },
+    leechSeedSourceByTarget: {
+      player1: state.leechSeedSourceByTarget?.player1 ?? null,
+      player2: state.leechSeedSourceByTarget?.player2 ?? null
     }
   };
 }
@@ -263,6 +280,101 @@ function apply_pending_wish(state: GameState, log: EventLog[], slot: PlayerSlot,
       summary: `${target.name} recebeu Wish (sem efeito: ${before_hp} -> ${after_hp})`,
       data: { slot, target: target.id, before: before_hp, after: after_hp }
     });
+  }
+}
+
+function clear_leech_seed_on_switch(state: GameState, log: EventLog[], slot: PlayerSlot): void {
+  const source = state.leechSeedSourceByTarget?.[slot] ?? null;
+  if (!source) {
+    return;
+  }
+  state.leechSeedSourceByTarget[slot] = null;
+  log.push({
+    type: "leech_end",
+    turn: state.turn,
+    summary: `Leech Life ended on ${slot} after switch`,
+    data: { slot, source }
+  });
+}
+
+function apply_leech_seed_turn_start(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
+  const sources = state.leechSeedSourceByTarget;
+  if (!sources) {
+    return;
+  }
+  for (const target_slot of ["player1", "player2"] as const) {
+    const source_slot = sources[target_slot];
+    if (!source_slot) {
+      continue;
+    }
+    const target_player = state.players[target_slot];
+    const target = active_monster(target_player);
+    if (!is_alive(target)) {
+      state.leechSeedSourceByTarget[target_slot] = null;
+      continue;
+    }
+
+    const target_before = target.hp;
+    const target_after = mul_div_floor(target_before, 7, 8);
+    const drained = Math.max(0, target_before - target_after);
+    if (drained <= 0) {
+      continue;
+    }
+    target.hp = target_after;
+    hp_changed.add(target);
+    log.push({
+      type: "leech_drain",
+      turn: state.turn,
+      phase: "attack_01",
+      summary: `${target.name} lost ${drained} HP from Leech Life`,
+      data: {
+        slot: source_slot,
+        targetSlot: target_slot,
+        source: source_slot,
+        target: target.id,
+        damage: drained,
+        before: target_before,
+        after: target_after
+      }
+    });
+
+    const source_player = state.players[source_slot];
+    const receiver = active_monster(source_player);
+    if (is_alive(receiver)) {
+      const heal_before = receiver.hp;
+      const heal_after = Math.min(receiver.maxHp, receiver.hp + drained);
+      const healed = Math.max(0, heal_after - heal_before);
+      if (healed > 0) {
+        receiver.hp = heal_after;
+        hp_changed.add(receiver);
+        log.push({
+          type: "leech_heal",
+          turn: state.turn,
+          phase: "attack_01",
+          summary: `${receiver.name} healed ${healed} HP from Leech Life`,
+          data: {
+            slot: source_slot,
+            source: source_slot,
+            targetSlot: target_slot,
+            target: target.id,
+            heal: healed,
+            before: heal_before,
+            after: heal_after
+          }
+        });
+      }
+    }
+
+    if (target_before > 0 && target_after === 0) {
+      log.push({
+        type: "faint",
+        turn: state.turn,
+        phase: "attack_01",
+        summary: `${target.name} fainted`,
+        data: { slot: target_slot, target: target.id }
+      });
+    }
+    handle_faint(state, log, target_slot);
   }
 }
 
@@ -561,6 +673,26 @@ function apply_move(
     return;
   }
 
+  if (spec.id === "leech_life") {
+    const target_slot = other_slot(player_slot);
+    state.leechSeedSourceByTarget[target_slot] = player_slot;
+    log.push({
+      type: "leech_apply",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} seeded ${defender.name} with Leech Life`,
+      data: { slot: player_slot, targetSlot: target_slot, source: player_slot, target: defender.id }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: "Leech Life: at start of each turn, target loses 12.5% current HP and caster side heals the same until target switches",
+      data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot }
+    });
+    return;
+  }
+
   if (spec.id === "screech") {
     const before_defense = defender.defense;
     const after_defense = Math.max(1, mul_div_floor(before_defense, 1, 2));
@@ -840,6 +972,7 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
     });
     return;
   }
+  clear_leech_seed_on_switch(state, log, player_slot);
   player.team[activeIndex].choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   log.push({
@@ -929,7 +1062,8 @@ export function create_initial_state(
     },
     pendingSwitch: empty_pending(),
     pendingWish: empty_pending_wish(),
-    tauntUntilTurn: empty_taunt_until_turn()
+    tauntUntilTurn: empty_taunt_until_turn(),
+    leechSeedSourceByTarget: empty_leech_seed_sources()
   };
 }
 
@@ -954,7 +1088,11 @@ export function resolve_turn(
   if (!next.tauntUntilTurn) {
     next.tauntUntilTurn = empty_taunt_until_turn();
   }
+  if (!next.leechSeedSourceByTarget) {
+    next.leechSeedSourceByTarget = empty_leech_seed_sources();
+  }
 
+  apply_leech_seed_turn_start(next, log, hp_changed_this_turn);
   reset_protect_flags(next);
   const actions = build_actions(intents, next);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
@@ -1055,6 +1193,7 @@ export function apply_forced_switch(
     return { state: next, log, error: "target fainted" };
   }
   const from = player.activeIndex;
+  clear_leech_seed_on_switch(next, log, slot);
   player.team[from].choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   next.pendingSwitch[slot] = false;

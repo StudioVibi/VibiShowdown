@@ -1860,6 +1860,7 @@ var MOVE_CATALOG = [
     damageType: "flat",
     flatDamage: 35
   },
+  { id: "leech_life", label: "Leech Life", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "pain_split", label: "Pain Split", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "screech", label: "Screech", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "taunt", label: "Taunt", phaseId: "attack_01", attackMultiplier100: 0 },
@@ -2156,7 +2157,16 @@ var PHASES = [
   { id: "guard", name: "Guard", order: 1, initiative: INITIATIVE_DEFAULT },
   { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT }
 ];
-var TAUNT_BLOCKED_MOVE_IDS = new Set(["none", "agility", "wish", "bells_drum", "screech", "taunt", "pain_split"]);
+var TAUNT_BLOCKED_MOVE_IDS = new Set([
+  "none",
+  "agility",
+  "wish",
+  "bells_drum",
+  "screech",
+  "taunt",
+  "pain_split",
+  "leech_life"
+]);
 var INITIATIVE_WITHOUT_SPEED = ["attack", "hp", "defense"];
 function compare_action_initiative(state, phase, a, b) {
   const a_active = active_monster(state.players[a.player]);
@@ -2229,6 +2239,9 @@ function empty_pending_wish() {
 function empty_taunt_until_turn() {
   return { player1: 0, player2: 0 };
 }
+function empty_leech_seed_sources() {
+  return { player1: null, player2: null };
+}
 function is_slot_taunted(state, slot) {
   return (state.tauntUntilTurn?.[slot] ?? 0) >= state.turn;
 }
@@ -2263,6 +2276,10 @@ function clone_state(state) {
     tauntUntilTurn: {
       player1: state.tauntUntilTurn?.player1 ?? 0,
       player2: state.tauntUntilTurn?.player2 ?? 0
+    },
+    leechSeedSourceByTarget: {
+      player1: state.leechSeedSourceByTarget?.player1 ?? null,
+      player2: state.leechSeedSourceByTarget?.player2 ?? null
     }
   };
 }
@@ -2359,6 +2376,96 @@ function apply_pending_wish(state, log, slot, hp_changed) {
       summary: `${target.name} recebeu Wish (sem efeito: ${before_hp} -> ${after_hp})`,
       data: { slot, target: target.id, before: before_hp, after: after_hp }
     });
+  }
+}
+function clear_leech_seed_on_switch(state, log, slot) {
+  const source = state.leechSeedSourceByTarget?.[slot] ?? null;
+  if (!source) {
+    return;
+  }
+  state.leechSeedSourceByTarget[slot] = null;
+  log.push({
+    type: "leech_end",
+    turn: state.turn,
+    summary: `Leech Life ended on ${slot} after switch`,
+    data: { slot, source }
+  });
+}
+function apply_leech_seed_turn_start(state, log, hp_changed) {
+  const sources = state.leechSeedSourceByTarget;
+  if (!sources) {
+    return;
+  }
+  for (const target_slot of ["player1", "player2"]) {
+    const source_slot = sources[target_slot];
+    if (!source_slot) {
+      continue;
+    }
+    const target_player = state.players[target_slot];
+    const target = active_monster(target_player);
+    if (!is_alive(target)) {
+      state.leechSeedSourceByTarget[target_slot] = null;
+      continue;
+    }
+    const target_before = target.hp;
+    const target_after = mul_div_floor(target_before, 7, 8);
+    const drained = Math.max(0, target_before - target_after);
+    if (drained <= 0) {
+      continue;
+    }
+    target.hp = target_after;
+    hp_changed.add(target);
+    log.push({
+      type: "leech_drain",
+      turn: state.turn,
+      phase: "attack_01",
+      summary: `${target.name} lost ${drained} HP from Leech Life`,
+      data: {
+        slot: source_slot,
+        targetSlot: target_slot,
+        source: source_slot,
+        target: target.id,
+        damage: drained,
+        before: target_before,
+        after: target_after
+      }
+    });
+    const source_player = state.players[source_slot];
+    const receiver = active_monster(source_player);
+    if (is_alive(receiver)) {
+      const heal_before = receiver.hp;
+      const heal_after = Math.min(receiver.maxHp, receiver.hp + drained);
+      const healed = Math.max(0, heal_after - heal_before);
+      if (healed > 0) {
+        receiver.hp = heal_after;
+        hp_changed.add(receiver);
+        log.push({
+          type: "leech_heal",
+          turn: state.turn,
+          phase: "attack_01",
+          summary: `${receiver.name} healed ${healed} HP from Leech Life`,
+          data: {
+            slot: source_slot,
+            source: source_slot,
+            targetSlot: target_slot,
+            target: target.id,
+            heal: healed,
+            before: heal_before,
+            after: heal_after
+          }
+        });
+      }
+    }
+    if (target_before > 0 && target_after === 0) {
+      log.push({
+        type: "faint",
+        turn: state.turn,
+        phase: "attack_01",
+        summary: `${target.name} fainted`,
+        data: { slot: target_slot, target: target.id }
+      });
+    }
+    handle_faint(state, log, target_slot);
   }
 }
 function handle_faint(state, log, slot) {
@@ -2621,6 +2728,25 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed) {
     });
     return;
   }
+  if (spec.id === "leech_life") {
+    const target_slot = other_slot(player_slot);
+    state.leechSeedSourceByTarget[target_slot] = player_slot;
+    log.push({
+      type: "leech_apply",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} seeded ${defender.name} with Leech Life`,
+      data: { slot: player_slot, targetSlot: target_slot, source: player_slot, target: defender.id }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: "Leech Life: at start of each turn, target loses 12.5% current HP and caster side heals the same until target switches",
+      data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot }
+    });
+    return;
+  }
   if (spec.id === "screech") {
     const before_defense = defender.defense;
     const after_defense = Math.max(1, mul_div_floor(before_defense, 1, 2));
@@ -2861,6 +2987,7 @@ function apply_switch(state, log, player_slot, targetIndex) {
     });
     return;
   }
+  clear_leech_seed_on_switch(state, log, player_slot);
   player.team[activeIndex].choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   log.push({
@@ -2944,7 +3071,8 @@ function create_initial_state(teams, names) {
     },
     pendingSwitch: empty_pending(),
     pendingWish: empty_pending_wish(),
-    tauntUntilTurn: empty_taunt_until_turn()
+    tauntUntilTurn: empty_taunt_until_turn(),
+    leechSeedSourceByTarget: empty_leech_seed_sources()
   };
 }
 function resolve_turn(state, intents) {
@@ -2963,6 +3091,10 @@ function resolve_turn(state, intents) {
   if (!next.tauntUntilTurn) {
     next.tauntUntilTurn = empty_taunt_until_turn();
   }
+  if (!next.leechSeedSourceByTarget) {
+    next.leechSeedSourceByTarget = empty_leech_seed_sources();
+  }
+  apply_leech_seed_turn_start(next, log, hp_changed_this_turn);
   reset_protect_flags(next);
   const actions = build_actions(intents, next);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
@@ -3050,6 +3182,7 @@ function apply_forced_switch(state, slot, targetIndex) {
     return { state: next, log, error: "target fainted" };
   }
   const from = player.activeIndex;
+  clear_leech_seed_on_switch(next, log, slot);
   player.team[from].choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   next.pendingSwitch[slot] = false;
@@ -3175,6 +3308,8 @@ var player_sprite = document.getElementById("player-sprite");
 var enemy_sprite = document.getElementById("enemy-sprite");
 var player_sprite_wrap = document.getElementById("player-sprite-wrap");
 var enemy_sprite_wrap = document.getElementById("enemy-sprite-wrap");
+var player_effects = document.getElementById("player-effects");
+var enemy_effects = document.getElementById("enemy-effects");
 var prematch = document.getElementById("prematch");
 var prematch_hint = document.getElementById("prematch-hint");
 var ready_btn = document.getElementById("ready-btn");
@@ -4674,12 +4809,46 @@ function log_events(log) {
     append_log(entry.summary);
   }
 }
+function effect_chip(label, kind) {
+  const chip = document.createElement("span");
+  chip.className = `effect-chip ${kind}`;
+  const dot = document.createElement("span");
+  dot.className = "effect-dot";
+  chip.appendChild(dot);
+  chip.append(label);
+  return chip;
+}
+function render_effects(state, viewer_slot, player_slot, enemy_slot) {
+  const player_seeded_by = state.leechSeedSourceByTarget?.[player_slot] ?? null;
+  const enemy_seeded_by = state.leechSeedSourceByTarget?.[enemy_slot] ?? null;
+  player_sprite_wrap.classList.toggle("seeded", !!player_seeded_by);
+  enemy_sprite_wrap.classList.toggle("seeded", !!enemy_seeded_by);
+  if (player_effects) {
+    player_effects.innerHTML = "";
+    if (player_seeded_by) {
+      player_effects.appendChild(effect_chip("Seeded", "seeded"));
+    }
+    if (enemy_seeded_by === viewer_slot) {
+      player_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+  }
+  if (enemy_effects) {
+    enemy_effects.innerHTML = "";
+    if (enemy_seeded_by) {
+      enemy_effects.appendChild(effect_chip("Seeded", "seeded"));
+    }
+    if (player_seeded_by === enemy_slot) {
+      enemy_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+  }
+}
 function update_panels(state, opts) {
   const viewer_slot = slot ?? (is_spectator ? "player1" : null);
   if (!viewer_slot)
     return;
+  const enemy_slot = viewer_slot === "player1" ? "player2" : "player1";
   const me = state.players[viewer_slot];
-  const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
+  const opp = state.players[enemy_slot];
   const my_active = me.team[me.activeIndex];
   const opp_active = opp.team[opp.activeIndex];
   player_title.textContent = me.name || player_name;
@@ -4702,6 +4871,7 @@ function update_panels(state, opts) {
   enemy_sprite.src = icon_path(opp_active.id);
   enemy_sprite.alt = monster_label(opp_active.id);
   set_monster_tooltip(enemy_sprite_wrap, tooltip_from_state(opp_active));
+  render_effects(state, viewer_slot, viewer_slot, enemy_slot);
   update_bench(state, viewer_slot);
 }
 function animate_hp_text(side, level, from, to, maxHp, delay = 180) {
@@ -4774,28 +4944,50 @@ function build_visual_steps(prev_state, log, viewer_slot) {
       steps.push({ kind: "shield_hit", attackerSide: attackerSide2, defenderSide: defenderSide2 });
       continue;
     }
-    if (entry.type === "passive_heal" || entry.type === "wish_heal") {
+    if (entry.type === "passive_heal" || entry.type === "wish_heal" || entry.type === "leech_heal") {
       const data = entry.data;
       if (!data?.slot)
         continue;
+      const target_player = temp.players[data.slot];
+      const target_mon = target_player.team[target_player.activeIndex];
+      if (typeof data.after === "number") {
+        target_mon.hp = data.after;
+      } else if (typeof data.before === "number") {
+        const fallback_after = typeof data.amount === "number" ? data.before + data.amount : data.before;
+        target_mon.hp = Math.min(target_mon.maxHp, Math.max(0, fallback_after));
+      } else if (typeof data.amount === "number") {
+        target_mon.hp = Math.min(target_mon.maxHp, Math.max(0, target_mon.hp + data.amount));
+      }
       const side = side_from_slot(viewer_slot, data.slot);
       steps.push({ kind: "heal", side });
       continue;
     }
-    if (entry.type !== "damage" && entry.type !== "recoil")
+    if (entry.type !== "damage" && entry.type !== "recoil" && entry.type !== "leech_drain")
       continue;
     const payload = entry.data;
     if (!payload || typeof payload.damage !== "number" || payload.damage <= 0 || !payload.slot) {
       continue;
     }
-    const defender_slot = entry.type === "recoil" ? payload.slot : payload.slot === "player1" ? "player2" : "player1";
+    let defender_slot;
+    if (entry.type === "recoil") {
+      defender_slot = payload.slot;
+    } else if (entry.type === "leech_drain") {
+      defender_slot = payload.targetSlot ?? (payload.slot === "player1" ? "player2" : "player1");
+    } else {
+      defender_slot = payload.slot === "player1" ? "player2" : "player1";
+    }
     const defender_player = temp.players[defender_slot];
     const defender = defender_player.team[defender_player.activeIndex];
-    const from = defender.hp;
-    const to = Math.max(0, from - payload.damage);
+    const from = typeof payload.before === "number" ? payload.before : defender.hp;
+    const to = typeof payload.after === "number" ? payload.after : Math.max(0, from - payload.damage);
     defender.hp = to;
     const defenderSide = side_from_slot(viewer_slot, defender_slot);
-    const attackerSide = entry.type === "recoil" ? defenderSide : defenderSide === "player" ? "enemy" : "player";
+    let attackerSide;
+    if (entry.type === "recoil") {
+      attackerSide = defenderSide;
+    } else {
+      attackerSide = side_from_slot(viewer_slot, payload.slot);
+    }
     steps.push({
       kind: "damage",
       attackerSide,

@@ -127,6 +127,8 @@ const player_sprite = document.getElementById("player-sprite") as HTMLImageEleme
 const enemy_sprite = document.getElementById("enemy-sprite") as HTMLImageElement;
 const player_sprite_wrap = document.getElementById("player-sprite-wrap") as HTMLDivElement;
 const enemy_sprite_wrap = document.getElementById("enemy-sprite-wrap") as HTMLDivElement;
+const player_effects = document.getElementById("player-effects") as HTMLDivElement | null;
+const enemy_effects = document.getElementById("enemy-effects") as HTMLDivElement | null;
 
 const prematch = document.getElementById("prematch")!;
 const prematch_hint = document.getElementById("prematch-hint")!;
@@ -1777,14 +1779,58 @@ function log_events(log: EventLog[]): void {
   }
 }
 
+function effect_chip(label: string, kind: "seeded" | "drain"): HTMLSpanElement {
+  const chip = document.createElement("span");
+  chip.className = `effect-chip ${kind}`;
+  const dot = document.createElement("span");
+  dot.className = "effect-dot";
+  chip.appendChild(dot);
+  chip.append(label);
+  return chip;
+}
+
+function render_effects(
+  state: GameState,
+  viewer_slot: PlayerSlot,
+  player_slot: PlayerSlot,
+  enemy_slot: PlayerSlot
+): void {
+  const player_seeded_by = state.leechSeedSourceByTarget?.[player_slot] ?? null;
+  const enemy_seeded_by = state.leechSeedSourceByTarget?.[enemy_slot] ?? null;
+
+  player_sprite_wrap.classList.toggle("seeded", !!player_seeded_by);
+  enemy_sprite_wrap.classList.toggle("seeded", !!enemy_seeded_by);
+
+  if (player_effects) {
+    player_effects.innerHTML = "";
+    if (player_seeded_by) {
+      player_effects.appendChild(effect_chip("Seeded", "seeded"));
+    }
+    if (enemy_seeded_by === viewer_slot) {
+      player_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+  }
+
+  if (enemy_effects) {
+    enemy_effects.innerHTML = "";
+    if (enemy_seeded_by) {
+      enemy_effects.appendChild(effect_chip("Seeded", "seeded"));
+    }
+    if (player_seeded_by === enemy_slot) {
+      enemy_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+  }
+}
+
 function update_panels(
   state: GameState,
   opts?: { skipMeta?: { player?: boolean; enemy?: boolean }; skipBar?: { player?: boolean; enemy?: boolean } }
 ): void {
   const viewer_slot = slot ?? (is_spectator ? "player1" : null);
   if (!viewer_slot) return;
+  const enemy_slot = viewer_slot === "player1" ? "player2" : "player1";
   const me = state.players[viewer_slot];
-  const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
+  const opp = state.players[enemy_slot];
   const my_active = me.team[me.activeIndex];
   const opp_active = opp.team[opp.activeIndex];
 
@@ -1809,6 +1855,7 @@ function update_panels(
   enemy_sprite.src = icon_path(opp_active.id);
   enemy_sprite.alt = monster_label(opp_active.id);
   set_monster_tooltip(enemy_sprite_wrap, tooltip_from_state(opp_active));
+  render_effects(state, viewer_slot, viewer_slot, enemy_slot);
   update_bench(state, viewer_slot);
 }
 
@@ -1896,26 +1943,50 @@ function build_visual_steps(prev_state: GameState, log: EventLog[], viewer_slot:
       steps.push({ kind: "shield_hit", attackerSide, defenderSide });
       continue;
     }
-    if (entry.type === "passive_heal" || entry.type === "wish_heal") {
-      const data = entry.data as { slot?: PlayerSlot } | undefined;
+    if (entry.type === "passive_heal" || entry.type === "wish_heal" || entry.type === "leech_heal") {
+      const data = entry.data as { slot?: PlayerSlot; amount?: number; before?: number; after?: number } | undefined;
       if (!data?.slot) continue;
+      const target_player = temp.players[data.slot];
+      const target_mon = target_player.team[target_player.activeIndex];
+      if (typeof data.after === "number") {
+        target_mon.hp = data.after;
+      } else if (typeof data.before === "number") {
+        const fallback_after = typeof data.amount === "number" ? data.before + data.amount : data.before;
+        target_mon.hp = Math.min(target_mon.maxHp, Math.max(0, fallback_after));
+      } else if (typeof data.amount === "number") {
+        target_mon.hp = Math.min(target_mon.maxHp, Math.max(0, target_mon.hp + data.amount));
+      }
       const side = side_from_slot(viewer_slot, data.slot);
       steps.push({ kind: "heal", side });
       continue;
     }
-    if (entry.type !== "damage" && entry.type !== "recoil") continue;
-    const payload = entry.data as { slot?: PlayerSlot; damage?: number } | undefined;
+    if (entry.type !== "damage" && entry.type !== "recoil" && entry.type !== "leech_drain") continue;
+    const payload = entry.data as
+      | { slot?: PlayerSlot; damage?: number; targetSlot?: PlayerSlot; before?: number; after?: number }
+      | undefined;
     if (!payload || typeof payload.damage !== "number" || payload.damage <= 0 || !payload.slot) {
       continue;
     }
-    const defender_slot = entry.type === "recoil" ? payload.slot : payload.slot === "player1" ? "player2" : "player1";
+    let defender_slot: PlayerSlot;
+    if (entry.type === "recoil") {
+      defender_slot = payload.slot;
+    } else if (entry.type === "leech_drain") {
+      defender_slot = payload.targetSlot ?? (payload.slot === "player1" ? "player2" : "player1");
+    } else {
+      defender_slot = payload.slot === "player1" ? "player2" : "player1";
+    }
     const defender_player = temp.players[defender_slot];
     const defender = defender_player.team[defender_player.activeIndex];
-    const from = defender.hp;
-    const to = Math.max(0, from - payload.damage);
+    const from = typeof payload.before === "number" ? payload.before : defender.hp;
+    const to = typeof payload.after === "number" ? payload.after : Math.max(0, from - payload.damage);
     defender.hp = to;
     const defenderSide = side_from_slot(viewer_slot, defender_slot);
-    const attackerSide = entry.type === "recoil" ? defenderSide : defenderSide === "player" ? "enemy" : "player";
+    let attackerSide: "player" | "enemy";
+    if (entry.type === "recoil") {
+      attackerSide = defenderSide;
+    } else {
+      attackerSide = side_from_slot(viewer_slot, payload.slot);
+    }
     steps.push({
       kind: "damage",
       attackerSide,
