@@ -56,20 +56,20 @@ function save_identity_value(key: string, value: string): void {
   } catch {}
 }
 
+function prompt_identity(label: string, fallback: string): string {
+  const next = normalize_identity_value(prompt(label, fallback));
+  return next ?? fallback;
+}
+
 function resolve_session_identity(): { room: string; player_name: string } {
   const params = new URLSearchParams(window.location.search);
   const room_param = normalize_identity_value(params.get("room"));
   const name_param = normalize_identity_value(params.get("name"));
 
-  let resolved_room = room_param ?? read_saved_identity_value(LAST_ROOM_KEY);
-  if (!resolved_room) {
-    resolved_room = normalize_identity_value(prompt("Room name?")) ?? gen_name();
-  }
-
-  let resolved_name = name_param ?? read_saved_identity_value(LAST_PLAYER_NAME_KEY);
-  if (!resolved_name) {
-    resolved_name = normalize_identity_value(prompt("Your name?")) ?? gen_name();
-  }
+  const default_room = room_param ?? read_saved_identity_value(LAST_ROOM_KEY) ?? gen_name();
+  const default_name = name_param ?? read_saved_identity_value(LAST_PLAYER_NAME_KEY) ?? gen_name();
+  const resolved_room = prompt_identity("Room name?", default_room);
+  const resolved_name = prompt_identity("Your name?", default_name);
 
   save_identity_value(LAST_ROOM_KEY, resolved_room);
   save_identity_value(LAST_PLAYER_NAME_KEY, resolved_name);
@@ -79,22 +79,12 @@ function resolve_session_identity(): { room: string; player_name: string } {
 
 const { room, player_name } = resolve_session_identity();
 
-function get_tab_player_id(room_name: string): string {
-  const key = `vibi_showdown_player_id:${room_name}`;
-  try {
-    const saved = sessionStorage.getItem(key);
-    if (saved && saved.length > 0) {
-      return saved;
-    }
-    const created = `${gen_name()}${gen_name()}`;
-    sessionStorage.setItem(key, created);
-    return created;
-  } catch {
-    return `${gen_name()}${gen_name()}`;
-  }
+function stable_player_id_from_name(name: string): string {
+  const normalized = name.trim().toLowerCase().replace(/\s+/g, " ");
+  return `name:${encodeURIComponent(normalized)}`;
 }
 
-const player_id = get_tab_player_id(room);
+const player_id = stable_player_id_from_name(player_name);
 
 const profile_key = `vibi_showdown_profile:${player_name}`;
 const team_key = `vibi_showdown_team:${room}:${player_name}`;
@@ -697,6 +687,55 @@ function move_label(id: string): string {
 
 function passive_label(id: string): string {
   return PASSIVE_LABELS[id] || id;
+}
+
+function stat_label(value: unknown): string {
+  if (value === "attack") return "ATK";
+  if (value === "defense") return "DEF";
+  if (value === "speed") return "SPE";
+  if (value === "hp" || value === "maxHp") return "HP";
+  if (typeof value === "string" && value.trim()) return value.trim().toUpperCase();
+  return "STAT";
+}
+
+function format_multiplier(value: number): string {
+  if (!Number.isFinite(value)) return "x?";
+  if (Number.isInteger(value)) return `x${value}`;
+  return `x${value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}`;
+}
+
+function stat_mod_feedback(entry: EventLog): string | null {
+  if (entry.type !== "stat_mod") {
+    return null;
+  }
+  const data = entry.data as
+    | {
+        target?: unknown;
+        stat?: unknown;
+        before?: unknown;
+        after?: unknown;
+        multiplier?: unknown;
+      }
+    | undefined;
+  if (!data) {
+    return null;
+  }
+
+  const before = typeof data.before === "number" ? data.before : null;
+  const after = typeof data.after === "number" ? data.after : null;
+  if (before === null || after === null) {
+    return null;
+  }
+
+  const target_name = typeof data.target === "string" ? monster_label(data.target) : "alvo";
+  const label = stat_label(data.stat);
+  const multiplier_text =
+    typeof data.multiplier === "number" && Number.isFinite(data.multiplier) ? ` ${format_multiplier(data.multiplier)}` : "";
+
+  if (before === after) {
+    return `modificador sem efeito: ${target_name} ${label}${multiplier_text} (${before} -> ${after})`;
+  }
+  return `modificador aplicado: ${target_name} ${label}${multiplier_text} (${before} -> ${after})`;
 }
 
 function build_monster_tooltip(
@@ -1527,6 +1566,10 @@ function log_events(log: EventLog[]): void {
         append_chat(`${attacker_name} deu ${damage} de dano em ${defender_name}`);
         continue;
       }
+    }
+    if (entry.type === "stat_mod") {
+      append_log(stat_mod_feedback(entry) ?? entry.summary);
+      continue;
     }
     append_log(entry.summary);
   }

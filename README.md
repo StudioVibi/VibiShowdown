@@ -30,6 +30,8 @@ Networking:
 - endpoint travado em `wss://net.studiovibi.com`.
 - modo atual: cliente-deterministico. Cada jogador envia `join/ready/intent/forced_switch/surrender` e todos recomputam o estado localmente com `src/engine.ts`.
 - stack de rede: apenas `vibinet@0.1.1` oficial (sem protocolo custom em `src/vibinet/*`).
-- identificacao de jogador por `player_id` persistido no browser (`localStorage`).
+- identificacao de jogador por `player_id` estavel derivado do nome (mesmo nome => mesmo id).
+- `room` e `name` ficam cacheados em `localStorage` e servem como default no prompt.
+- a cada carregamento da pagina o app pergunta novamente `room` e `name` (com os defaults salvos).
 - documento de ordem atual (rede + turnos): `docs/ordem_atual_sistema.txt`.
 - self-host removido deste repositorio (sem backend de jogo local).
