@@ -390,10 +390,34 @@
       }
 
       .chat-messages {
-        overflow: auto;
+        overflow-y: auto;
+        overflow-x: hidden;
         display: grid;
         gap: 3px;
         align-content: start;
+        padding-right: 1px;
+        scrollbar-gutter: auto;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+      }
+
+      .chat-messages::-webkit-scrollbar {
+        width: 7px;
+      }
+
+      .chat-messages::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .chat-messages::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 999px;
+        border: 1px solid transparent;
+        background-clip: content-box;
+      }
+
+      .chat-messages::-webkit-scrollbar-thumb:hover {
+        background: rgba(255, 255, 255, 0.16);
       }
 
       .chat-messages p {
