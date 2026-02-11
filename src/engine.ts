@@ -30,7 +30,7 @@ const PHASES: Phase[] = [
 
 const END_PHASE_ID = "end_turn";
 const SLOT_ORDER = ["player1", "player2"] as const;
-const END_TURN_EFFECT_ORDER = ["wish", "leftovers", "leech_life"] as const;
+const END_TURN_EFFECT_ORDER = ["focus_punch", "wish", "leftovers", "leech_life"] as const;
 type EndTurnEffectId = (typeof END_TURN_EFFECT_ORDER)[number];
 
 const TAUNT_BLOCKED_MOVE_IDS = new Set([
@@ -429,12 +429,55 @@ function check_match_end(state: GameState, log: EventLog[]): boolean {
   return false;
 }
 
+function apply_focus_punch_end_turn(
+  state: GameState,
+  log: EventLog[],
+  hp_changed: WeakSet<MonsterState>,
+  focus_punch_pending: Record<PlayerSlot, boolean>,
+  took_damage_this_turn: Record<PlayerSlot, boolean>
+): void {
+  const spec = move_spec("focus_punch");
+  for (const slot of SLOT_ORDER) {
+    if (!focus_punch_pending[slot]) {
+      continue;
+    }
+    const attacker = active_monster(state.players[slot]);
+    if (!is_alive(attacker)) {
+      log.push({
+        type: "focus_punch_fail",
+        turn: state.turn,
+        phase: END_PHASE_ID,
+        summary: `${slot} lost focus (fainted before Focus Punch)`,
+        data: { slot, reason: "fainted" }
+      });
+      continue;
+    }
+    if (took_damage_this_turn[slot]) {
+      log.push({
+        type: "focus_punch_fail",
+        turn: state.turn,
+        phase: END_PHASE_ID,
+        summary: `${attacker.name} lost focus and Focus Punch failed`,
+        data: { slot, reason: "took_damage_before_attack" }
+      });
+      continue;
+    }
+    apply_damage_move(state, log, slot, spec, hp_changed, END_PHASE_ID, took_damage_this_turn);
+  }
+}
+
 function apply_end_turn_effect(
   state: GameState,
   log: EventLog[],
   hp_changed: WeakSet<MonsterState>,
-  effect_id: EndTurnEffectId
+  effect_id: EndTurnEffectId,
+  focus_punch_pending: Record<PlayerSlot, boolean>,
+  took_damage_this_turn: Record<PlayerSlot, boolean>
 ): void {
+  if (effect_id === "focus_punch") {
+    apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending, took_damage_this_turn);
+    return;
+  }
   if (effect_id === "wish") {
     for (const slot of SLOT_ORDER) {
       apply_pending_wish(state, log, slot, hp_changed);
@@ -448,12 +491,18 @@ function apply_end_turn_effect(
   apply_leech_seed_end_turn(state, log, hp_changed);
 }
 
-function apply_end_turn_phase(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
+function apply_end_turn_phase(
+  state: GameState,
+  log: EventLog[],
+  hp_changed: WeakSet<MonsterState>,
+  focus_punch_pending: Record<PlayerSlot, boolean>,
+  took_damage_this_turn: Record<PlayerSlot, boolean>
+): void {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
     if (state.status === "ended") {
       break;
     }
-    apply_end_turn_effect(state, log, hp_changed, effect_id);
+    apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn);
     if (check_match_end(state, log)) {
       break;
     }
@@ -489,7 +538,8 @@ function apply_damage_with_endure(
   slot: PlayerSlot,
   monster: MonsterState,
   attempted_damage: number,
-  hp_changed: WeakSet<MonsterState>
+  hp_changed: WeakSet<MonsterState>,
+  took_damage_this_turn: Record<PlayerSlot, boolean>
 ): { before: number; after: number; applied: number } {
   const before = monster.hp;
   if (before <= 0 || attempted_damage <= 0) {
@@ -536,10 +586,211 @@ function apply_damage_with_endure(
   }
 
   monster.hp = after;
-  if (after !== before) {
+  const applied = before - after;
+  if (applied > 0) {
     hp_changed.add(monster);
+    took_damage_this_turn[slot] = true;
   }
-  return { before, after, applied: before - after };
+  return { before, after, applied };
+}
+
+function apply_damage_move(
+  state: GameState,
+  log: EventLog[],
+  player_slot: PlayerSlot,
+  spec: ReturnType<typeof move_spec>,
+  hp_changed: WeakSet<MonsterState>,
+  phase_id: string,
+  took_damage_this_turn: Record<PlayerSlot, boolean>
+): void {
+  const player = state.players[player_slot];
+  const opponent_slot = other_slot(player_slot);
+  const opponent = state.players[opponent_slot];
+  const attacker = active_monster(player);
+  const defender = active_monster(opponent);
+
+  if (!is_alive(attacker)) {
+    log.push({
+      type: "action_skipped",
+      turn: state.turn,
+      phase: phase_id,
+      summary: `${player_slot} action skipped (fainted)`,
+      data: { slot: player_slot, move: spec.id }
+    });
+    return;
+  }
+  if (!is_alive(defender)) {
+    log.push({
+      type: "no_target",
+      turn: state.turn,
+      phase: phase_id,
+      summary: `${player_slot} has no target`,
+      data: { slot: player_slot, move: spec.id }
+    });
+    return;
+  }
+
+  const passive = passive_spec(attacker.chosenPassive);
+  const choice_band_active = passive.id === "choice_band";
+  const effective_attack = choice_band_active ? Math.max(0, mul_div_round(attacker.attack, 3, 2)) : attacker.attack;
+  const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
+  const damage_type = spec.damageType ?? "scaled";
+  const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
+  let raw_damage = 0;
+  if (damage_type === "flat") {
+    raw_damage = spec.flatDamage ?? 0;
+  } else if (damage_type === "true") {
+    raw_damage = mul_div_round(effective_attack, multiplier100, 100);
+  } else {
+    raw_damage = mul_div_round(effective_attack, multiplier100, effective_defense);
+  }
+  let damage = Math.max(0, raw_damage);
+  const was_blocked = defender.protectActiveThisTurn;
+  if (was_blocked) {
+    damage = 0;
+    log.push({
+      type: "damage_blocked",
+      turn: state.turn,
+      phase: phase_id,
+      summary: `${defender.name} blocked the attack`,
+      data: { slot: opponent_slot }
+    });
+  }
+
+  const defender_result = apply_damage_with_endure(
+    state,
+    log,
+    phase_id,
+    opponent_slot,
+    defender,
+    damage,
+    hp_changed,
+    took_damage_this_turn
+  );
+  const final_damage = defender_result.applied;
+  log.push({
+    type: "damage",
+    turn: state.turn,
+    phase: phase_id,
+    summary: `${player_slot} dealt ${final_damage} to ${defender.name}`,
+    data: { slot: player_slot, damage: final_damage, target: defender.id }
+  });
+
+  if (defender_result.before > 0 && defender_result.after === 0) {
+    log.push({
+      type: "faint",
+      turn: state.turn,
+      phase: phase_id,
+      summary: `${defender.name} fainted`,
+      data: { slot: opponent_slot, target: defender.id }
+    });
+  }
+
+  const recoil_num = spec.recoilNumerator ?? 0;
+  const recoil_den = spec.recoilDenominator ?? 1;
+  let recoil_damage = 0;
+  let recoil_before = attacker.hp;
+  if (recoil_num > 0 && recoil_den > 0 && final_damage > 0) {
+    const recoil_attempt = Math.max(0, mul_div_round(final_damage, recoil_num, recoil_den));
+    recoil_damage = recoil_attempt;
+    if (recoil_damage > 0) {
+      const recoil_result = apply_damage_with_endure(
+        state,
+        log,
+        phase_id,
+        player_slot,
+        attacker,
+        recoil_damage,
+        hp_changed,
+        took_damage_this_turn
+      );
+      recoil_before = recoil_result.before;
+      recoil_damage = recoil_result.applied;
+      log.push({
+        type: "recoil",
+        turn: state.turn,
+        phase: phase_id,
+        summary: `${attacker.name} took ${recoil_damage} recoil`,
+        data: { slot: player_slot, damage: recoil_damage, target: attacker.id }
+      });
+      if (recoil_result.before > 0 && recoil_result.after === 0) {
+        log.push({
+          type: "faint",
+          turn: state.turn,
+          phase: phase_id,
+          summary: `${attacker.name} fainted`,
+          data: { slot: player_slot, target: attacker.id }
+        });
+      }
+    }
+  }
+
+  const choice_band_detail =
+    choice_band_active && damage_type !== "flat"
+      ? `; Choice Band ATK boost: ${attacker.attack} -> ${effective_attack}`
+      : "";
+
+  if (spec.id === "return") {
+    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / def) = round(${effective_attack} * ${multiplier100} / ${effective_defense}) = ${raw_damage}; final=${final_damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }${choice_band_detail}`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: phase_id,
+      summary: detail,
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "double_edge") {
+    const detail = `Double-Edge: dmg = round(atk*120/def) = round(${effective_attack}*120/${effective_defense}) = ${raw_damage}; final=${final_damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: phase_id,
+      summary: detail,
+      data: { move: spec.id, damage: final_damage, recoil: recoil_damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "seismic_toss") {
+    const detail = `Seismic Toss: dmg = flat ${spec.flatDamage ?? 0} (ignores defense); final=${final_damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: phase_id,
+      summary: detail,
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "quick_attack") {
+    const detail = `Quick Attack: dmg = round(atk*66/def) = round(${effective_attack}*66/${effective_defense}) = ${raw_damage}; final=${final_damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }; speed check ignored${choice_band_detail}`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: phase_id,
+      summary: detail,
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "focus_punch") {
+    const detail = `Focus Punch: dmg = round(atk*150/def) = round(${effective_attack}*150/${effective_defense}) = ${raw_damage}; final=${final_damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }${choice_band_detail}`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: phase_id,
+      summary: detail,
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
+    });
+  }
+
+  handle_faint(state, log, opponent_slot);
+  if (recoil_num > 0 && recoil_den > 0) {
+    handle_faint(state, log, player_slot);
+  }
 }
 
 function apply_move(
@@ -548,7 +799,9 @@ function apply_move(
   player_slot: PlayerSlot,
   move_id: MoveId,
   move_index: number,
-  hp_changed: WeakSet<MonsterState>
+  hp_changed: WeakSet<MonsterState>,
+  focus_punch_pending: Record<PlayerSlot, boolean>,
+  took_damage_this_turn: Record<PlayerSlot, boolean>
 ): void {
   const player = state.players[player_slot];
   const opponent = state.players[other_slot(player_slot)];
@@ -776,6 +1029,25 @@ function apply_move(
     return;
   }
 
+  if (spec.id === "focus_punch") {
+    focus_punch_pending[player_slot] = true;
+    log.push({
+      type: "focus_punch_charge",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} is tightening focus for Focus Punch`,
+      data: { slot: player_slot, target: defender.id }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: "Focus Punch: resolves at start of end_turn; fails if user took real damage before executing",
+      data: { move: spec.id, slot: player_slot, target: defender.id }
+    });
+    return;
+  }
+
   if (spec.id === "screech") {
     const before_defense = defender.defense;
     const after_defense = Math.max(1, mul_div_floor(before_defense, 1, 2));
@@ -877,152 +1149,7 @@ function apply_move(
     return;
   }
 
-  const effective_attack = choice_band_active ? Math.max(0, mul_div_round(attacker.attack, 3, 2)) : attacker.attack;
-  const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
-  const damage_type = spec.damageType ?? "scaled";
-  const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
-  let raw_damage = 0;
-  if (damage_type === "flat") {
-    raw_damage = spec.flatDamage ?? 0;
-  } else if (damage_type === "true") {
-    raw_damage = mul_div_round(effective_attack, multiplier100, 100);
-  } else {
-    raw_damage = mul_div_round(effective_attack, multiplier100, effective_defense);
-  }
-  let damage = Math.max(0, raw_damage);
-  const was_blocked = defender.protectActiveThisTurn;
-  if (was_blocked) {
-    damage = 0;
-    log.push({
-      type: "damage_blocked",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${defender.name} blocked the attack`,
-      data: { slot: other_slot(player_slot) }
-    });
-  }
-
-  const defender_result = apply_damage_with_endure(
-    state,
-    log,
-    spec.phaseId,
-    other_slot(player_slot),
-    defender,
-    damage,
-    hp_changed
-  );
-  const final_damage = defender_result.applied;
-  log.push({
-    type: "damage",
-    turn: state.turn,
-    phase: spec.phaseId,
-    summary: `${player_slot} dealt ${final_damage} to ${defender.name}`,
-    data: { slot: player_slot, damage: final_damage, target: defender.id }
-  });
-
-  if (defender_result.before > 0 && defender_result.after === 0) {
-    log.push({
-      type: "faint",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${defender.name} fainted`,
-      data: { slot: other_slot(player_slot), target: defender.id }
-    });
-  }
-
-  const recoil_num = spec.recoilNumerator ?? 0;
-  const recoil_den = spec.recoilDenominator ?? 1;
-  let recoil_damage = 0;
-  let recoil_before = attacker.hp;
-  if (recoil_num > 0 && recoil_den > 0 && final_damage > 0) {
-    const recoil_attempt = Math.max(0, mul_div_round(final_damage, recoil_num, recoil_den));
-    recoil_damage = recoil_attempt;
-    if (recoil_damage > 0) {
-      const recoil_result = apply_damage_with_endure(
-        state,
-        log,
-        spec.phaseId,
-        player_slot,
-        attacker,
-        recoil_damage,
-        hp_changed
-      );
-      recoil_before = recoil_result.before;
-      recoil_damage = recoil_result.applied;
-      log.push({
-        type: "recoil",
-        turn: state.turn,
-        phase: spec.phaseId,
-        summary: `${attacker.name} took ${recoil_damage} recoil`,
-        data: { slot: player_slot, damage: recoil_damage, target: attacker.id }
-      });
-      if (recoil_result.before > 0 && recoil_result.after === 0) {
-        log.push({
-          type: "faint",
-          turn: state.turn,
-          phase: spec.phaseId,
-          summary: `${attacker.name} fainted`,
-          data: { slot: player_slot, target: attacker.id }
-        });
-      }
-    }
-  }
-
-  const choice_band_detail =
-    choice_band_active && damage_type !== "flat"
-      ? `; Choice Band ATK boost: ${attacker.attack} -> ${effective_attack}`
-      : "";
-
-  if (spec.id === "return") {
-    const detail = `Return: dmg = round(atk * (72 + 4*lvl) / def) = round(${effective_attack} * ${multiplier100} / ${effective_defense}) = ${raw_damage}; final=${final_damage}${
-      was_blocked ? " (blocked by Protect)" : ""
-    }${choice_band_detail}`;
-    log.push({
-      type: "move_detail",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: detail,
-      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
-    });
-  } else if (spec.id === "double_edge") {
-    const detail = `Double-Edge: dmg = round(atk*120/def) = round(${effective_attack}*120/${effective_defense}) = ${raw_damage}; final=${final_damage}${
-      was_blocked ? " (blocked by Protect)" : ""
-    }; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
-    log.push({
-      type: "move_detail",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: detail,
-      data: { move: spec.id, damage: final_damage, recoil: recoil_damage, blocked: was_blocked }
-    });
-  } else if (spec.id === "seismic_toss") {
-    const detail = `Seismic Toss: dmg = flat ${spec.flatDamage ?? 0} (ignores defense); final=${final_damage}${
-      was_blocked ? " (blocked by Protect)" : ""
-    }`;
-    log.push({
-      type: "move_detail",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: detail,
-      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
-    });
-  } else if (spec.id === "quick_attack") {
-    const detail = `Quick Attack: dmg = round(atk*66/def) = round(${effective_attack}*66/${effective_defense}) = ${raw_damage}; final=${final_damage}${
-      was_blocked ? " (blocked by Protect)" : ""
-    }; speed check ignored${choice_band_detail}`;
-    log.push({
-      type: "move_detail",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: detail,
-      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
-    });
-  }
-
-  handle_faint(state, log, other_slot(player_slot));
-  if (recoil_num > 0 && recoil_den > 0) {
-    handle_faint(state, log, player_slot);
-  }
+  apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn);
 }
 
 function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot, targetIndex: number): void {
@@ -1155,6 +1282,8 @@ export function resolve_turn(
   const next = clone_state(state);
   const log: EventLog[] = [];
   const hp_changed_this_turn = new WeakSet<MonsterState>();
+  const focus_punch_pending: Record<PlayerSlot, boolean> = { player1: false, player2: false };
+  const took_damage_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
 
   if (next.status !== "running") {
     return { state: next, log };
@@ -1214,7 +1343,16 @@ export function resolve_turn(
         }
         apply_switch(next, log, action.player, action.targetIndex);
       } else {
-        apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn);
+        apply_move(
+          next,
+          log,
+          action.player,
+          action.moveId,
+          action.moveIndex,
+          hp_changed_this_turn,
+          focus_punch_pending,
+          took_damage_this_turn
+        );
       }
 
       if (check_match_end(next, log)) {
@@ -1229,7 +1367,7 @@ export function resolve_turn(
   }
 
   if (!match_ended_in_main_phases) {
-    apply_end_turn_phase(next, log, hp_changed_this_turn);
+    apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
   }
   decrement_cooldowns(next);
   // Clear protect after the turn resolves (so next turn starts unprotected).

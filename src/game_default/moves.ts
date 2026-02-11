@@ -30,6 +30,7 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
     flatDamage: 35
   },
   { id: "leech_life", label: "Leech Life", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "focus_punch", label: "Focus Punch", phaseId: "attack_01", attackMultiplier100: 150 },
   { id: "pain_split", label: "Pain Split", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "screech", label: "Screech", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "taunt", label: "Taunt", phaseId: "attack_01", attackMultiplier100: 0 },
