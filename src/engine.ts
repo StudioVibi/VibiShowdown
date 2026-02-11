@@ -33,11 +33,6 @@ type Action =
   | { player: PlayerSlot; type: "move"; phase: string; moveId: MoveId; moveIndex: number }
   | { player: PlayerSlot; type: "wish"; phase: string };
 
-type AgilityPending = {
-  slot: PlayerSlot;
-  monster: MonsterState;
-};
-
 const INITIATIVE_WITHOUT_SPEED: Phase["initiative"] = ["attack", "hp", "defense"];
 
 function compare_action_initiative(state: GameState, phase: Phase, a: Action, b: Action): number {
@@ -338,8 +333,7 @@ function apply_move(
   player_slot: PlayerSlot,
   move_id: MoveId,
   move_index: number,
-  hp_changed: WeakSet<MonsterState>,
-  pending_agility: AgilityPending[]
+  hp_changed: WeakSet<MonsterState>
 ): void {
   const player = state.players[player_slot];
   const opponent = state.players[other_slot(player_slot)];
@@ -426,13 +420,28 @@ function apply_move(
   }
 
   if (spec.id === "agility") {
-    pending_agility.push({ slot: player_slot, monster: attacker });
+    const before_speed = attacker.speed;
+    attacker.speed = Math.max(1, mul_div_round(before_speed, 2, 1));
+    log.push({
+      type: "stat_mod",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} Agility success on ${attacker.name} (SPE ${before_speed} -> ${attacker.speed})`,
+      data: {
+        slot: player_slot,
+        target: attacker.id,
+        stat: "speed",
+        multiplier: 2,
+        before: before_speed,
+        after: attacker.speed
+      }
+    });
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Agility: pending (applies at end of turn)",
-      data: { move: spec.id, slot: player_slot, target: attacker.id }
+      summary: `Agility: user SPE x2 (${before_speed} -> ${attacker.speed})`,
+      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_speed, after: attacker.speed }
     });
     return;
   }
@@ -692,49 +701,6 @@ function apply_move(
   }
 }
 
-function resolve_agility(
-  state: GameState,
-  log: EventLog[],
-  pending_agility: AgilityPending[]
-): void {
-  for (const pending of pending_agility) {
-    const monster = pending.monster;
-    if (!is_alive(monster)) {
-      log.push({
-        type: "move_detail",
-        turn: state.turn,
-        phase: "attack_01",
-        summary: "Agility failed: user fainted",
-        data: { move: "agility", slot: pending.slot, target: monster.id }
-      });
-      continue;
-    }
-    const before_speed = monster.speed;
-    monster.speed = Math.max(1, monster.speed * 2);
-    log.push({
-      type: "stat_mod",
-      turn: state.turn,
-      phase: "attack_01",
-      summary: `${pending.slot} Agility success on ${monster.name} (SPE ${before_speed} -> ${monster.speed})`,
-      data: {
-        slot: pending.slot,
-        target: monster.id,
-        stat: "speed",
-        multiplier: 2,
-        before: before_speed,
-        after: monster.speed
-      }
-    });
-    log.push({
-      type: "move_detail",
-      turn: state.turn,
-      phase: "attack_01",
-      summary: `Agility: user SPE x2 (${before_speed} -> ${monster.speed})`,
-      data: { move: "agility", slot: pending.slot, target: monster.id, before: before_speed, after: monster.speed }
-    });
-  }
-}
-
 function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot, targetIndex: number): void {
   const player = state.players[player_slot];
   const activeIndex = player.activeIndex;
@@ -864,7 +830,6 @@ export function resolve_turn(
   const next = clone_state(state);
   const log: EventLog[] = [];
   const hp_changed_this_turn = new WeakSet<MonsterState>();
-  const pending_agility: AgilityPending[] = [];
 
   if (next.status !== "running") {
     return { state: next, log };
@@ -906,7 +871,7 @@ export function resolve_turn(
       } else if (action.type === "wish") {
         apply_pending_wish(next, log, action.player, hp_changed_this_turn);
       } else {
-        apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn, pending_agility);
+        apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn);
       }
 
       if (!any_alive(next.players.player1)) {
@@ -939,7 +904,6 @@ export function resolve_turn(
   }
 
   apply_passives(next, log, hp_changed_this_turn);
-  resolve_agility(next, log, pending_agility);
   decrement_cooldowns(next);
   // Clear protect after the turn resolves (so next turn starts unprotected).
   reset_protect_flags(next);

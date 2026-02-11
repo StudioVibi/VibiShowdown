@@ -2410,7 +2410,7 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
   }
   return { before, after, applied: before - after };
 }
-function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pending_agility) {
+function apply_move(state, log, player_slot, move_id, move_index, hp_changed) {
   const player = state.players[player_slot];
   const opponent = state.players[other_slot(player_slot)];
   const attacker = active_monster(player);
@@ -2489,13 +2489,28 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
     return;
   }
   if (spec.id === "agility") {
-    pending_agility.push({ slot: player_slot, monster: attacker });
+    const before_speed = attacker.speed;
+    attacker.speed = Math.max(1, mul_div_round(before_speed, 2, 1));
+    log.push({
+      type: "stat_mod",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} Agility success on ${attacker.name} (SPE ${before_speed} -> ${attacker.speed})`,
+      data: {
+        slot: player_slot,
+        target: attacker.id,
+        stat: "speed",
+        multiplier: 2,
+        before: before_speed,
+        after: attacker.speed
+      }
+    });
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Agility: pending (applies at end of turn)",
-      data: { move: spec.id, slot: player_slot, target: attacker.id }
+      summary: `Agility: user SPE x2 (${before_speed} -> ${attacker.speed})`,
+      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_speed, after: attacker.speed }
     });
     return;
   }
@@ -2714,44 +2729,6 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, pe
     handle_faint(state, log, player_slot);
   }
 }
-function resolve_agility(state, log, pending_agility) {
-  for (const pending of pending_agility) {
-    const monster = pending.monster;
-    if (!is_alive(monster)) {
-      log.push({
-        type: "move_detail",
-        turn: state.turn,
-        phase: "attack_01",
-        summary: "Agility failed: user fainted",
-        data: { move: "agility", slot: pending.slot, target: monster.id }
-      });
-      continue;
-    }
-    const before_speed = monster.speed;
-    monster.speed = Math.max(1, monster.speed * 2);
-    log.push({
-      type: "stat_mod",
-      turn: state.turn,
-      phase: "attack_01",
-      summary: `${pending.slot} Agility success on ${monster.name} (SPE ${before_speed} -> ${monster.speed})`,
-      data: {
-        slot: pending.slot,
-        target: monster.id,
-        stat: "speed",
-        multiplier: 2,
-        before: before_speed,
-        after: monster.speed
-      }
-    });
-    log.push({
-      type: "move_detail",
-      turn: state.turn,
-      phase: "attack_01",
-      summary: `Agility: user SPE x2 (${before_speed} -> ${monster.speed})`,
-      data: { move: "agility", slot: pending.slot, target: monster.id, before: before_speed, after: monster.speed }
-    });
-  }
-}
 function apply_switch(state, log, player_slot, targetIndex) {
   const player = state.players[player_slot];
   const activeIndex = player.activeIndex;
@@ -2871,7 +2848,6 @@ function resolve_turn(state, intents) {
   const next = clone_state(state);
   const log = [];
   const hp_changed_this_turn = new WeakSet;
-  const pending_agility = [];
   if (next.status !== "running") {
     return { state: next, log };
   }
@@ -2907,7 +2883,7 @@ function resolve_turn(state, intents) {
       } else if (action.type === "wish") {
         apply_pending_wish(next, log, action.player, hp_changed_this_turn);
       } else {
-        apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn, pending_agility);
+        apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn);
       }
       if (!any_alive(next.players.player1)) {
         next.status = "ended";
@@ -2937,7 +2913,6 @@ function resolve_turn(state, intents) {
     }
   }
   apply_passives(next, log, hp_changed_this_turn);
-  resolve_agility(next, log, pending_agility);
   decrement_cooldowns(next);
   reset_protect_flags(next);
   return { state: next, log };
