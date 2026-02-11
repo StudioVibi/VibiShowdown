@@ -7,11 +7,10 @@ Regra base
 Leech Life (decisao de design)
 - Quando aplicado, cria:
   - debuff no alvo (perde HP por turno)
-  - buff no caster (ganha HP com base no alvo)
+  - efeito de cura no lado de quem aplicou (mon ativo ganha HP com base no alvo)
 - O tick acontece no fim do turno e ja pode procar no turno de aplicacao.
 - Se o alvo trocar: os dois efeitos acabam.
-- Se o caster trocar: so o buff de cura do caster acaba.
-- Com caster trocado, o alvo continua perdendo HP ate ele mesmo trocar.
+- Se quem aplicou trocar: o efeito continua e a cura vai para o novo mon ativo daquele lado.
 - Se o mon alvo voltar depois, volta sem semente.
 
 Objetivo
