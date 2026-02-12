@@ -1728,12 +1728,12 @@ function update_action_controls(): void {
 
   const active_id = selected[0];
   const config = get_config(active_id);
-  let protect_on_cooldown = false;
+  let guard_on_cooldown = false;
   let choice_band_locked_move: number | null = null;
   let active_moves = config.moves;
   if (latest_state && slot) {
     const active_state = latest_state.players[slot].team[latest_state.players[slot].activeIndex];
-    protect_on_cooldown = active_state.protectCooldownTurns > 0;
+    guard_on_cooldown = Math.max(active_state.protectCooldownTurns, active_state.endureCooldownTurns) > 0;
     active_moves = active_state.chosenMoves;
     if (active_state.chosenPassive === "choice_band") {
       choice_band_locked_move =
@@ -1748,8 +1748,11 @@ function update_action_controls(): void {
     if (locked_by_choice_band) {
       btn.textContent = `${index + 1}. ${label} (Choice Band lock)`;
       btn.disabled = true;
-    } else if (move === "protect" && protect_on_cooldown) {
+    } else if (move === "protect" && guard_on_cooldown) {
       btn.textContent = is_locked_slot ? `${index + 1}. Protect (cooldown, locked)` : `${index + 1}. Protect (cooldown)`;
+      btn.disabled = true;
+    } else if (move === "endure" && guard_on_cooldown) {
+      btn.textContent = is_locked_slot ? `${index + 1}. Endure (cooldown, locked)` : `${index + 1}. Endure (cooldown)`;
       btn.disabled = true;
     } else {
       btn.textContent = is_locked_slot ? `${index + 1}. ${label} (locked)` : `${index + 1}. ${label}`;

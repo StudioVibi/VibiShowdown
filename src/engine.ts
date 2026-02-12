@@ -115,7 +115,8 @@ function clone_monster(monster: MonsterState): MonsterState {
     protectActiveThisTurn: monster.protectActiveThisTurn,
     endureActiveThisTurn: monster.endureActiveThisTurn,
     choiceBandLockedMoveIndex: monster.choiceBandLockedMoveIndex,
-    protectCooldownTurns: monster.protectCooldownTurns
+    protectCooldownTurns: monster.protectCooldownTurns,
+    endureCooldownTurns: monster.endureCooldownTurns
   };
 }
 
@@ -246,8 +247,11 @@ function reset_protect_flags(state: GameState): void {
 function decrement_cooldowns(state: GameState): void {
   for_each_player(state, (player) => {
     for (const monster of player.team) {
-      if (monster.protectCooldownTurns > 0) {
-        monster.protectCooldownTurns -= 1;
+      const guard_cooldown = Math.max(monster.protectCooldownTurns, monster.endureCooldownTurns);
+      if (guard_cooldown > 0) {
+        const next_guard_cooldown = guard_cooldown - 1;
+        monster.protectCooldownTurns = next_guard_cooldown;
+        monster.endureCooldownTurns = next_guard_cooldown;
       }
     }
   });
@@ -866,7 +870,8 @@ function apply_move(
   }
 
   if (spec.id === "protect") {
-    if (attacker.protectCooldownTurns > 0) {
+    const guard_cooldown = Math.max(attacker.protectCooldownTurns, attacker.endureCooldownTurns);
+    if (guard_cooldown > 0) {
       log.push({
         type: "protect_blocked",
         turn: state.turn,
@@ -878,6 +883,7 @@ function apply_move(
     }
     attacker.protectActiveThisTurn = true;
     attacker.protectCooldownTurns = 2;
+    attacker.endureCooldownTurns = 2;
     log.push({
       type: "protect",
       turn: state.turn,
@@ -889,7 +895,20 @@ function apply_move(
   }
 
   if (spec.id === "endure") {
+    const guard_cooldown = Math.max(attacker.protectCooldownTurns, attacker.endureCooldownTurns);
+    if (guard_cooldown > 0) {
+      log.push({
+        type: "endure_blocked",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `${player_slot} tried Endure but is on cooldown`,
+        data: { slot: player_slot }
+      });
+      return;
+    }
     attacker.endureActiveThisTurn = true;
+    attacker.protectCooldownTurns = 2;
+    attacker.endureCooldownTurns = 2;
     log.push({
       type: "endure",
       turn: state.turn,
@@ -1294,7 +1313,8 @@ export function create_initial_state(
         protectActiveThisTurn: false,
         endureActiveThisTurn: false,
         choiceBandLockedMoveIndex: null,
-        protectCooldownTurns: 0
+        protectCooldownTurns: 0,
+        endureCooldownTurns: 0
       };
     });
     return {
@@ -1415,7 +1435,7 @@ export function resolve_turn(
     apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
   }
   decrement_cooldowns(next);
-  // Clear protect after the turn resolves (so next turn starts unprotected).
+  // Clear guard flags after the turn resolves (so next turn starts unprotected/not-enduring).
   reset_protect_flags(next);
 
   return { state: next, log };
@@ -1495,11 +1515,15 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
   }
 
   const moveId = active.chosenMoves[intent.moveIndex] ?? "none";
+  const guard_cooldown = Math.max(active.protectCooldownTurns, active.endureCooldownTurns);
   if (taunted && !is_attack_move(move_spec(moveId))) {
     return "taunted: must use attack";
   }
-  if (moveId === "protect" && active.protectCooldownTurns > 0) {
+  if (moveId === "protect" && guard_cooldown > 0) {
     return "protect on cooldown";
+  }
+  if (moveId === "endure" && guard_cooldown > 0) {
+    return "endure on cooldown";
   }
 
   return null;

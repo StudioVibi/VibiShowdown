@@ -56,6 +56,7 @@ export type MonsterState = {
   endureActiveThisTurn: boolean;
   choiceBandLockedMoveIndex: number | null;
   protectCooldownTurns: number;
+  endureCooldownTurns: number;
 };
 
 export type PlayerState = {

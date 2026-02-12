@@ -2305,7 +2305,8 @@ function clone_monster(monster) {
     protectActiveThisTurn: monster.protectActiveThisTurn,
     endureActiveThisTurn: monster.endureActiveThisTurn,
     choiceBandLockedMoveIndex: monster.choiceBandLockedMoveIndex,
-    protectCooldownTurns: monster.protectCooldownTurns
+    protectCooldownTurns: monster.protectCooldownTurns,
+    endureCooldownTurns: monster.endureCooldownTurns
   };
 }
 function empty_pending() {
@@ -2415,8 +2416,11 @@ function reset_protect_flags(state) {
 function decrement_cooldowns(state) {
   for_each_player(state, (player) => {
     for (const monster of player.team) {
-      if (monster.protectCooldownTurns > 0) {
-        monster.protectCooldownTurns -= 1;
+      const guard_cooldown = Math.max(monster.protectCooldownTurns, monster.endureCooldownTurns);
+      if (guard_cooldown > 0) {
+        const next_guard_cooldown = guard_cooldown - 1;
+        monster.protectCooldownTurns = next_guard_cooldown;
+        monster.endureCooldownTurns = next_guard_cooldown;
       }
     }
   });
@@ -2924,7 +2928,8 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     return;
   }
   if (spec.id === "protect") {
-    if (attacker.protectCooldownTurns > 0) {
+    const guard_cooldown = Math.max(attacker.protectCooldownTurns, attacker.endureCooldownTurns);
+    if (guard_cooldown > 0) {
       log.push({
         type: "protect_blocked",
         turn: state.turn,
@@ -2936,6 +2941,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     }
     attacker.protectActiveThisTurn = true;
     attacker.protectCooldownTurns = 2;
+    attacker.endureCooldownTurns = 2;
     log.push({
       type: "protect",
       turn: state.turn,
@@ -2946,7 +2952,20 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     return;
   }
   if (spec.id === "endure") {
+    const guard_cooldown = Math.max(attacker.protectCooldownTurns, attacker.endureCooldownTurns);
+    if (guard_cooldown > 0) {
+      log.push({
+        type: "endure_blocked",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `${player_slot} tried Endure but is on cooldown`,
+        data: { slot: player_slot }
+      });
+      return;
+    }
     attacker.endureActiveThisTurn = true;
+    attacker.protectCooldownTurns = 2;
+    attacker.endureCooldownTurns = 2;
     log.push({
       type: "endure",
       turn: state.turn,
@@ -3326,7 +3345,8 @@ function create_initial_state(teams, names) {
         protectActiveThisTurn: false,
         endureActiveThisTurn: false,
         choiceBandLockedMoveIndex: null,
-        protectCooldownTurns: 0
+        protectCooldownTurns: 0,
+        endureCooldownTurns: 0
       };
     });
     return {
@@ -3489,11 +3509,15 @@ function validate_intent(state, slot, intent) {
     return "choice band locked";
   }
   const moveId = active.chosenMoves[intent.moveIndex] ?? "none";
+  const guard_cooldown = Math.max(active.protectCooldownTurns, active.endureCooldownTurns);
   if (taunted && !is_attack_move(move_spec(moveId))) {
     return "taunted: must use attack";
   }
-  if (moveId === "protect" && active.protectCooldownTurns > 0) {
+  if (moveId === "protect" && guard_cooldown > 0) {
     return "protect on cooldown";
+  }
+  if (moveId === "endure" && guard_cooldown > 0) {
+    return "endure on cooldown";
   }
   return null;
 }
@@ -4993,12 +5017,12 @@ function update_action_controls() {
   }
   const active_id = selected[0];
   const config = get_config(active_id);
-  let protect_on_cooldown = false;
+  let guard_on_cooldown = false;
   let choice_band_locked_move = null;
   let active_moves = config.moves;
   if (latest_state && slot) {
     const active_state = latest_state.players[slot].team[latest_state.players[slot].activeIndex];
-    protect_on_cooldown = active_state.protectCooldownTurns > 0;
+    guard_on_cooldown = Math.max(active_state.protectCooldownTurns, active_state.endureCooldownTurns) > 0;
     active_moves = active_state.chosenMoves;
     if (active_state.chosenPassive === "choice_band") {
       choice_band_locked_move = typeof active_state.choiceBandLockedMoveIndex === "number" ? active_state.choiceBandLockedMoveIndex : null;
@@ -5012,8 +5036,11 @@ function update_action_controls() {
     if (locked_by_choice_band) {
       btn.textContent = `${index + 1}. ${label} (Choice Band lock)`;
       btn.disabled = true;
-    } else if (move === "protect" && protect_on_cooldown) {
+    } else if (move === "protect" && guard_on_cooldown) {
       btn.textContent = is_locked_slot ? `${index + 1}. Protect (cooldown, locked)` : `${index + 1}. Protect (cooldown)`;
+      btn.disabled = true;
+    } else if (move === "endure" && guard_on_cooldown) {
+      btn.textContent = is_locked_slot ? `${index + 1}. Endure (cooldown, locked)` : `${index + 1}. Endure (cooldown)`;
       btn.disabled = true;
     } else {
       btn.textContent = is_locked_slot ? `${index + 1}. ${label} (locked)` : `${index + 1}. ${label}`;
