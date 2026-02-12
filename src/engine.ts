@@ -97,15 +97,25 @@ function compare_actions_for_phase(state: GameState, phase: Phase, a: Action, b:
 }
 
 function clone_monster(monster: MonsterState): MonsterState {
+  const base_attack = Number.isFinite(monster.baseAttack) ? monster.baseAttack : monster.attack;
+  const base_defense = Number.isFinite(monster.baseDefense) ? monster.baseDefense : monster.defense;
+  const base_speed = Number.isFinite(monster.baseSpeed) ? monster.baseSpeed : monster.speed;
   return {
     id: monster.id,
     name: monster.name,
     hp: monster.hp,
     maxHp: monster.maxHp,
     level: monster.level,
+    baseAttack: base_attack,
+    baseDefense: base_defense,
+    baseSpeed: base_speed,
     attack: monster.attack,
     defense: monster.defense,
     speed: monster.speed,
+    agilityBoostActive: !!monster.agilityBoostActive,
+    endureSpeedBoostActive: !!monster.endureSpeedBoostActive,
+    bellyDrumActive: !!monster.bellyDrumActive,
+    screechDebuffActive: !!monster.screechDebuffActive,
     possibleMoves: monster.possibleMoves.slice(),
     possiblePassives: monster.possiblePassives.slice(),
     chosenMoves: monster.chosenMoves.slice(),
@@ -563,6 +573,7 @@ function apply_damage_with_endure(
 
       const speed_before = monster.speed;
       monster.speed = Math.max(1, mul_div_round(speed_before, 3, 2));
+      monster.endureSpeedBoostActive = true;
       log.push({
         type: "endure_trigger",
         turn: state.turn,
@@ -952,6 +963,7 @@ function apply_move(
   if (spec.id === "agility") {
     const before_speed = attacker.speed;
     attacker.speed = Math.max(1, mul_div_round(before_speed, 2, 1));
+    attacker.agilityBoostActive = true;
     log.push({
       type: "stat_mod",
       turn: state.turn,
@@ -994,12 +1006,24 @@ function apply_move(
 
   if (spec.id === "belly_drum") {
     const before_hp = attacker.hp;
+    if (before_hp * 2 <= attacker.maxHp) {
+      log.push({
+        type: "belly_drum_failed",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `${player_slot} used Belly Drum but failed (${attacker.name} HP ${before_hp}/${attacker.maxHp})`,
+        data: { slot: player_slot, target: attacker.id, move: spec.id, hp: before_hp, maxHp: attacker.maxHp, reason: "hp_not_above_half" }
+      });
+      return;
+    }
+
     const before_attack = attacker.attack;
-    const hp_cost = Math.max(1, mul_div_floor(attacker.maxHp, 1, 2));
-    const after_hp = Math.max(1, before_hp - hp_cost);
+    const hp_cost = mul_div_floor(before_hp, 1, 2);
+    const after_hp = Math.max(0, before_hp - hp_cost);
     const after_attack = Math.max(0, mul_div_round(before_attack, 2, 1));
     attacker.hp = after_hp;
     attacker.attack = after_attack;
+    attacker.bellyDrumActive = true;
 
     const hp_spent = Math.max(0, before_hp - after_hp);
     if (hp_spent > 0) {
@@ -1031,7 +1055,7 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Belly Drum: user paga 50% do maxHp (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
+      summary: `Belly Drum: user paga floor(HP atual/2) (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
       data: {
         move: spec.id,
         slot: player_slot,
@@ -1039,7 +1063,7 @@ function apply_move(
         hpBefore: before_hp,
         hpAfter: after_hp,
         hpCost: hp_cost,
-        hpCostBasedOn: "maxHp",
+        hpCostBasedOn: "currentHp",
         attackBefore: before_attack,
         attackAfter: after_attack
       }
@@ -1102,6 +1126,7 @@ function apply_move(
     const before_defense = defender.defense;
     const after_defense = Math.max(1, mul_div_floor(before_defense, 1, 2));
     defender.defense = after_defense;
+    defender.screechDebuffActive = true;
     log.push({
       type: "stat_mod",
       turn: state.turn,
@@ -1232,8 +1257,16 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
     });
     return;
   }
+  const outgoing = player.team[activeIndex];
+  outgoing.attack = outgoing.baseAttack;
+  outgoing.defense = outgoing.baseDefense;
+  outgoing.speed = outgoing.baseSpeed;
+  outgoing.agilityBoostActive = false;
+  outgoing.endureSpeedBoostActive = false;
+  outgoing.bellyDrumActive = false;
+  outgoing.screechDebuffActive = false;
   clear_leech_seed_on_target_switch(state, log, player_slot);
-  player.team[activeIndex].choiceBandLockedMoveIndex = null;
+  outgoing.choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   log.push({
     type: "switch",
@@ -1320,9 +1353,16 @@ export function create_initial_state(
         hp: final_stats.hpMax,
         maxHp: final_stats.hpMax,
         level,
+        baseAttack: final_stats.atk,
+        baseDefense: final_stats.def,
+        baseSpeed: final_stats.spe,
         attack: final_stats.atk,
         defense: final_stats.def,
         speed: final_stats.spe,
+        agilityBoostActive: false,
+        endureSpeedBoostActive: false,
+        bellyDrumActive: false,
+        screechDebuffActive: false,
         possibleMoves: monster.moves.slice(),
         possiblePassives: [monster.passive],
         chosenMoves: monster.moves.slice(0, 4),
@@ -1479,8 +1519,16 @@ export function apply_forced_switch(
     return { state: next, log, error: "target fainted" };
   }
   const from = player.activeIndex;
+  const outgoing = player.team[from];
+  outgoing.attack = outgoing.baseAttack;
+  outgoing.defense = outgoing.baseDefense;
+  outgoing.speed = outgoing.baseSpeed;
+  outgoing.agilityBoostActive = false;
+  outgoing.endureSpeedBoostActive = false;
+  outgoing.bellyDrumActive = false;
+  outgoing.screechDebuffActive = false;
   clear_leech_seed_on_target_switch(next, log, slot);
-  player.team[from].choiceBandLockedMoveIndex = null;
+  outgoing.choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   next.pendingSwitch[slot] = false;
   log.push({

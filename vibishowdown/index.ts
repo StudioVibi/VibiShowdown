@@ -2138,7 +2138,7 @@ function log_events(log: EventLog[]): void {
   }
 }
 
-function effect_chip(label: string, kind: "seeded" | "drain"): HTMLSpanElement {
+function effect_chip(label: string, kind: "seeded" | "drain" | "buff" | "debuff" | "passive"): HTMLSpanElement {
   const chip = document.createElement("span");
   chip.className = `effect-chip ${kind}`;
   const dot = document.createElement("span");
@@ -2154,6 +2154,8 @@ function render_effects(
   player_slot: PlayerSlot,
   enemy_slot: PlayerSlot
 ): void {
+  const player_active = state.players[player_slot].team[state.players[player_slot].activeIndex];
+  const enemy_active = state.players[enemy_slot].team[state.players[enemy_slot].activeIndex];
   const player_seeded_by = state.leechSeedSourceByTarget?.[player_slot] ?? null;
   const enemy_seeded_by = state.leechSeedSourceByTarget?.[enemy_slot] ?? null;
   const player_seeded = state.leechSeedActiveByTarget?.[player_slot] ?? !!player_seeded_by;
@@ -2170,6 +2172,21 @@ function render_effects(
     if (enemy_seeded_by === viewer_slot) {
       player_effects.appendChild(effect_chip("Leech+", "drain"));
     }
+    if (enemy_active.screechDebuffActive) {
+      player_effects.appendChild(effect_chip("Screech (enemyDEF 0.5)", "debuff"));
+    }
+    if (player_active.agilityBoostActive) {
+      player_effects.appendChild(effect_chip("Agility (mySPE 2)", "buff"));
+    }
+    if (player_active.endureSpeedBoostActive) {
+      player_effects.appendChild(effect_chip("Endure (mySPE 1.5)", "buff"));
+    }
+    if (player_active.bellyDrumActive) {
+      player_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 2)", "buff"));
+    }
+    if (normalize_passive_id(player_active.chosenPassive) === "choice_band") {
+      player_effects.appendChild(effect_chip("Choice Band (myATK 1.5)", "passive"));
+    }
   }
 
   if (enemy_effects) {
@@ -2179,6 +2196,21 @@ function render_effects(
     }
     if (player_seeded_by === enemy_slot) {
       enemy_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+    if (player_active.screechDebuffActive) {
+      enemy_effects.appendChild(effect_chip("Screech (enemyDEF 0.5)", "debuff"));
+    }
+    if (enemy_active.agilityBoostActive) {
+      enemy_effects.appendChild(effect_chip("Agility (mySPE 2)", "buff"));
+    }
+    if (enemy_active.endureSpeedBoostActive) {
+      enemy_effects.appendChild(effect_chip("Endure (mySPE 1.5)", "buff"));
+    }
+    if (enemy_active.bellyDrumActive) {
+      enemy_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 2)", "buff"));
+    }
+    if (normalize_passive_id(enemy_active.chosenPassive) === "choice_band") {
+      enemy_effects.appendChild(effect_chip("Choice Band (myATK 1.5)", "passive"));
     }
   }
 }

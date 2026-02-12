@@ -39,9 +39,16 @@ export type MonsterState = {
   hp: number;
   maxHp: number;
   level: number;
+  baseAttack: number;
+  baseDefense: number;
+  baseSpeed: number;
   attack: number;
   defense: number;
   speed: number;
+  agilityBoostActive: boolean;
+  endureSpeedBoostActive: boolean;
+  bellyDrumActive: boolean;
+  screechDebuffActive: boolean;
   possibleMoves: MoveId[];
   possiblePassives: PassiveId[];
   chosenMoves: MoveId[];
