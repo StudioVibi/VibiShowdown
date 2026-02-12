@@ -1506,7 +1506,7 @@ function render_config(): void {
 
   const column_header = document.createElement("div");
   column_header.className = "stat-alloc-header";
-  for (const heading of ["", "Base", "EV's", "Slider", "Total"]) {
+  for (const heading of ["", "Base", "EV's", "", "Total"]) {
     const header_cell = document.createElement("span");
     header_cell.className = "stat-alloc-header-cell";
     if (heading.length === 0) {
