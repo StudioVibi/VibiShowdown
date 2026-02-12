@@ -4941,8 +4941,30 @@ function render_config() {
     const result_value = document.createElement("span");
     result_value.className = "stat-result-value";
     result_value.textContent = `${calc_total_stat(key)}`;
-    const apply_allocation_value = (next_raw) => {
+    const max_ev_for_key = () => {
+      const used_without_current = ev_total(config.ev) - config.ev[key];
+      return Math.min(EV_PER_STAT_MAX, Math.max(0, EV_TOTAL_MAX - used_without_current));
+    };
+    const apply_allocation_value = (next_raw, source) => {
       const current = config.ev[key];
+      if (!Number.isFinite(next_raw)) {
+        alloc_input.value = `${current}`;
+        alloc_slider.value = `${current}`;
+        return;
+      }
+      if (source === "slider") {
+        const clamped = Math.max(0, Math.min(max_ev_for_key(), Math.floor(next_raw)));
+        const candidate2 = { ...config.ev, [key]: clamped };
+        config.ev = candidate2;
+        config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
+        alloc_input.value = `${clamped}`;
+        alloc_slider.value = `${clamped}`;
+        result_value.textContent = `${calc_total_stat(key)}`;
+        clear_warning();
+        update_points_summary();
+        save_profile();
+        return;
+      }
       if (!Number.isInteger(next_raw)) {
         show_warning(`EV ${key} must be integer.`);
         alloc_input.value = `${current}`;
@@ -4974,12 +4996,12 @@ function render_config() {
         alloc_input.value = `${config.ev[key]}`;
         return;
       }
-      apply_allocation_value(value);
+      apply_allocation_value(value, "input");
     });
     alloc_slider.addEventListener("input", () => {
       if (is_ready && !match_started)
         return;
-      apply_allocation_value(Number(alloc_slider.value));
+      apply_allocation_value(Number(alloc_slider.value), "slider");
     });
     row.appendChild(stat_name);
     row.appendChild(base_value);
