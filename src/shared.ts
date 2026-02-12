@@ -9,8 +9,6 @@ export type EVSpread = {
   hp: number;
   atk: number;
   def: number;
-  spa: number;
-  spd: number;
   spe: number;
 };
 
@@ -19,8 +17,6 @@ export type Stats = {
   maxHp: number;
   attack: number;
   defense: number;
-  spAttack: number;
-  spDefense: number;
   speed: number;
 };
 
@@ -45,8 +41,6 @@ export type MonsterState = {
   level: number;
   attack: number;
   defense: number;
-  spAttack: number;
-  spDefense: number;
   speed: number;
   possibleMoves: MoveId[];
   possiblePassives: PassiveId[];

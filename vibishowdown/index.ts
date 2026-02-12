@@ -42,7 +42,7 @@ type Profile = {
 };
 
 type EVStatKey = keyof EVSpread;
-const EV_KEYS: EVStatKey[] = ["hp", "atk", "def", "spa", "spd", "spe"];
+const EV_KEYS: EVStatKey[] = ["hp", "atk", "def", "spe"];
 
 type TooltipValueState = "up" | "down" | "neutral";
 
@@ -778,8 +778,6 @@ function passive_label(id: string): string {
 function stat_label(value: unknown): string {
   if (value === "attack") return "ATK";
   if (value === "defense") return "DEF";
-  if (value === "spAttack" || value === "spa") return "SPA";
-  if (value === "spDefense" || value === "spd") return "SPD";
   if (value === "speed") return "SPE";
   if (value === "hp" || value === "maxHp") return "HP";
   if (typeof value === "string" && value.trim()) return value.trim().toUpperCase();
@@ -1174,8 +1172,6 @@ function normalize_ev_spread(value: unknown, fallback: EVSpread = empty_ev_sprea
     hp: read_ev_value(source.hp, fallback.hp),
     atk: read_ev_value(source.atk, fallback.atk),
     def: read_ev_value(source.def, fallback.def),
-    spa: read_ev_value(source.spa, fallback.spa),
-    spd: read_ev_value(source.spd, fallback.spd),
     spe: read_ev_value(source.spe, fallback.spe)
   };
 }
@@ -1190,8 +1186,6 @@ function normalize_legacy_ev_from_stat_alloc(value: unknown): EVSpread | null {
     hp: read_ev_value(source.maxHp, 0),
     atk: read_ev_value(source.attack, 0),
     def: read_ev_value(source.defense, 0),
-    spa: 0,
-    spd: 0,
     spe: read_ev_value(source.speed, 0)
   };
 }
@@ -1202,8 +1196,6 @@ function stats_from_base_level_ev(base: Stats, level: number, ev: EVSpread): Sta
       hp: base.maxHp,
       atk: base.attack,
       def: base.defense,
-      spa: base.spAttack,
-      spd: base.spDefense,
       spe: base.speed
     },
     level,
@@ -1214,8 +1206,6 @@ function stats_from_base_level_ev(base: Stats, level: number, ev: EVSpread): Sta
     maxHp: final.hpMax,
     attack: final.atk,
     defense: final.def,
-    spAttack: final.spa,
-    spDefense: final.spd,
     speed: final.spe
   };
 }
@@ -1227,8 +1217,6 @@ function normalize_stats(value: Partial<Stats> | undefined, fallback: Stats): St
     maxHp: normalize_stat_value("maxHp", source.maxHp, fallback.maxHp),
     attack: normalize_stat_value("attack", source.attack, fallback.attack),
     defense: normalize_stat_value("defense", source.defense, fallback.defense),
-    spAttack: normalize_stat_value("spAttack", source.spAttack, fallback.spAttack),
-    spDefense: normalize_stat_value("spDefense", source.spDefense, fallback.spDefense),
     speed: normalize_stat_value("speed", source.speed, fallback.speed)
   };
 }
@@ -1239,8 +1227,6 @@ function stats_equal(left: Stats, right: Stats): boolean {
     left.maxHp === right.maxHp &&
     left.attack === right.attack &&
     left.defense === right.defense &&
-    left.spAttack === right.spAttack &&
-    left.spDefense === right.spDefense &&
     left.speed === right.speed
   );
 }
@@ -1250,8 +1236,6 @@ function ev_equal(left: EVSpread, right: EVSpread): boolean {
     left.hp === right.hp &&
     left.atk === right.atk &&
     left.def === right.def &&
-    left.spa === right.spa &&
-    left.spd === right.spd &&
     left.spe === right.spe
   );
 }
@@ -1521,16 +1505,12 @@ function render_config(): void {
     ["hp", "HP"],
     ["atk", "ATK"],
     ["def", "DEF"],
-    ["spa", "SPA"],
-    ["spd", "SPD"],
     ["spe", "SPE"]
   ];
   const stat_key_by_ev: Record<EVStatKey, keyof Stats> = {
     hp: "maxHp",
     atk: "attack",
     def: "defense",
-    spa: "spAttack",
-    spd: "spDefense",
     spe: "speed"
   };
   const controls: Array<{ key: EVStatKey; totalInput: HTMLInputElement; input: HTMLInputElement; slider: HTMLInputElement }> =

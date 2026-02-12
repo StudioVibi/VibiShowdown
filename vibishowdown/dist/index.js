@@ -2029,7 +2029,7 @@ var MONSTER_ROSTER = [
     id: "babydragon",
     name: "Baby Dragon",
     role: "Snorlax",
-    stats: { level: 100, maxHp: 575, attack: 438, defense: 250, spAttack: 438, spDefense: 250, speed: 105 },
+    stats: { level: 100, maxHp: 575, attack: 438, defense: 250, speed: 105 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2039,7 +2039,7 @@ var MONSTER_ROSTER = [
     id: "croni",
     name: "Croni",
     role: "Ninjask",
-    stats: { level: 100, maxHp: 163, attack: 355, defense: 167, spAttack: 355, spDefense: 167, speed: 646 },
+    stats: { level: 100, maxHp: 163, attack: 355, defense: 167, speed: 646 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2049,7 +2049,7 @@ var MONSTER_ROSTER = [
     id: "harpy",
     name: "Harpy",
     role: "Absol",
-    stats: { level: 100, maxHp: 180, attack: 521, defense: 230, spAttack: 521, spDefense: 230, speed: 292 },
+    stats: { level: 100, maxHp: 180, attack: 521, defense: 230, speed: 292 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2059,7 +2059,7 @@ var MONSTER_ROSTER = [
     id: "hoof",
     name: "Hoof",
     role: "Chansey",
-    stats: { level: 100, maxHp: 950, attack: 0, defense: 0, spAttack: 0, spDefense: 0, speed: 188 },
+    stats: { level: 100, maxHp: 950, attack: 0, defense: 0, speed: 188 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2069,7 +2069,7 @@ var MONSTER_ROSTER = [
     id: "knight",
     name: "Knight",
     role: "Metagross",
-    stats: { level: 100, maxHp: 242, attack: 542, defense: 521, spAttack: 542, spDefense: 521, speed: 271 },
+    stats: { level: 100, maxHp: 242, attack: 542, defense: 521, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2079,7 +2079,7 @@ var MONSTER_ROSTER = [
     id: "miren",
     name: "Miren",
     role: "Celebi",
-    stats: { level: 100, maxHp: 325, attack: 396, defense: 396, spAttack: 396, spDefense: 396, speed: 396 },
+    stats: { level: 100, maxHp: 325, attack: 396, defense: 396, speed: 396 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2089,7 +2089,7 @@ var MONSTER_ROSTER = [
     id: "panda",
     name: "Panda",
     role: "Cloyster",
-    stats: { level: 100, maxHp: 117, attack: 375, defense: 730, spAttack: 375, spDefense: 730, speed: 271 },
+    stats: { level: 100, maxHp: 117, attack: 375, defense: 730, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2099,7 +2099,7 @@ var MONSTER_ROSTER = [
     id: "valkyria",
     name: "Valkyria",
     role: "Aerodactyl",
-    stats: { level: 100, maxHp: 242, attack: 417, defense: 250, spAttack: 417, spDefense: 250, speed: 521 },
+    stats: { level: 100, maxHp: 242, attack: 417, defense: 250, speed: 521 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2114,13 +2114,13 @@ var EV_TOTAL_MAX = 508;
 var LEVEL_MIN = 1;
 var LEVEL_MAX = 100;
 function empty_ev_spread() {
-  return { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
+  return { hp: 0, atk: 0, def: 0, spe: 0 };
 }
 function empty_iv_spread() {
-  return { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
+  return { hp: 0, atk: 0, def: 0, spe: 0 };
 }
 function neutral_nature() {
-  return { atk: 1, def: 1, spa: 1, spd: 1, spe: 1 };
+  return { atk: 1, def: 1, spe: 1 };
 }
 function ev_bonus(ev) {
   return Math.floor(ev / 4);
@@ -2130,8 +2130,6 @@ function validate_ev_spread(ev) {
     ["hp", ev.hp],
     ["atk", ev.atk],
     ["def", ev.def],
-    ["spa", ev.spa],
-    ["spd", ev.spd],
     ["spe", ev.spe]
   ];
   for (const [key, value] of values) {
@@ -2160,8 +2158,6 @@ function calc_final_stats(base, level, ev, iv = empty_iv_spread(), nature = neut
     hpMax: calc_hp_max(base.hp, level, ev.hp, iv.hp),
     atk: calc_non_hp_stat(base.atk, level, ev.atk, iv.atk, nature.atk),
     def: calc_non_hp_stat(base.def, level, ev.def, iv.def, nature.def),
-    spa: calc_non_hp_stat(base.spa, level, ev.spa, iv.spa, nature.spa),
-    spd: calc_non_hp_stat(base.spd, level, ev.spd, iv.spd, nature.spd),
     spe: calc_non_hp_stat(base.spe, level, ev.spe, iv.spe, nature.spe)
   };
 }
@@ -2208,16 +2204,12 @@ function assert_monster_integrity(monsters) {
     ensure_int(monster.stats.maxHp, `${monster.id}: maxHp must be integer`);
     ensure_int(monster.stats.attack, `${monster.id}: attack must be integer`);
     ensure_int(monster.stats.defense, `${monster.id}: defense must be integer`);
-    ensure_int(monster.stats.spAttack, `${monster.id}: spAttack must be integer`);
-    ensure_int(monster.stats.spDefense, `${monster.id}: spDefense must be integer`);
     ensure_int(monster.stats.speed, `${monster.id}: speed must be integer`);
     ensure(monster.stats.level > 0, `${monster.id}: level must be > 0`);
     ensure(monster.stats.level >= LEVEL_MIN && monster.stats.level <= LEVEL_MAX, `${monster.id}: level must be between ${LEVEL_MIN} and ${LEVEL_MAX}`);
     ensure(monster.stats.maxHp > 0, `${monster.id}: maxHp must be > 0`);
     ensure(monster.stats.attack >= 0, `${monster.id}: attack must be >= 0`);
     ensure(monster.stats.defense >= 0, `${monster.id}: defense must be >= 0`);
-    ensure(monster.stats.spAttack >= 0, `${monster.id}: spAttack must be >= 0`);
-    ensure(monster.stats.spDefense >= 0, `${monster.id}: spDefense must be >= 0`);
     ensure(monster.stats.speed >= 0, `${monster.id}: speed must be >= 0`);
   }
 }
@@ -2295,8 +2287,6 @@ function clone_monster(monster) {
     level: monster.level,
     attack: monster.attack,
     defense: monster.defense,
-    spAttack: monster.spAttack,
-    spDefense: monster.spDefense,
     speed: monster.speed,
     possibleMoves: monster.possibleMoves.slice(),
     possiblePassives: monster.possiblePassives.slice(),
@@ -3324,8 +3314,6 @@ function create_initial_state(teams, names) {
       hp: read_ev_component(source, "hp"),
       atk: read_ev_component(source, "atk"),
       def: read_ev_component(source, "def"),
-      spa: read_ev_component(source, "spa"),
-      spd: read_ev_component(source, "spd"),
       spe: read_ev_component(source, "spe")
     };
   };
@@ -3348,8 +3336,6 @@ function create_initial_state(teams, names) {
         hp: spec.stats.maxHp,
         atk: spec.stats.attack,
         def: spec.stats.defense,
-        spa: spec.stats.spAttack,
-        spd: spec.stats.spDefense,
         spe: spec.stats.speed
       }, level, ev);
       return {
@@ -3360,8 +3346,6 @@ function create_initial_state(teams, names) {
         level,
         attack: final_stats.atk,
         defense: final_stats.def,
-        spAttack: final_stats.spa,
-        spDefense: final_stats.spd,
         speed: final_stats.spe,
         possibleMoves: monster.moves.slice(),
         possiblePassives: [monster.passive],
@@ -3548,7 +3532,7 @@ function validate_intent(state, slot, intent) {
 }
 
 // vibishowdown/index.ts
-var EV_KEYS = ["hp", "atk", "def", "spa", "spd", "spe"];
+var EV_KEYS = ["hp", "atk", "def", "spe"];
 var PLAYER_SLOTS = ["player1", "player2"];
 var LAST_ROOM_KEY = "vibi_showdown_last_room";
 var LAST_PLAYER_NAME_KEY = "vibi_showdown_last_player_name";
@@ -4207,10 +4191,6 @@ function stat_label(value) {
     return "ATK";
   if (value === "defense")
     return "DEF";
-  if (value === "spAttack" || value === "spa")
-    return "SPA";
-  if (value === "spDefense" || value === "spd")
-    return "SPD";
   if (value === "speed")
     return "SPE";
   if (value === "hp" || value === "maxHp")
@@ -4563,8 +4543,6 @@ function normalize_ev_spread(value, fallback = empty_ev_spread()) {
     hp: read_ev_value(source.hp, fallback.hp),
     atk: read_ev_value(source.atk, fallback.atk),
     def: read_ev_value(source.def, fallback.def),
-    spa: read_ev_value(source.spa, fallback.spa),
-    spd: read_ev_value(source.spd, fallback.spd),
     spe: read_ev_value(source.spe, fallback.spe)
   };
 }
@@ -4576,8 +4554,6 @@ function normalize_legacy_ev_from_stat_alloc(value) {
     hp: read_ev_value(source.maxHp, 0),
     atk: read_ev_value(source.attack, 0),
     def: read_ev_value(source.defense, 0),
-    spa: 0,
-    spd: 0,
     spe: read_ev_value(source.speed, 0)
   };
 }
@@ -4586,8 +4562,6 @@ function stats_from_base_level_ev(base, level, ev) {
     hp: base.maxHp,
     atk: base.attack,
     def: base.defense,
-    spa: base.spAttack,
-    spd: base.spDefense,
     spe: base.speed
   }, level, ev);
   return {
@@ -4595,8 +4569,6 @@ function stats_from_base_level_ev(base, level, ev) {
     maxHp: final.hpMax,
     attack: final.atk,
     defense: final.def,
-    spAttack: final.spa,
-    spDefense: final.spd,
     speed: final.spe
   };
 }
@@ -4607,16 +4579,14 @@ function normalize_stats(value, fallback) {
     maxHp: normalize_stat_value("maxHp", source.maxHp, fallback.maxHp),
     attack: normalize_stat_value("attack", source.attack, fallback.attack),
     defense: normalize_stat_value("defense", source.defense, fallback.defense),
-    spAttack: normalize_stat_value("spAttack", source.spAttack, fallback.spAttack),
-    spDefense: normalize_stat_value("spDefense", source.spDefense, fallback.spDefense),
     speed: normalize_stat_value("speed", source.speed, fallback.speed)
   };
 }
 function stats_equal(left, right) {
-  return left.level === right.level && left.maxHp === right.maxHp && left.attack === right.attack && left.defense === right.defense && left.spAttack === right.spAttack && left.spDefense === right.spDefense && left.speed === right.speed;
+  return left.level === right.level && left.maxHp === right.maxHp && left.attack === right.attack && left.defense === right.defense && left.speed === right.speed;
 }
 function ev_equal(left, right) {
-  return left.hp === right.hp && left.atk === right.atk && left.def === right.def && left.spa === right.spa && left.spd === right.spd && left.spe === right.spe;
+  return left.hp === right.hp && left.atk === right.atk && left.def === right.def && left.spe === right.spe;
 }
 function coerce_config(spec, value) {
   const base_stats = normalize_stats(spec.stats, spec.stats);
@@ -4858,16 +4828,12 @@ function render_config() {
     ["hp", "HP"],
     ["atk", "ATK"],
     ["def", "DEF"],
-    ["spa", "SPA"],
-    ["spd", "SPD"],
     ["spe", "SPE"]
   ];
   const stat_key_by_ev = {
     hp: "maxHp",
     atk: "attack",
     def: "defense",
-    spa: "spAttack",
-    spd: "spDefense",
     spe: "speed"
   };
   const controls = [];

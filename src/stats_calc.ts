@@ -2,8 +2,6 @@ export type EVSpread = {
   hp: number;
   atk: number;
   def: number;
-  spa: number;
-  spd: number;
   spe: number;
 };
 
@@ -11,16 +9,12 @@ export type IVSpread = {
   hp: number;
   atk: number;
   def: number;
-  spa: number;
-  spd: number;
   spe: number;
 };
 
 export type NatureSpread = {
   atk: number;
   def: number;
-  spa: number;
-  spd: number;
   spe: number;
 };
 
@@ -28,8 +22,6 @@ export type BaseStats = {
   hp: number;
   atk: number;
   def: number;
-  spa: number;
-  spd: number;
   spe: number;
 };
 
@@ -37,8 +29,6 @@ export type FinalStats = {
   hpMax: number;
   atk: number;
   def: number;
-  spa: number;
-  spd: number;
   spe: number;
 };
 
@@ -48,15 +38,15 @@ export const LEVEL_MIN = 1;
 export const LEVEL_MAX = 100;
 
 export function empty_ev_spread(): EVSpread {
-  return { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
+  return { hp: 0, atk: 0, def: 0, spe: 0 };
 }
 
 export function empty_iv_spread(): IVSpread {
-  return { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
+  return { hp: 0, atk: 0, def: 0, spe: 0 };
 }
 
 export function neutral_nature(): NatureSpread {
-  return { atk: 1, def: 1, spa: 1, spd: 1, spe: 1 };
+  return { atk: 1, def: 1, spe: 1 };
 }
 
 export function ev_bonus(ev: number): number {
@@ -68,8 +58,6 @@ export function validate_ev_spread(ev: EVSpread): string | null {
     ["hp", ev.hp],
     ["atk", ev.atk],
     ["def", ev.def],
-    ["spa", ev.spa],
-    ["spd", ev.spd],
     ["spe", ev.spe]
   ];
   for (const [key, value] of values) {
@@ -107,8 +95,6 @@ export function calc_final_stats(
     hpMax: calc_hp_max(base.hp, level, ev.hp, iv.hp),
     atk: calc_non_hp_stat(base.atk, level, ev.atk, iv.atk, nature.atk),
     def: calc_non_hp_stat(base.def, level, ev.def, iv.def, nature.def),
-    spa: calc_non_hp_stat(base.spa, level, ev.spa, iv.spa, nature.spa),
-    spd: calc_non_hp_stat(base.spd, level, ev.spd, iv.spd, nature.spd),
     spe: calc_non_hp_stat(base.spe, level, ev.spe, iv.spe, nature.spe)
   };
 }

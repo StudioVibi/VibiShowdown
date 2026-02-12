@@ -105,8 +105,6 @@ function clone_monster(monster: MonsterState): MonsterState {
     level: monster.level,
     attack: monster.attack,
     defense: monster.defense,
-    spAttack: monster.spAttack,
-    spDefense: monster.spDefense,
     speed: monster.speed,
     possibleMoves: monster.possibleMoves.slice(),
     possiblePassives: monster.possiblePassives.slice(),
@@ -1287,8 +1285,6 @@ export function create_initial_state(
       hp: read_ev_component(source, "hp"),
       atk: read_ev_component(source, "atk"),
       def: read_ev_component(source, "def"),
-      spa: read_ev_component(source, "spa"),
-      spd: read_ev_component(source, "spd"),
       spe: read_ev_component(source, "spe")
     };
   };
@@ -1313,8 +1309,6 @@ export function create_initial_state(
           hp: spec.stats.maxHp,
           atk: spec.stats.attack,
           def: spec.stats.defense,
-          spa: spec.stats.spAttack,
-          spd: spec.stats.spDefense,
           spe: spec.stats.speed
         },
         level,
@@ -1328,8 +1322,6 @@ export function create_initial_state(
         level,
         attack: final_stats.atk,
         defense: final_stats.def,
-        spAttack: final_stats.spa,
-        spDefense: final_stats.spd,
         speed: final_stats.spe,
         possibleMoves: monster.moves.slice(),
         possiblePassives: [monster.passive],
