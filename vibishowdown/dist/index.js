@@ -3707,6 +3707,7 @@ var room_feed_started = false;
 var chat_ready = false;
 var forced_switch_target_index = null;
 var forced_switch_target_turn = 0;
+var room_game_count = 0;
 function icon_path(id) {
   return `./icons/unit_${id}.png`;
 }
@@ -4400,6 +4401,12 @@ function append_chat_user(name, message) {
 }
 function append_turn_marker(turn) {
   append_line(log_list, `turno ${turn}`, "log-turn");
+}
+function append_match_start_marker(game_number) {
+  append_line(log_list, `JOGO ${game_number}`, "log-match");
+}
+function append_match_end_marker() {
+  append_line(log_list, "FIM DE JOGO", "log-match");
 }
 function compact_slot_labels(text) {
   return text.replace(/\bplayer1\b/g, "P1").replace(/\bplayer2\b/g, "P2");
@@ -5352,6 +5359,10 @@ function handle_turn_start(data) {
   clear_forced_switch_target();
   status_turn.textContent = `${current_turn}`;
   update_deadline();
+  if (current_turn === 1) {
+    room_game_count += 1;
+    append_match_start_marker(room_game_count);
+  }
   append_turn_marker(current_turn);
   if (!has_pending_switch()) {
     close_switch_modal();
@@ -5681,6 +5692,9 @@ function handle_state(data) {
     log_events(data.log);
   }
   update_action_controls();
+  if (data.state.status === "ended" && prev_state?.status !== "ended") {
+    append_match_end_marker();
+  }
   if (data.state.status === "ended") {
     show_match_end(data.state.winner);
   }

@@ -252,6 +252,7 @@ let chat_ready = false;
 
 let forced_switch_target_index: number | null = null;
 let forced_switch_target_turn = 0;
+let room_game_count = 0;
 
 function icon_path(id: string): string {
   return `./icons/unit_${id}.png`;
@@ -1012,6 +1013,14 @@ function append_chat_user(name: string, message: string): void {
 
 function append_turn_marker(turn: number): void {
   append_line(log_list, `turno ${turn}`, "log-turn");
+}
+
+function append_match_start_marker(game_number: number): void {
+  append_line(log_list, `JOGO ${game_number}`, "log-match");
+}
+
+function append_match_end_marker(): void {
+  append_line(log_list, "FIM DE JOGO", "log-match");
 }
 
 function compact_slot_labels(text: string): string {
@@ -2084,6 +2093,10 @@ function handle_turn_start(data: { turn: number; deadline_at: number }): void {
   clear_forced_switch_target();
   status_turn.textContent = `${current_turn}`;
   update_deadline();
+  if (current_turn === 1) {
+    room_game_count += 1;
+    append_match_start_marker(room_game_count);
+  }
   append_turn_marker(current_turn);
   if (!has_pending_switch()) {
     close_switch_modal();
@@ -2452,6 +2465,9 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
     log_events(data.log);
   }
   update_action_controls();
+  if (data.state.status === "ended" && prev_state?.status !== "ended") {
+    append_match_end_marker();
+  }
   if (data.state.status === "ended") {
     show_match_end(data.state.winner);
   }
