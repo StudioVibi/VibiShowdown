@@ -1416,18 +1416,52 @@ function render_config(): void {
   const base_stats = normalize_stats(spec.stats, spec.stats);
   config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
 
+  let moves_changed = false;
+  const unique_moves = new Set<string>();
+  for (let i = 0; i < 4; i++) {
+    const move = config.moves[i] ?? "none";
+    if (move === "none") {
+      if (config.moves[i] !== "none") {
+        config.moves[i] = "none";
+        moves_changed = true;
+      }
+      continue;
+    }
+    if (unique_moves.has(move)) {
+      config.moves[i] = "none";
+      moves_changed = true;
+      continue;
+    }
+    unique_moves.add(move);
+  }
+  if (moves_changed) {
+    save_profile();
+  }
+
   for (let i = 0; i < 4; i++) {
     const label = document.createElement("label");
     label.textContent = `Move ${i + 1}`;
     const select = document.createElement("select");
     select.dataset.index = `${i}`;
+    const current_move = config.moves[i] ?? "none";
+    const used_by_others = new Set(
+      config.moves.filter((move, idx) => idx !== i && move !== "none")
+    );
     for (const move of spec.possibleMoves) {
+      if (move !== "none" && move !== current_move && used_by_others.has(move)) {
+        continue;
+      }
       const option = document.createElement("option");
       option.value = move;
       option.textContent = MOVE_LABELS[move] || move;
       select.appendChild(option);
     }
-    select.value = config.moves[i] ?? "none";
+    const has_current = Array.from(select.options).some((option) => option.value === current_move);
+    select.value = has_current ? current_move : "none";
+    if (!has_current) {
+      config.moves[i] = "none";
+      save_profile();
+    }
     select.dataset.prev = select.value;
     select.disabled = is_ready && !match_started;
     select.addEventListener("change", () => {
@@ -1437,19 +1471,11 @@ function render_config(): void {
       }
       const idx = Number(select.dataset.index);
       const next = select.value;
-      const prev = select.dataset.prev || "none";
-      if (next !== "none") {
-        const duplicate = config.moves.some((value, other) => other !== idx && value === next);
-        if (duplicate) {
-          select.value = prev;
-          show_warning("Moves cannot repeat (except 'none').");
-          return;
-        }
-      }
       config.moves[idx] = next;
       select.dataset.prev = next;
       clear_warning();
       save_profile();
+      render_config();
       update_action_controls();
     });
     label.appendChild(select);

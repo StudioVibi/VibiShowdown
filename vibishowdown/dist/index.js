@@ -1830,9 +1830,8 @@ function ping() {
   return client.ping();
 }
 
-// src/game_default/moves.ts
+// src/data/moves.ts
 var MOVE_CATALOG = [
-  { id: "basic_attack", label: "Basic Attack", phaseId: "attack_01", attackMultiplier100: 100 },
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "wish", label: "Wish", phaseId: "attack_01", attackMultiplier100: 0 },
@@ -1956,7 +1955,7 @@ function mul_div_round(a, b, d) {
   return to_safe_number(negative ? -rounded : rounded);
 }
 
-// src/game_default/passives.ts
+// src/data/passives.ts
 var PASSIVE_CATALOG = [
   { id: "none", label: "none" },
   { id: "leftovers", label: "Leftovers", aliases: ["regen_5pct"] },
@@ -2017,7 +2016,7 @@ function apply_passive_turn_effect(passive_id, context) {
   effect(context);
 }
 
-// src/game_default/pokemon.ts
+// src/data/pokemon.ts
 function all_move_options() {
   return MOVE_OPTIONS.slice();
 }
@@ -2162,10 +2161,10 @@ function calc_final_stats(base, level, ev, iv = empty_iv_spread(), nature = neut
   };
 }
 
-// src/game_default/integrity.ts
+// src/data/integrity.ts
 function ensure(condition, message) {
   if (!condition) {
-    throw new Error(`[game_default] ${message}`);
+    throw new Error(`[data] ${message}`);
   }
 }
 function ensure_int(value, message) {
@@ -2213,8 +2212,23 @@ function assert_monster_integrity(monsters) {
     ensure(monster.stats.speed >= 0, `${monster.id}: speed must be >= 0`);
   }
 }
+function is_integrity_entrypoint() {
+  if (typeof process === "undefined" || !Array.isArray(process.argv)) {
+    return false;
+  }
+  const entry = process.argv[1];
+  if (typeof entry !== "string" || entry.length === 0) {
+    return false;
+  }
+  const normalized = entry.replace(/\\/g, "/");
+  return normalized.endsWith("/src/data/integrity.ts") || normalized.endsWith("src/data/integrity.ts");
+}
+if (is_integrity_entrypoint()) {
+  assert_monster_integrity(MONSTER_ROSTER);
+  console.log(`[integrity] ok (${MONSTER_ROSTER.length} monsters)`);
+}
 
-// src/game_default/index.ts
+// src/data/index.ts
 assert_monster_integrity(MONSTER_ROSTER);
 
 // src/engine.ts
@@ -4787,18 +4801,49 @@ function render_config() {
   const config = get_config(active_tab);
   const base_stats = normalize_stats(spec.stats, spec.stats);
   config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
+  let moves_changed = false;
+  const unique_moves = new Set;
+  for (let i = 0;i < 4; i++) {
+    const move = config.moves[i] ?? "none";
+    if (move === "none") {
+      if (config.moves[i] !== "none") {
+        config.moves[i] = "none";
+        moves_changed = true;
+      }
+      continue;
+    }
+    if (unique_moves.has(move)) {
+      config.moves[i] = "none";
+      moves_changed = true;
+      continue;
+    }
+    unique_moves.add(move);
+  }
+  if (moves_changed) {
+    save_profile();
+  }
   for (let i = 0;i < 4; i++) {
     const label = document.createElement("label");
     label.textContent = `Move ${i + 1}`;
     const select = document.createElement("select");
     select.dataset.index = `${i}`;
+    const current_move = config.moves[i] ?? "none";
+    const used_by_others = new Set(config.moves.filter((move, idx) => idx !== i && move !== "none"));
     for (const move of spec.possibleMoves) {
+      if (move !== "none" && move !== current_move && used_by_others.has(move)) {
+        continue;
+      }
       const option = document.createElement("option");
       option.value = move;
       option.textContent = MOVE_LABELS[move] || move;
       select.appendChild(option);
     }
-    select.value = config.moves[i] ?? "none";
+    const has_current = Array.from(select.options).some((option) => option.value === current_move);
+    select.value = has_current ? current_move : "none";
+    if (!has_current) {
+      config.moves[i] = "none";
+      save_profile();
+    }
     select.dataset.prev = select.value;
     select.disabled = is_ready && !match_started;
     select.addEventListener("change", () => {
@@ -4808,19 +4853,11 @@ function render_config() {
       }
       const idx = Number(select.dataset.index);
       const next = select.value;
-      const prev = select.dataset.prev || "none";
-      if (next !== "none") {
-        const duplicate = config.moves.some((value, other) => other !== idx && value === next);
-        if (duplicate) {
-          select.value = prev;
-          show_warning("Moves cannot repeat (except 'none').");
-          return;
-        }
-      }
       config.moves[idx] = next;
       select.dataset.prev = next;
       clear_warning();
       save_profile();
+      render_config();
       update_action_controls();
     });
     label.appendChild(select);
