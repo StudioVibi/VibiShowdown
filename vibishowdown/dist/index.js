@@ -4826,6 +4826,20 @@ function render_config() {
   const points_summary = document.createElement("div");
   points_summary.className = "stat-points-summary";
   stats_grid.appendChild(points_summary);
+  const column_header = document.createElement("div");
+  column_header.className = "stat-alloc-header";
+  for (const heading of ["", "Base", "EV's", "Slider", "Total"]) {
+    const header_cell = document.createElement("span");
+    header_cell.className = "stat-alloc-header-cell";
+    if (heading.length === 0) {
+      header_cell.classList.add("is-empty");
+      header_cell.textContent = " ";
+    } else {
+      header_cell.textContent = heading;
+    }
+    column_header.appendChild(header_cell);
+  }
+  stats_grid.appendChild(column_header);
   const update_points_summary = () => {
     const used = ev_total(config.ev);
     const remaining = EV_TOTAL_MAX - used;
@@ -4843,21 +4857,15 @@ function render_config() {
     def: "defense",
     spe: "speed"
   };
-  const controls = [];
-  const sync_ev_limits = () => {
-    for (const control of controls) {
-      const current = config.ev[control.key];
-      const used_without_current = ev_total(config.ev) - current;
-      const max_for_key = Math.min(EV_PER_STAT_MAX, Math.max(0, EV_TOTAL_MAX - used_without_current));
-      control.input.max = `${max_for_key}`;
-      control.slider.max = `${max_for_key}`;
+  const calc_total_stat = (key) => {
+    const base = base_stats[stat_key_by_ev[key]];
+    const level = config.stats.level;
+    const ev_quarter = Math.floor(config.ev[key] / 4);
+    const scaled = Math.floor((2 * base + ev_quarter) * level / 100);
+    if (key === "hp") {
+      return scaled + level + 10;
     }
-  };
-  const sync_total_inputs = () => {
-    for (const control of controls) {
-      const stat_key = stat_key_by_ev[control.key];
-      control.totalInput.value = `${config.stats[stat_key]}`;
-    }
+    return scaled + 5;
   };
   for (const [key, label_text] of stat_rows) {
     const row = document.createElement("div");
@@ -4865,11 +4873,9 @@ function render_config() {
     const stat_name = document.createElement("span");
     stat_name.className = "stat-alloc-name";
     stat_name.textContent = label_text;
-    const base_input = document.createElement("input");
-    base_input.type = "number";
-    base_input.className = "stat-base-input";
-    base_input.value = `${config.stats[stat_key_by_ev[key]]}`;
-    base_input.disabled = true;
+    const base_value = document.createElement("span");
+    base_value.className = "stat-static-value";
+    base_value.textContent = `${base_stats[stat_key_by_ev[key]]}`;
     const alloc_input = document.createElement("input");
     alloc_input.type = "number";
     alloc_input.className = "stat-alloc-input";
@@ -4885,6 +4891,9 @@ function render_config() {
     alloc_slider.max = `${EV_PER_STAT_MAX}`;
     alloc_slider.value = `${config.ev[key]}`;
     alloc_slider.disabled = is_ready && !match_started;
+    const result_value = document.createElement("span");
+    result_value.className = "stat-result-value";
+    result_value.textContent = `${calc_total_stat(key)}`;
     const apply_allocation_value = (next_raw) => {
       const current = config.ev[key];
       if (!Number.isInteger(next_raw)) {
@@ -4905,11 +4914,9 @@ function render_config() {
       config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
       alloc_input.value = `${next_raw}`;
       alloc_slider.value = `${next_raw}`;
-      base_input.value = `${config.stats[stat_key_by_ev[key]]}`;
+      result_value.textContent = `${calc_total_stat(key)}`;
       clear_warning();
       update_points_summary();
-      sync_ev_limits();
-      sync_total_inputs();
       save_profile();
     };
     alloc_input.addEventListener("change", () => {
@@ -4928,15 +4935,13 @@ function render_config() {
       apply_allocation_value(Number(alloc_slider.value));
     });
     row.appendChild(stat_name);
-    row.appendChild(base_input);
+    row.appendChild(base_value);
     row.appendChild(alloc_input);
     row.appendChild(alloc_slider);
+    row.appendChild(result_value);
     stats_grid.appendChild(row);
-    controls.push({ key, totalInput: base_input, input: alloc_input, slider: alloc_slider });
   }
   update_points_summary();
-  sync_ev_limits();
-  sync_total_inputs();
 }
 function set_edit_target(index) {
   if (is_ready && !match_started) {
