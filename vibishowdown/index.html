@@ -1194,7 +1194,7 @@
 
       .stat-alloc-row {
         display: grid;
-        grid-template-columns: 36px 76px 76px minmax(90px, 1fr);
+        grid-template-columns: 36px calc(76px * 2 / 3) calc(76px * 2 / 3) minmax(90px, 1fr);
         align-items: center;
         gap: 6px;
       }
@@ -1405,7 +1405,7 @@
         }
 
         .stat-alloc-row {
-          grid-template-columns: 34px 60px 60px minmax(80px, 1fr);
+          grid-template-columns: 34px calc(60px * 2 / 3) calc(60px * 2 / 3) minmax(80px, 1fr);
           gap: 4px;
         }
 
