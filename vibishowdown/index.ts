@@ -5,8 +5,8 @@ import {
   MOVE_LABELS,
   PASSIVE_LABELS,
   normalize_passive_id
-} from "../src/game_default/index.ts";
-import type { MonsterCatalogEntry } from "../src/game_default/index.ts";
+} from "../src/data/index.ts";
+import type { MonsterCatalogEntry } from "../src/data/index.ts";
 import { apply_forced_switch, create_initial_state, resolve_turn, validate_intent } from "../src/engine.ts";
 import type {
   EVSpread,

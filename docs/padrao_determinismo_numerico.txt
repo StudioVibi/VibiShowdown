@@ -5,7 +5,7 @@ Objetivo
 - Garantir que a simulacao produza o mesmo estado em qualquer maquina.
 
 Escopo
-- Vale para calculos de combate em `src/engine.ts` e regras em `src/game_default/*`.
+- Vale para calculos de combate em `src/engine.ts` e regras em `src/data/*`.
 - UI pode ler valor decimal do usuario, mas o estado de batalha deve ser inteiro.
 
 Estado atual (implementado)

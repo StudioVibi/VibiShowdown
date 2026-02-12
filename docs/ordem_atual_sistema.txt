@@ -70,17 +70,17 @@ Ordem exata atual:
 Importante sobre passivas:
 - Passivas de item (ex: Leftovers) acontecem dentro da fase end_turn.
 - A logica da passiva fica no modulo de passivas:
-  src/game_default/passives.ts
+  src/data/passives.ts
 - O engine chama apply_passive_turn_effect(...) para cada player ativo.
 
 
 3) Onde alterar cada tipo de regra
 ----------------------------------
 Cadastro de dados:
-- Pokemons/defaults: src/game_default/pokemon.ts
-- Moves/catalogo: src/game_default/moves.ts
-- Passivas/catalogo + efeitos: src/game_default/passives.ts
-- Check de integridade: src/game_default/integrity.ts
+- Pokemons/defaults: src/data/pokemon.ts
+- Moves/catalogo: src/data/moves.ts
+- Passivas/catalogo + efeitos: src/data/passives.ts
+- Check de integridade: src/data/integrity.ts
 
 Ordem de execucao:
 - Sempre em src/engine.ts (resolve_turn e funcoes auxiliares).

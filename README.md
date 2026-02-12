@@ -5,7 +5,7 @@ Estrutura oficial do projeto:
 - `src/engine.ts`: regras do combate (motor).
 - `src/shared.ts`: tipos compartilhados entre cliente e servidor.
 - `src/client.ts`: camada de conexao usando o pacote oficial `vibinet`.
-- `src/game_default/*`: catalogo de defaults do jogo (pokemons, moves, passivas) + checks de integridade.
+- `src/data/*`: catalogo de defaults do jogo (pokemons, moves, passivas) + checks de integridade.
 - `vibishowdown/index.ts`: frontend (fonte principal da UI).
 - `vibishowdown/index.html`: pagina do app.
 - `vibishowdown/icons/`: assets da UI.
@@ -22,7 +22,7 @@ Comandos:
 - `npm run setup:run`: executa `setup` e sobe host local.
 - `npm run dev`: serve estatico do app em `http://localhost:8080` (sem depender de `npx serve`).
 - `npm run check`: type-check.
-- `npm run check:integrity`: valida integridade dos defaults em `src/game_default/*`.
+- `npm run check:integrity`: valida integridade dos defaults em `src/data/*`.
 - `npm run build:web`: atualiza bundle web.
 
 Networking:

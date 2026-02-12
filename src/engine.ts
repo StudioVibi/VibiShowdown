@@ -9,9 +9,9 @@ import type {
   PlayerState,
   TeamSelection
 } from "./shared.ts";
-import { MONSTER_BY_ID } from "./game_default/pokemon.ts";
-import { move_spec } from "./game_default/moves.ts";
-import { apply_passive_turn_effect, passive_spec } from "./game_default/passives.ts";
+import { MONSTER_BY_ID } from "./data/pokemon.ts";
+import { move_spec } from "./data/moves.ts";
+import { apply_passive_turn_effect, passive_spec } from "./data/passives.ts";
 import { mul_div_ceil, mul_div_floor, mul_div_round, normalize_int } from "./int_math.ts";
 import { LEVEL_MAX, LEVEL_MIN, calc_final_stats, validate_ev_spread } from "./stats_calc.ts";
 

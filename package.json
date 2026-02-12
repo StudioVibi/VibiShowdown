@@ -6,7 +6,7 @@
     "setup:run": "npm run setup && npm run dev",
     "check": "tsc --target esnext --noEmit --skipLibCheck",
     "check:stats": "node --experimental-strip-types src/stats_calc-test.ts",
-    "check:integrity": "node --experimental-strip-types src/game_default/integrity-test.ts",
+    "check:integrity": "node --experimental-strip-types src/data/integrity.ts",
     "build:web": "bun build vibishowdown/index.ts --outdir vibishowdown/dist --target=browser --format=esm",
     "dev": "node scripts/serve-static.mjs"
   },

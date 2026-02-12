@@ -1,11 +1,12 @@
 import { MOVE_BY_ID } from "./moves.ts";
 import { PASSIVE_BY_ID, normalize_passive_id } from "./passives.ts";
 import type { MonsterCatalogEntry } from "./types.ts";
+import { MONSTER_ROSTER } from "./pokemon.ts";
 import { LEVEL_MAX, LEVEL_MIN } from "../stats_calc.ts";
 
 function ensure(condition: unknown, message: string): void {
   if (!condition) {
-    throw new Error(`[game_default] ${message}`);
+    throw new Error(`[data] ${message}`);
   }
 }
 
@@ -69,4 +70,21 @@ export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[
     ensure(monster.stats.defense >= 0, `${monster.id}: defense must be >= 0`);
     ensure(monster.stats.speed >= 0, `${monster.id}: speed must be >= 0`);
   }
+}
+
+function is_integrity_entrypoint(): boolean {
+  if (typeof process === "undefined" || !Array.isArray(process.argv)) {
+    return false;
+  }
+  const entry = process.argv[1];
+  if (typeof entry !== "string" || entry.length === 0) {
+    return false;
+  }
+  const normalized = entry.replace(/\\/g, "/");
+  return normalized.endsWith("/src/data/integrity.ts") || normalized.endsWith("src/data/integrity.ts");
+}
+
+if (is_integrity_entrypoint()) {
+  assert_monster_integrity(MONSTER_ROSTER);
+  console.log(`[integrity] ok (${MONSTER_ROSTER.length} monsters)`);
 }
