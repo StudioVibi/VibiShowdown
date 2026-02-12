@@ -5,7 +5,7 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "wish", label: "Wish", phaseId: "attack_01", attackMultiplier100: 0 },
-  { id: "bells_drum", label: "Bells Drum", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "belly_drum", label: "Belly Drum", phaseId: "attack_01", attackMultiplier100: 0 },
   {
     id: "return",
     label: "Return",
@@ -41,13 +41,24 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
 
 export const MOVE_OPTIONS: string[] = MOVE_CATALOG.map((entry) => entry.id);
 
+const MOVE_ALIASES: Record<string, string> = {
+  bells_drum: "belly_drum"
+};
+
 export const MOVE_LABELS: Record<string, string> = Object.fromEntries(
   MOVE_CATALOG.map((entry) => [entry.id, entry.label])
 );
+MOVE_LABELS.bells_drum = "Belly Drum";
 
 const MOVE_BY_ID_INTERNAL = new Map<string, MoveCatalogEntry>(
   MOVE_CATALOG.map((entry) => [entry.id, entry])
 );
+for (const [legacy_id, canonical_id] of Object.entries(MOVE_ALIASES)) {
+  const canonical = MOVE_BY_ID_INTERNAL.get(canonical_id);
+  if (canonical) {
+    MOVE_BY_ID_INTERNAL.set(legacy_id, canonical);
+  }
+}
 
 export const MOVE_BY_ID = MOVE_BY_ID_INTERNAL;
 

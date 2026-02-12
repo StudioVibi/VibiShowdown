@@ -39,7 +39,7 @@ const TAUNT_BLOCKED_MOVE_IDS = new Set([
   "none",
   "agility",
   "wish",
-  "bells_drum",
+  "belly_drum",
   "screech",
   "taunt",
   "pain_split",
@@ -950,7 +950,7 @@ function apply_move(
     return;
   }
 
-  if (spec.id === "bells_drum") {
+  if (spec.id === "belly_drum") {
     const before_hp = attacker.hp;
     const before_attack = attacker.attack;
     const hp_cost = Math.max(1, mul_div_floor(attacker.maxHp, 1, 2));
@@ -966,7 +966,7 @@ function apply_move(
         type: "recoil",
         turn: state.turn,
         phase: spec.phaseId,
-        summary: `${attacker.name} paid ${hp_spent} HP for Bells Drum`,
+        summary: `${attacker.name} paid ${hp_spent} HP for Belly Drum`,
         data: { slot: player_slot, damage: hp_spent, target: attacker.id, move: spec.id }
       });
     }
@@ -975,7 +975,7 @@ function apply_move(
       type: "stat_mod",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `${player_slot} used Bells Drum on ${attacker.name} (ATK ${before_attack} -> ${after_attack})`,
+      summary: `${player_slot} used Belly Drum on ${attacker.name} (ATK ${before_attack} -> ${after_attack})`,
       data: {
         slot: player_slot,
         target: attacker.id,
@@ -989,7 +989,7 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Bells Drum: user paga 50% do maxHp (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
+      summary: `Belly Drum: user paga 50% do maxHp (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
       data: {
         move: spec.id,
         slot: player_slot,

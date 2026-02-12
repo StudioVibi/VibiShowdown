@@ -1836,7 +1836,7 @@ var MOVE_CATALOG = [
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "wish", label: "Wish", phaseId: "attack_01", attackMultiplier100: 0 },
-  { id: "bells_drum", label: "Bells Drum", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "belly_drum", label: "Belly Drum", phaseId: "attack_01", attackMultiplier100: 0 },
   {
     id: "return",
     label: "Return",
@@ -1870,8 +1870,18 @@ var MOVE_CATALOG = [
   { id: "none", label: "none", phaseId: "attack_01", attackMultiplier100: 100 }
 ];
 var MOVE_OPTIONS = MOVE_CATALOG.map((entry) => entry.id);
+var MOVE_ALIASES = {
+  bells_drum: "belly_drum"
+};
 var MOVE_LABELS = Object.fromEntries(MOVE_CATALOG.map((entry) => [entry.id, entry.label]));
+MOVE_LABELS.bells_drum = "Belly Drum";
 var MOVE_BY_ID_INTERNAL = new Map(MOVE_CATALOG.map((entry) => [entry.id, entry]));
+for (const [legacy_id, canonical_id] of Object.entries(MOVE_ALIASES)) {
+  const canonical = MOVE_BY_ID_INTERNAL.get(canonical_id);
+  if (canonical) {
+    MOVE_BY_ID_INTERNAL.set(legacy_id, canonical);
+  }
+}
 var MOVE_BY_ID = MOVE_BY_ID_INTERNAL;
 function move_spec(move_id) {
   return MOVE_BY_ID_INTERNAL.get(move_id) ?? MOVE_BY_ID_INTERNAL.get("none");
@@ -2019,7 +2029,7 @@ var MONSTER_ROSTER = [
     id: "babydragon",
     name: "Baby Dragon",
     role: "Snorlax",
-    stats: { level: 12, maxHp: 575, attack: 438, defense: 250, spAttack: 438, spDefense: 250, speed: 105 },
+    stats: { level: 100, maxHp: 575, attack: 438, defense: 250, spAttack: 438, spDefense: 250, speed: 105 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2029,7 +2039,7 @@ var MONSTER_ROSTER = [
     id: "croni",
     name: "Croni",
     role: "Ninjask",
-    stats: { level: 12, maxHp: 163, attack: 355, defense: 167, spAttack: 355, spDefense: 167, speed: 646 },
+    stats: { level: 100, maxHp: 163, attack: 355, defense: 167, spAttack: 355, spDefense: 167, speed: 646 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2039,7 +2049,7 @@ var MONSTER_ROSTER = [
     id: "harpy",
     name: "Harpy",
     role: "Absol",
-    stats: { level: 12, maxHp: 180, attack: 521, defense: 230, spAttack: 521, spDefense: 230, speed: 292 },
+    stats: { level: 100, maxHp: 180, attack: 521, defense: 230, spAttack: 521, spDefense: 230, speed: 292 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2049,7 +2059,7 @@ var MONSTER_ROSTER = [
     id: "hoof",
     name: "Hoof",
     role: "Chansey",
-    stats: { level: 12, maxHp: 950, attack: 0, defense: 0, spAttack: 0, spDefense: 0, speed: 188 },
+    stats: { level: 100, maxHp: 950, attack: 0, defense: 0, spAttack: 0, spDefense: 0, speed: 188 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2059,7 +2069,7 @@ var MONSTER_ROSTER = [
     id: "knight",
     name: "Knight",
     role: "Metagross",
-    stats: { level: 12, maxHp: 242, attack: 542, defense: 521, spAttack: 542, spDefense: 521, speed: 271 },
+    stats: { level: 100, maxHp: 242, attack: 542, defense: 521, spAttack: 542, spDefense: 521, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2069,7 +2079,7 @@ var MONSTER_ROSTER = [
     id: "miren",
     name: "Miren",
     role: "Celebi",
-    stats: { level: 12, maxHp: 325, attack: 396, defense: 396, spAttack: 396, spDefense: 396, speed: 396 },
+    stats: { level: 100, maxHp: 325, attack: 396, defense: 396, spAttack: 396, spDefense: 396, speed: 396 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2079,7 +2089,7 @@ var MONSTER_ROSTER = [
     id: "panda",
     name: "Panda",
     role: "Cloyster",
-    stats: { level: 12, maxHp: 117, attack: 375, defense: 730, spAttack: 375, spDefense: 730, speed: 271 },
+    stats: { level: 100, maxHp: 117, attack: 375, defense: 730, spAttack: 375, spDefense: 730, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2089,7 +2099,7 @@ var MONSTER_ROSTER = [
     id: "valkyria",
     name: "Valkyria",
     role: "Aerodactyl",
-    stats: { level: 12, maxHp: 242, attack: 417, defense: 250, spAttack: 417, spDefense: 250, speed: 521 },
+    stats: { level: 100, maxHp: 242, attack: 417, defense: 250, spAttack: 417, spDefense: 250, speed: 521 },
     possibleMoves: all_move_options(),
     possiblePassives: all_passive_options(),
     defaultMoves: ["return", "seismic_toss", "agility", "none"],
@@ -2102,7 +2112,7 @@ var MONSTER_BY_ID = new Map(MONSTER_ROSTER.map((entry) => [entry.id, entry]));
 var EV_PER_STAT_MAX = 252;
 var EV_TOTAL_MAX = 508;
 var LEVEL_MIN = 1;
-var LEVEL_MAX = 12;
+var LEVEL_MAX = 100;
 function empty_ev_spread() {
   return { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 };
 }
@@ -2229,7 +2239,7 @@ var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "none",
   "agility",
   "wish",
-  "bells_drum",
+  "belly_drum",
   "screech",
   "taunt",
   "pain_split",
@@ -2994,7 +3004,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     });
     return;
   }
-  if (spec.id === "bells_drum") {
+  if (spec.id === "belly_drum") {
     const before_hp = attacker.hp;
     const before_attack = attacker.attack;
     const hp_cost = Math.max(1, mul_div_floor(attacker.maxHp, 1, 2));
@@ -3009,7 +3019,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
         type: "recoil",
         turn: state.turn,
         phase: spec.phaseId,
-        summary: `${attacker.name} paid ${hp_spent} HP for Bells Drum`,
+        summary: `${attacker.name} paid ${hp_spent} HP for Belly Drum`,
         data: { slot: player_slot, damage: hp_spent, target: attacker.id, move: spec.id }
       });
     }
@@ -3017,7 +3027,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
       type: "stat_mod",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `${player_slot} used Bells Drum on ${attacker.name} (ATK ${before_attack} -> ${after_attack})`,
+      summary: `${player_slot} used Belly Drum on ${attacker.name} (ATK ${before_attack} -> ${after_attack})`,
       data: {
         slot: player_slot,
         target: attacker.id,
@@ -3031,7 +3041,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Bells Drum: user paga 50% do maxHp (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
+      summary: `Belly Drum: user paga 50% do maxHp (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
       data: {
         move: spec.id,
         slot: player_slot,
@@ -4530,6 +4540,9 @@ function coerce_config(spec, value) {
   }
   const allowed = new Set(spec.possibleMoves);
   for (let i = 0;i < moves.length; i++) {
+    if (moves[i] === "bells_drum") {
+      moves[i] = "belly_drum";
+    }
     if (!allowed.has(moves[i])) {
       moves[i] = "none";
     }

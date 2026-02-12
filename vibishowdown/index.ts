@@ -1226,6 +1226,9 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
   }
   const allowed = new Set(spec.possibleMoves);
   for (let i = 0; i < moves.length; i++) {
+    if (moves[i] === "bells_drum") {
+      moves[i] = "belly_drum";
+    }
     if (!allowed.has(moves[i])) {
       moves[i] = "none";
     }
