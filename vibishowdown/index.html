@@ -1170,7 +1170,7 @@
         color: var(--muted);
       }
 
-      .config-grid input,
+      .config-grid input:not([type="range"]),
       .config-grid select {
         width: 100%;
         border-radius: 8px;
@@ -1218,6 +1218,10 @@
 
       .stat-alloc-slider {
         width: 100%;
+        margin: 0;
+        padding: 0;
+        border: none;
+        background: transparent;
         accent-color: #6ed6ff;
       }
 
