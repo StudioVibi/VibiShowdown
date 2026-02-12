@@ -2680,41 +2680,46 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
     return { before, after: before, applied: 0 };
   }
   let after = Math.max(0, before - attempted_damage);
-  if (after === 0 && monster.endureActiveThisTurn) {
+  if (monster.endureActiveThisTurn) {
     const survive_hp = Math.min(before, minimum_endure_hp(monster));
-    after = survive_hp;
-    monster.endureActiveThisTurn = false;
-    const speed_before = monster.speed;
-    monster.speed = Math.max(1, mul_div_round(speed_before, 3, 2));
-    log.push({
-      type: "endure_trigger",
-      turn: state.turn,
-      phase,
-      summary: `${monster.name} endured the hit (${before} -> ${after})`,
-      data: { slot, target: monster.id, before, after }
-    });
-    log.push({
-      type: "stat_mod",
-      turn: state.turn,
-      phase,
-      summary: `${monster.name} gained speed from Endure (${speed_before} -> ${monster.speed})`,
-      data: { slot, target: monster.id, stat: "speed", multiplier: 1.5, before: speed_before, after: monster.speed }
-    });
-    log.push({
-      type: "move_detail",
-      turn: state.turn,
-      phase,
-      summary: `Endure: immortal trigger (HP floor 1% => ${after}); SPE x1.5 (${speed_before} -> ${monster.speed})`,
-      data: {
-        move: "endure",
-        slot,
-        target: monster.id,
-        hpBefore: before,
-        hpAfter: after,
-        speedBefore: speed_before,
-        speedAfter: monster.speed
-      }
-    });
+    if (after < survive_hp) {
+      const capped_damage = Math.max(0, before - survive_hp);
+      after = survive_hp;
+      monster.endureActiveThisTurn = false;
+      const speed_before = monster.speed;
+      monster.speed = Math.max(1, mul_div_round(speed_before, 3, 2));
+      log.push({
+        type: "endure_trigger",
+        turn: state.turn,
+        phase,
+        summary: `${monster.name} endured the hit (${before} -> ${after})`,
+        data: { slot, target: monster.id, before, after, attemptedDamage: attempted_damage, appliedDamage: capped_damage }
+      });
+      log.push({
+        type: "stat_mod",
+        turn: state.turn,
+        phase,
+        summary: `${monster.name} gained speed from Endure (${speed_before} -> ${monster.speed})`,
+        data: { slot, target: monster.id, stat: "speed", multiplier: 1.5, before: speed_before, after: monster.speed }
+      });
+      log.push({
+        type: "move_detail",
+        turn: state.turn,
+        phase,
+        summary: `Endure: immortal trigger (HP floor 1% => ${after}); dmg capped ${attempted_damage} -> ${capped_damage}; SPE x1.5 (${speed_before} -> ${monster.speed})`,
+        data: {
+          move: "endure",
+          slot,
+          target: monster.id,
+          hpBefore: before,
+          hpAfter: after,
+          damageAttempted: attempted_damage,
+          damageApplied: capped_damage,
+          speedBefore: speed_before,
+          speedAfter: monster.speed
+        }
+      });
+    }
   }
   monster.hp = after;
   const applied = before - after;
@@ -2783,7 +2788,13 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
     turn: state.turn,
     phase: phase_id,
     summary: `${player_slot} dealt ${final_damage} to ${defender.name}`,
-    data: { slot: player_slot, damage: final_damage, target: defender.id }
+    data: {
+      slot: player_slot,
+      damage: final_damage,
+      target: defender.id,
+      before: defender_result.before,
+      after: defender_result.after
+    }
   });
   if (defender_result.before > 0 && defender_result.after === 0) {
     log.push({
@@ -2810,7 +2821,13 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
         turn: state.turn,
         phase: phase_id,
         summary: `${attacker.name} took ${recoil_damage} recoil`,
-        data: { slot: player_slot, damage: recoil_damage, target: attacker.id }
+        data: {
+          slot: player_slot,
+          damage: recoil_damage,
+          target: attacker.id,
+          before: recoil_result.before,
+          after: recoil_result.after
+        }
       });
       if (recoil_result.before > 0 && recoil_result.after === 0) {
         log.push({
@@ -2963,6 +2980,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
       });
       return;
     }
+    const floor_hp = minimum_endure_hp(attacker);
     attacker.endureActiveThisTurn = true;
     attacker.protectCooldownTurns = 2;
     attacker.endureCooldownTurns = 2;
@@ -2977,8 +2995,8 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Endure: cannot be reduced below 1% HP this turn; on trigger gain SPE x1.5",
-      data: { move: spec.id, slot: player_slot, target: attacker.id }
+      summary: `Endure: HP floor this turn = ${floor_hp} (1% do maxHp); on trigger gain SPE x1.5`,
+      data: { move: spec.id, slot: player_slot, target: attacker.id, floorHp: floor_hp }
     });
     return;
   }
