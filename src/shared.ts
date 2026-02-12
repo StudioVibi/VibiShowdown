@@ -106,7 +106,13 @@ export type ReadyStatePost = {
   names: Record<PlayerSlot, string | null>;
   order?: PlayerSlot[];
 };
-export type IntentPost = { $: "intent"; turn: number; intent: PlayerIntent; player_id?: string };
+export type IntentPost = {
+  $: "intent";
+  turn: number;
+  intent: PlayerIntent;
+  forcedSwitchTargetIndex?: number;
+  player_id?: string;
+};
 export type ForcedSwitchPost = { $: "forced_switch"; targetIndex: number; player_id?: string };
 export type IntentLockedPost = { $: "intent_locked"; slot: PlayerSlot; turn: number };
 export type TurnStartPost = { $: "turn_start"; turn: number; deadline_at: number; intents: Record<PlayerSlot, boolean> };

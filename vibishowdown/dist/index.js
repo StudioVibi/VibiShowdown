@@ -3717,9 +3717,12 @@ var relay_join_order = [];
 var relay_ready_order_ids = [];
 var relay_team_by_id = new Map;
 var relay_intents = { player1: null, player2: null };
+var relay_forced_switch_intents = { player1: null, player2: null };
 var join_sent = false;
 var room_feed_started = false;
 var chat_ready = false;
+var forced_switch_target_index = null;
+var forced_switch_target_turn = 0;
 function icon_path(id) {
   return `./icons/unit_${id}.png`;
 }
@@ -3823,6 +3826,8 @@ function relay_reset_match_to_lobby() {
   relay_turn = 0;
   relay_intents.player1 = null;
   relay_intents.player2 = null;
+  relay_forced_switch_intents.player1 = null;
+  relay_forced_switch_intents.player2 = null;
   relay_team_by_id.clear();
   relay_ready_order_ids.length = 0;
   relay_recompute_slots_from_ready_order();
@@ -3844,6 +3849,8 @@ function relay_remove_participant(id) {
   relay_recompute_slots_from_ready_order();
   relay_intents.player1 = null;
   relay_intents.player2 = null;
+  relay_forced_switch_intents.player1 = null;
+  relay_forced_switch_intents.player2 = null;
 }
 function relay_prune_inactive(now_ms) {
   let changed = false;
@@ -3875,13 +3882,12 @@ function relay_start_turn() {
   if (!relay_state || relay_ended) {
     return;
   }
-  if (relay_state.pendingSwitch.player1 || relay_state.pendingSwitch.player2) {
-    return;
-  }
   relay_turn += 1;
   relay_state.turn = relay_turn;
   relay_intents.player1 = null;
   relay_intents.player2 = null;
+  relay_forced_switch_intents.player1 = null;
+  relay_forced_switch_intents.player2 = null;
   emit_local_post({
     $: "turn_start",
     turn: relay_turn,
@@ -3982,7 +3988,23 @@ function relay_handle_intent(data) {
   if (data.turn !== relay_turn) {
     return;
   }
-  const validation = validate_intent(relay_state, slot_id, data.intent);
+  let validation_state = relay_state;
+  if (relay_state.pendingSwitch[slot_id]) {
+    const forced_target_candidate = Number.isInteger(data.forcedSwitchTargetIndex) ? data.forcedSwitchTargetIndex : relay_forced_switch_intents[slot_id];
+    if (typeof forced_target_candidate !== "number" || !Number.isInteger(forced_target_candidate)) {
+      return;
+    }
+    const forced_target = forced_target_candidate;
+    const forced_preview = apply_forced_switch(relay_state, slot_id, forced_target);
+    if (forced_preview.error) {
+      return;
+    }
+    validation_state = forced_preview.state;
+    relay_forced_switch_intents[slot_id] = forced_target;
+  } else {
+    relay_forced_switch_intents[slot_id] = null;
+  }
+  const validation = validate_intent(validation_state, slot_id, data.intent);
   if (validation) {
     return;
   }
@@ -3990,20 +4012,41 @@ function relay_handle_intent(data) {
   if (!relay_intents.player1 || !relay_intents.player2) {
     return;
   }
-  const { state, log } = resolve_turn(relay_state, {
+  for (const slot_check of PLAYER_SLOTS) {
+    if (relay_state.pendingSwitch[slot_check] && !Number.isInteger(relay_forced_switch_intents[slot_check])) {
+      return;
+    }
+  }
+  let turn_state = relay_state;
+  const pre_turn_log = [];
+  for (const slot_apply of PLAYER_SLOTS) {
+    if (!turn_state.pendingSwitch[slot_apply]) {
+      continue;
+    }
+    const target_candidate = relay_forced_switch_intents[slot_apply];
+    if (typeof target_candidate !== "number" || !Number.isInteger(target_candidate)) {
+      return;
+    }
+    const target_index = target_candidate;
+    const switch_result = apply_forced_switch(turn_state, slot_apply, target_index);
+    if (switch_result.error) {
+      return;
+    }
+    turn_state = switch_result.state;
+    pre_turn_log.push(...switch_result.log);
+  }
+  const { state, log } = resolve_turn(turn_state, {
     player1: relay_intents.player1,
     player2: relay_intents.player2
   });
   relay_state = state;
-  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log });
+  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log: [...pre_turn_log, ...log] });
   if (relay_state.status === "ended") {
     relay_ended = true;
     relay_reset_match_to_lobby();
     return;
   }
-  if (!relay_state.pendingSwitch.player1 && !relay_state.pendingSwitch.player2) {
-    relay_start_turn();
-  }
+  relay_start_turn();
 }
 function relay_handle_forced_switch(data) {
   if (!relay_state || relay_ended) {
@@ -4017,15 +4060,20 @@ function relay_handle_forced_switch(data) {
   if (!slot_id) {
     return;
   }
-  const result = apply_forced_switch(relay_state, slot_id, data.targetIndex);
-  if (result.error) {
+  if (!relay_state.pendingSwitch[slot_id]) {
     return;
   }
-  relay_state = result.state;
-  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log: result.log });
-  if (!relay_state.pendingSwitch.player1 && !relay_state.pendingSwitch.player2) {
-    relay_start_turn();
+  const player = relay_state.players[slot_id];
+  if (data.targetIndex < 0 || data.targetIndex >= player.team.length) {
+    return;
   }
+  if (data.targetIndex === player.activeIndex) {
+    return;
+  }
+  if (player.team[data.targetIndex].hp <= 0) {
+    return;
+  }
+  relay_forced_switch_intents[slot_id] = data.targetIndex;
 }
 function relay_handle_surrender(data) {
   if (!relay_state || relay_ended || "loser" in data) {
@@ -5029,7 +5077,8 @@ function update_bench(state, viewer_slot) {
 function update_action_controls() {
   const has_team = selected.length === 3;
   const pending_switch = has_pending_switch();
-  const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || pending_switch;
+  const forced_switch_ready = !relay_server_managed && has_forced_switch_target_for_current_turn();
+  const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || pending_switch && !forced_switch_ready;
   if (!has_team) {
     move_buttons.forEach((btn, index) => {
       btn.textContent = `Move ${index + 1}`;
@@ -5046,11 +5095,13 @@ function update_action_controls() {
   let choice_band_locked_move = null;
   let active_moves = config.moves;
   if (latest_state && slot) {
-    const active_state = latest_state.players[slot].team[latest_state.players[slot].activeIndex];
-    guard_on_cooldown = Math.max(active_state.protectCooldownTurns, active_state.endureCooldownTurns) > 0;
-    active_moves = active_state.chosenMoves;
-    if (active_state.chosenPassive === "choice_band") {
-      choice_band_locked_move = typeof active_state.choiceBandLockedMoveIndex === "number" ? active_state.choiceBandLockedMoveIndex : null;
+    const player_state = latest_state.players[slot];
+    const fallback_active = player_state.team[player_state.activeIndex];
+    const preview_active = pending_switch && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number" ? player_state.team[forced_switch_target_index] ?? fallback_active : fallback_active;
+    guard_on_cooldown = Math.max(preview_active.protectCooldownTurns, preview_active.endureCooldownTurns) > 0;
+    active_moves = preview_active.chosenMoves;
+    if (preview_active.chosenPassive === "choice_band") {
+      choice_band_locked_move = typeof preview_active.choiceBandLockedMoveIndex === "number" ? preview_active.choiceBandLockedMoveIndex : null;
     }
   }
   move_buttons.forEach((btn, index) => {
@@ -5075,7 +5126,7 @@ function update_action_controls() {
     btn.classList.toggle("selected-intent", is_selected_move && !btn.disabled);
   });
   if (switch_btn) {
-    const switch_disabled = !match_started || !slot || is_spectator || !pending_switch && current_turn <= 0;
+    const switch_disabled = !match_started || !slot || is_spectator || current_turn <= 0;
     switch_btn.disabled = switch_disabled;
   }
   const show_surrender = match_started && !!slot && !is_spectator;
@@ -5091,6 +5142,36 @@ function update_action_controls() {
 function has_pending_switch() {
   return !!(latest_state && slot && latest_state.pendingSwitch?.[slot]);
 }
+function clear_forced_switch_target() {
+  forced_switch_target_index = null;
+  forced_switch_target_turn = 0;
+}
+function has_forced_switch_target_for_current_turn() {
+  return has_pending_switch() && typeof forced_switch_target_index === "number" && forced_switch_target_turn === current_turn;
+}
+function post_turn_intent(intent) {
+  if (!can_send_intent()) {
+    return false;
+  }
+  const post_data = {
+    $: "intent",
+    turn: current_turn,
+    intent,
+    player_id
+  };
+  if (has_pending_switch()) {
+    if (relay_server_managed) {
+      append_log("pending switch");
+      return false;
+    }
+    if (!has_forced_switch_target_for_current_turn()) {
+      append_log("choose replacement first");
+      return false;
+    }
+    post_data.forcedSwitchTargetIndex = forced_switch_target_index;
+  }
+  return try_post(post_data);
+}
 function can_send_intent() {
   if (current_turn <= 0) {
     append_log("turn not active yet");
@@ -5103,16 +5184,10 @@ function can_send_intent() {
   if (is_spectator) {
     return false;
   }
-  if (has_pending_switch()) {
-    append_log("pending switch");
-    return false;
-  }
   return true;
 }
 function send_move_intent(moveIndex) {
-  if (!can_send_intent())
-    return;
-  if (!try_post({ $: "intent", turn: current_turn, intent: { action: "use_move", moveIndex }, player_id })) {
+  if (!post_turn_intent({ action: "use_move", moveIndex })) {
     return;
   }
   const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
@@ -5123,14 +5198,26 @@ function send_move_intent(moveIndex) {
 }
 function send_switch_intent(targetIndex) {
   if (has_pending_switch()) {
-    if (try_post({ $: "forced_switch", targetIndex, player_id })) {
-      close_switch_modal();
+    if (relay_server_managed) {
+      if (try_post({ $: "forced_switch", targetIndex, player_id })) {
+        close_switch_modal();
+      }
+      return;
     }
+    forced_switch_target_index = targetIndex;
+    forced_switch_target_turn = current_turn;
+    append_log("replacement selected (hidden until turn resolves)");
+    close_switch_modal();
+    if (selected_intent_turn === current_turn && selected_intent) {
+      const reposted = post_turn_intent(selected_intent);
+      if (reposted) {
+        append_log("intent updated");
+      }
+    }
+    update_action_controls();
     return;
   }
-  if (!can_send_intent())
-    return;
-  if (!try_post({ $: "intent", turn: current_turn, intent: { action: "switch", targetIndex }, player_id })) {
+  if (!post_turn_intent({ action: "switch", targetIndex })) {
     return;
   }
   const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
@@ -5170,27 +5257,10 @@ function open_switch_modal(mode = "intent") {
       button.textContent = `${entry.mon.name}${is_alive2 ? "" : " (fainted)"}`;
       button.addEventListener("click", () => {
         if (mode === "intent") {
-          if (!can_send_intent())
-            return;
-          if (!try_post({
-            $: "intent",
-            turn: current_turn,
-            intent: { action: "switch", targetIndex: entry.index },
-            player_id
-          })) {
-            return;
-          }
-          const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
-          selected_intent = { action: "switch", targetIndex: entry.index };
-          selected_intent_turn = current_turn;
-          update_action_controls();
-          append_log(was_selected ? "intent updated" : "intent sent");
-          close_switch_modal();
+          send_switch_intent(entry.index);
           return;
         }
-        if (try_post({ $: "forced_switch", targetIndex: entry.index, player_id })) {
-          close_switch_modal();
-        }
+        send_switch_intent(entry.index);
       });
       switch_options.appendChild(button);
     }
@@ -5299,6 +5369,7 @@ function reset_to_lobby_view() {
   deadline_at = 0;
   selected_intent = null;
   selected_intent_turn = 0;
+  clear_forced_switch_target();
   close_switch_modal();
   match_end.classList.remove("open");
   prematch.style.display = "";
@@ -5312,16 +5383,22 @@ function handle_turn_start(data) {
   deadline_at = data.deadline_at;
   selected_intent = null;
   selected_intent_turn = 0;
+  clear_forced_switch_target();
   status_turn.textContent = `${current_turn}`;
   update_deadline();
   append_turn_marker(current_turn);
-  close_switch_modal();
+  if (!has_pending_switch()) {
+    close_switch_modal();
+  }
   if (!match_started) {
     match_started = true;
     prematch.style.display = "none";
     document.body.classList.remove("prematch-open");
   }
   update_action_controls();
+  if (slot && has_pending_switch() && !switch_modal.classList.contains("open")) {
+    open_switch_modal("forced");
+  }
 }
 function log_events(log) {
   for (const entry of log) {
@@ -5573,6 +5650,9 @@ function handle_state(data) {
   const steps = prev_state ? build_visual_steps(prev_state, data.log, viewer_slot) : [];
   const hit_sides = new Set(steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide));
   latest_state = data.state;
+  if (!(slot && data.state.pendingSwitch?.[slot])) {
+    clear_forced_switch_target();
+  }
   if (!match_started && data.state.status === "running") {
     match_started = true;
     prematch.style.display = "none";
