@@ -1490,18 +1490,33 @@ function render_config(): void {
   level_input.max = `${LEVEL_MAX}`;
   level_input.value = `${config.stats.level}`;
   level_input.disabled = is_ready && !match_started;
+  const apply_level_value = (next_value: number): number => {
+    const normalized = normalize_stat_value("level", next_value, config.stats.level);
+    if (normalized !== config.stats.level) {
+      config.stats = stats_from_base_level_ev(base_stats, normalized, config.ev);
+      save_profile();
+    }
+    return normalized;
+  };
+  level_input.addEventListener("input", () => {
+    if (is_ready && !match_started) return;
+    const value = level_input.valueAsNumber;
+    if (!Number.isFinite(value)) {
+      return;
+    }
+    apply_level_value(value);
+    clear_warning();
+  });
   level_input.addEventListener("change", () => {
     if (is_ready && !match_started) return;
-    const value = Number(level_input.value);
+    const value = level_input.valueAsNumber;
     if (!Number.isFinite(value)) {
       level_input.value = `${config.stats.level}`;
       return;
     }
-    const normalized = normalize_stat_value("level", value, config.stats.level);
-    config.stats = stats_from_base_level_ev(base_stats, normalized, config.ev);
+    const normalized = apply_level_value(value);
     level_input.value = `${normalized}`;
     clear_warning();
-    save_profile();
     render_config();
   });
   level_label.appendChild(level_input);
