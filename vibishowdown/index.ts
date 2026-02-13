@@ -2336,7 +2336,7 @@ function render_effects(
       player_effects.appendChild(effect_chip("Endure (mySPE 1.5)", "buff"));
     }
     if (player_active.bellyDrumActive) {
-      player_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 2)", "buff"));
+      player_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 4)", "buff"));
     }
     if (normalize_passive_id(player_active.chosenPassive) === "choice_band") {
       player_effects.appendChild(effect_chip("Choice Band (myATK 1.5)", "passive"));
@@ -2361,7 +2361,7 @@ function render_effects(
       enemy_effects.appendChild(effect_chip("Endure (mySPE 1.5)", "buff"));
     }
     if (enemy_active.bellyDrumActive) {
-      enemy_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 2)", "buff"));
+      enemy_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 4)", "buff"));
     }
     if (normalize_passive_id(enemy_active.chosenPassive) === "choice_band") {
       enemy_effects.appendChild(effect_chip("Choice Band (myATK 1.5)", "passive"));

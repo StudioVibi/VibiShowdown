@@ -3079,7 +3079,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     const before_attack = attacker.attack;
     const hp_cost = mul_div_floor(before_hp, 1, 2);
     const after_hp = Math.max(0, before_hp - hp_cost);
-    const after_attack = Math.max(0, mul_div_round(before_attack, 2, 1));
+    const after_attack = Math.max(0, mul_div_round(before_attack, 4, 1));
     attacker.hp = after_hp;
     attacker.attack = after_attack;
     attacker.bellyDrumActive = true;
@@ -3103,7 +3103,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
         slot: player_slot,
         target: attacker.id,
         stat: "attack",
-        multiplier: 2,
+        multiplier: 4,
         before: before_attack,
         after: after_attack
       }
@@ -3112,7 +3112,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Belly Drum: user paga floor(HP atual/2) (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
+      summary: `Belly Drum: user paga floor(HP atual/2) (${before_hp} -> ${after_hp}); ATK x4 (${before_attack} -> ${after_attack})`,
       data: {
         move: spec.id,
         slot: player_slot,
@@ -5639,7 +5639,7 @@ function render_effects(state, viewer_slot, player_slot, enemy_slot) {
       player_effects.appendChild(effect_chip("Endure (mySPE 1.5)", "buff"));
     }
     if (player_active.bellyDrumActive) {
-      player_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 2)", "buff"));
+      player_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 4)", "buff"));
     }
     if (normalize_passive_id(player_active.chosenPassive) === "choice_band") {
       player_effects.appendChild(effect_chip("Choice Band (myATK 1.5)", "passive"));
@@ -5663,7 +5663,7 @@ function render_effects(state, viewer_slot, player_slot, enemy_slot) {
       enemy_effects.appendChild(effect_chip("Endure (mySPE 1.5)", "buff"));
     }
     if (enemy_active.bellyDrumActive) {
-      enemy_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 2)", "buff"));
+      enemy_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 4)", "buff"));
     }
     if (normalize_passive_id(enemy_active.chosenPassive) === "choice_band") {
       enemy_effects.appendChild(effect_chip("Choice Band (myATK 1.5)", "passive"));
