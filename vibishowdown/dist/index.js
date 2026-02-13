@@ -4846,17 +4846,34 @@ function render_config() {
     }
     select.dataset.prev = select.value;
     select.disabled = is_ready && !match_started;
+    const apply_move_value = (next_value) => {
+      const idx = Number(select.dataset.index);
+      if (!Number.isInteger(idx)) {
+        return;
+      }
+      select.dataset.prev = next_value;
+      if (config.moves[idx] === next_value) {
+        return;
+      }
+      config.moves[idx] = next_value;
+      save_profile();
+    };
+    select.addEventListener("input", () => {
+      if (is_ready && !match_started) {
+        select.value = select.dataset.prev || "none";
+        return;
+      }
+      apply_move_value(select.value);
+      clear_warning();
+      update_action_controls();
+    });
     select.addEventListener("change", () => {
       if (is_ready && !match_started) {
         select.value = select.dataset.prev || "none";
         return;
       }
-      const idx = Number(select.dataset.index);
-      const next = select.value;
-      config.moves[idx] = next;
-      select.dataset.prev = next;
+      apply_move_value(select.value);
       clear_warning();
-      save_profile();
       render_config();
       update_action_controls();
     });
@@ -4915,11 +4932,24 @@ function render_config() {
   }
   passive_select.value = config.passive;
   passive_select.disabled = is_ready && !match_started;
+  const apply_passive_value = (next_value) => {
+    if (config.passive === next_value) {
+      return;
+    }
+    config.passive = next_value;
+    save_profile();
+  };
+  passive_select.addEventListener("input", () => {
+    if (is_ready && !match_started)
+      return;
+    apply_passive_value(passive_select.value);
+    clear_warning();
+  });
   passive_select.addEventListener("change", () => {
     if (is_ready && !match_started)
       return;
-    config.passive = passive_select.value;
-    save_profile();
+    apply_passive_value(passive_select.value);
+    clear_warning();
   });
   passive_label2.appendChild(passive_select);
   moves_grid.appendChild(passive_label2);
@@ -5418,7 +5448,7 @@ function send_ready(next_ready) {
     try_post({ $: "ready", ready: false, player_id });
   }
 }
-function update_ready_ui() {
+function update_ready_ui(should_refresh_lobby = true) {
   if (status_ready) {
     status_ready.textContent = is_ready ? "ready" : "not ready";
     status_ready.className = `status-pill ${is_ready ? "ok" : "off"}`;
@@ -5441,6 +5471,9 @@ function update_ready_ui() {
     hint = "Spectator mode. Select 3 monsters and click Ready to join.";
   }
   prematch_hint.textContent = hint;
+  if (!should_refresh_lobby) {
+    return;
+  }
   render_roster();
   render_tabs();
   render_config();
@@ -5880,6 +5913,7 @@ function handle_post(message) {
     case "ready_state": {
       const previous = last_ready_snapshot ?? { player1: false, player2: false };
       last_ready_snapshot = { ...data.ready };
+      const was_ready = is_ready;
       participants = {
         players: { ...data.names },
         spectators: participants ? participants.spectators.slice() : []
@@ -5920,7 +5954,7 @@ function handle_post(message) {
         opponent_name = null;
         update_opponent_ui(false, null);
       }
-      update_ready_ui();
+      update_ready_ui(was_ready !== is_ready);
       render_participants();
       return;
     }
