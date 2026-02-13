@@ -4704,10 +4704,42 @@ function get_config(monster_id) {
   if (!spec) {
     throw new Error(`Missing monster spec: ${monster_id}`);
   }
-  const config = coerce_config(spec, profile.monsters[monster_id]);
-  profile.monsters[monster_id] = config;
-  save_profile();
-  return config;
+  const existing = profile.monsters[monster_id];
+  const coerced = coerce_config(spec, existing);
+  if (!existing) {
+    profile.monsters[monster_id] = coerced;
+    save_profile();
+    return coerced;
+  }
+  const has_existing_shape = Array.isArray(existing.moves) && typeof existing.passive === "string" && typeof existing.stats === "object" && existing.stats !== null && typeof existing.ev === "object" && existing.ev !== null;
+  if (!has_existing_shape) {
+    profile.monsters[monster_id] = coerced;
+    save_profile();
+    return coerced;
+  }
+  let changed = false;
+  if (existing.passive !== coerced.passive) {
+    existing.passive = coerced.passive;
+    changed = true;
+  }
+  if (!stats_equal(existing.stats, coerced.stats)) {
+    existing.stats = coerced.stats;
+    changed = true;
+  }
+  if (!ev_equal(existing.ev, coerced.ev)) {
+    existing.ev = coerced.ev;
+    changed = true;
+  }
+  const existing_moves = existing.moves.slice(0, 4);
+  const coerced_moves = coerced.moves.slice(0, 4);
+  if (existing_moves.length !== coerced_moves.length || existing_moves.some((move, idx) => move !== coerced_moves[idx])) {
+    existing.moves = coerced_moves;
+    changed = true;
+  }
+  if (changed) {
+    save_profile();
+  }
+  return existing;
 }
 function reset_profile_stats_to_defaults() {
   let changed = false;
@@ -4888,6 +4920,17 @@ function render_config() {
   level_input.max = `${LEVEL_MAX}`;
   level_input.value = `${config.stats.level}`;
   level_input.disabled = is_ready && !match_started;
+  const read_level_input_value = () => {
+    const raw = level_input.value.trim();
+    if (!raw) {
+      return null;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+    return parsed;
+  };
   const apply_level_value = (next_value) => {
     const normalized = normalize_stat_value("level", next_value, config.stats.level);
     if (normalized !== config.stats.level) {
@@ -4899,18 +4942,18 @@ function render_config() {
   level_input.addEventListener("input", () => {
     if (is_ready && !match_started)
       return;
-    const value = level_input.valueAsNumber;
-    if (!Number.isFinite(value)) {
+    const value = read_level_input_value();
+    if (value === null) {
       return;
     }
     apply_level_value(value);
     clear_warning();
   });
-  level_input.addEventListener("change", () => {
+  const commit_level_input = () => {
     if (is_ready && !match_started)
       return;
-    const value = level_input.valueAsNumber;
-    if (!Number.isFinite(value)) {
+    const value = read_level_input_value();
+    if (value === null) {
       level_input.value = `${config.stats.level}`;
       return;
     }
@@ -4918,7 +4961,9 @@ function render_config() {
     level_input.value = `${normalized}`;
     clear_warning();
     render_config();
-  });
+  };
+  level_input.addEventListener("change", commit_level_input);
+  level_input.addEventListener("blur", commit_level_input);
   level_label.appendChild(level_input);
   moves_grid.appendChild(level_label);
   const passive_label2 = document.createElement("label");
