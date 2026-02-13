@@ -1020,7 +1020,7 @@ function apply_move(
     const before_attack = attacker.attack;
     const hp_cost = mul_div_floor(before_hp, 1, 2);
     const after_hp = Math.max(0, before_hp - hp_cost);
-    const after_attack = Math.max(0, mul_div_round(before_attack, 2, 1));
+    const after_attack = Math.max(0, mul_div_round(before_attack, 4, 1));
     attacker.hp = after_hp;
     attacker.attack = after_attack;
     attacker.bellyDrumActive = true;
@@ -1046,7 +1046,7 @@ function apply_move(
         slot: player_slot,
         target: attacker.id,
         stat: "attack",
-        multiplier: 2,
+        multiplier: 4,
         before: before_attack,
         after: after_attack
       }
@@ -1055,7 +1055,7 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Belly Drum: user paga floor(HP atual/2) (${before_hp} -> ${after_hp}); ATK x2 (${before_attack} -> ${after_attack})`,
+      summary: `Belly Drum: user paga floor(HP atual/2) (${before_hp} -> ${after_hp}); ATK x4 (${before_attack} -> ${after_attack})`,
       data: {
         move: spec.id,
         slot: player_slot,
