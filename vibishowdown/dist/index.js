@@ -3328,6 +3328,9 @@ function build_actions(intents, state) {
     const intent = intents[slot];
     if (!intent)
       continue;
+    if (intent.action === "premove_plan") {
+      continue;
+    }
     if (intent.action === "switch") {
       actions.push({ player: slot, type: "switch", phase: "switch", targetIndex: intent.targetIndex });
     } else {
@@ -3551,6 +3554,9 @@ function validate_intent(state, slot, intent) {
   if (!player) {
     return "unknown player";
   }
+  if (intent.action === "premove_plan") {
+    return "premove plan must be handled before turn resolution";
+  }
   if (state.pendingSwitch[slot]) {
     return "pending switch";
   }
@@ -3647,6 +3653,7 @@ var status_conn = document.getElementById("status-conn");
 var status_ping = document.getElementById("status-ping");
 var status_turn = document.getElementById("status-turn");
 var status_deadline = document.getElementById("status-deadline");
+var status_enemy_timer = document.getElementById("status-enemy-timer");
 var premove_btn = document.getElementById("premove-btn");
 var premove_status = document.getElementById("premove-status");
 var status_ready = document.getElementById("status-ready");
@@ -3723,6 +3730,8 @@ var match_end_title = document.getElementById("match-end-title");
 var match_end_sub = document.getElementById("match-end-sub");
 var match_end_btn = document.getElementById("match-end-btn");
 var PREMOVE_TURN_COUNT = 3;
+var SCOUT_SECONDS = 10;
+var ACTION_TIMER_SECONDS = [5, 4, 3];
 status_room.textContent = room;
 status_name.textContent = player_name;
 player_title.textContent = player_name;
@@ -3730,6 +3739,11 @@ enemy_title.textContent = "Opponent";
 document.body.classList.add("prematch-open");
 var current_turn = 0;
 var deadline_at = 0;
+var deadline_by_slot = { player1: 0, player2: 0 };
+var timer_seconds_by_slot = { player1: 0, player2: 0 };
+var timer_phase_by_slot = { player1: "scout", player2: "scout" };
+var evade_by_slot = { player1: false, player2: false };
+var final_action_for = null;
 var slot = null;
 var is_ready = false;
 var match_started = false;
@@ -3751,12 +3765,24 @@ var tooltip_payload_by_element = new WeakMap;
 var active_tooltip_target = null;
 var premove_state = "idle";
 var premove_plan = [null, null, null];
-var premove_last_auto_sent_turn = 0;
-var premove_last_blocked_turn_logged = 0;
 var relay_server_managed = false;
 var relay_ended = false;
 var relay_turn = 0;
 var relay_state = null;
+var relay_clock_by_slot = {
+  player1: { phase: "scout", windowIndex: 0, deadlineAt: 0, seconds: SCOUT_SECONDS, inEvade: false },
+  player2: { phase: "scout", windowIndex: 0, deadlineAt: 0, seconds: SCOUT_SECONDS, inEvade: false }
+};
+var relay_premove_by_slot = {
+  player1: { active: false, interrupted: false, cursor: 0, steps: null },
+  player2: { active: false, interrupted: false, cursor: 0, steps: null }
+};
+var relay_intents = { player1: null, player2: null };
+var relay_intent_locked = { player1: false, player2: false };
+var relay_last_action = { player1: null, player2: null };
+var relay_action_from_premove = { player1: false, player2: false };
+var relay_final_action_for = null;
+var relay_in_final_action_turn = false;
 var relay_local_role = null;
 var RELAY_WATCHER_TTL_MS = 90000;
 var RELAY_JOIN_HEARTBEAT_MS = 25000;
@@ -3768,7 +3794,6 @@ var relay_ids_by_slot = { player1: null, player2: null };
 var relay_join_order = [];
 var relay_ready_order_ids = [];
 var relay_team_by_id = new Map;
-var relay_intents = { player1: null, player2: null };
 var relay_forced_switch_intents = { player1: null, player2: null };
 var join_sent = false;
 var room_feed_started = false;
@@ -3873,14 +3898,46 @@ function relay_recompute_slots_from_ready_order() {
     relay_slot_by_id.set(p2, "player2");
   }
 }
+function relay_reset_clock(slot_id) {
+  relay_clock_by_slot[slot_id] = {
+    phase: "scout",
+    windowIndex: 0,
+    deadlineAt: 0,
+    seconds: SCOUT_SECONDS,
+    inEvade: false
+  };
+}
+function relay_reset_premove(slot_id) {
+  relay_premove_by_slot[slot_id] = {
+    active: false,
+    interrupted: false,
+    cursor: 0,
+    steps: null
+  };
+}
+function relay_reset_turn_buffers() {
+  for (const slot_id of PLAYER_SLOTS) {
+    relay_intents[slot_id] = null;
+    relay_intent_locked[slot_id] = false;
+    relay_action_from_premove[slot_id] = false;
+    relay_forced_switch_intents[slot_id] = null;
+  }
+}
+function relay_reset_runtime_state() {
+  relay_final_action_for = null;
+  relay_in_final_action_turn = false;
+  for (const slot_id of PLAYER_SLOTS) {
+    relay_reset_clock(slot_id);
+    relay_reset_premove(slot_id);
+    relay_last_action[slot_id] = null;
+  }
+  relay_reset_turn_buffers();
+}
 function relay_reset_match_to_lobby() {
   relay_state = null;
   relay_ended = false;
   relay_turn = 0;
-  relay_intents.player1 = null;
-  relay_intents.player2 = null;
-  relay_forced_switch_intents.player1 = null;
-  relay_forced_switch_intents.player2 = null;
+  relay_reset_runtime_state();
   relay_team_by_id.clear();
   relay_ready_order_ids.length = 0;
   relay_recompute_slots_from_ready_order();
@@ -3900,10 +3957,7 @@ function relay_remove_participant(id) {
     relay_ready_order_ids.splice(ready_idx, 1);
   }
   relay_recompute_slots_from_ready_order();
-  relay_intents.player1 = null;
-  relay_intents.player2 = null;
-  relay_forced_switch_intents.player1 = null;
-  relay_forced_switch_intents.player2 = null;
+  relay_reset_turn_buffers();
 }
 function relay_prune_inactive(now_ms) {
   let changed = false;
@@ -3931,22 +3985,368 @@ function relay_prune_inactive(now_ms) {
   relay_emit_local_role();
   relay_emit_snapshots();
 }
-function relay_start_turn() {
+function relay_other_slot(slot_id) {
+  return slot_id === "player1" ? "player2" : "player1";
+}
+function relay_timer_seconds_for_clock(clock) {
+  if (clock.inEvade || clock.phase === "evade") {
+    return 0;
+  }
+  if (clock.phase === "scout") {
+    return SCOUT_SECONDS;
+  }
+  const next_seconds = ACTION_TIMER_SECONDS[clock.windowIndex] ?? 0;
+  return next_seconds > 0 ? next_seconds : 0;
+}
+function relay_premove_step_intent(step) {
+  if (step.action === "switch") {
+    return { action: "switch", targetIndex: step.targetIndex };
+  }
+  return { action: "use_move", moveIndex: step.moveIndex };
+}
+function relay_premove_step_for_turn(slot_id) {
+  const premove = relay_premove_by_slot[slot_id];
+  if (!premove.active || !premove.steps) {
+    return null;
+  }
+  if (premove.cursor < 0 || premove.cursor >= PREMOVE_TURN_COUNT) {
+    return null;
+  }
+  return premove.steps[premove.cursor] ?? null;
+}
+function relay_pick_first_alive_replacement(state, slot_id) {
+  const player = state.players[slot_id];
+  for (let i = 0;i < player.team.length; i++) {
+    if (i === player.activeIndex) {
+      continue;
+    }
+    if (player.team[i].hp > 0) {
+      return i;
+    }
+  }
+  return null;
+}
+function relay_prepare_validation_state(slot_id, forced_target_candidate) {
+  if (!relay_state) {
+    return { validationState: null, forcedTarget: null, error: "missing relay state" };
+  }
+  if (!relay_state.pendingSwitch[slot_id]) {
+    return { validationState: relay_state, forcedTarget: null };
+  }
+  const fallback_target = relay_forced_switch_intents[slot_id];
+  const forced_target = Number.isInteger(forced_target_candidate) && typeof forced_target_candidate === "number" ? forced_target_candidate : fallback_target;
+  if (typeof forced_target !== "number" || !Number.isInteger(forced_target)) {
+    return { validationState: relay_state, forcedTarget: null, error: "missing forced switch target" };
+  }
+  const forced_preview = apply_forced_switch(relay_state, slot_id, forced_target);
+  if (forced_preview.error) {
+    return { validationState: relay_state, forcedTarget: null, error: forced_preview.error };
+  }
+  return { validationState: forced_preview.state, forcedTarget: forced_target };
+}
+function relay_mark_intent_locked(slot_id, intent, from_premove, silent = false) {
+  relay_intents[slot_id] = intent;
+  relay_intent_locked[slot_id] = true;
+  relay_action_from_premove[slot_id] = from_premove;
+  if (!silent) {
+    emit_local_post({ $: "intent_locked", slot: slot_id, turn: relay_turn });
+  }
+}
+function relay_slot_requires_intent(slot_id) {
+  if (!relay_state || relay_ended || relay_state.status !== "running") {
+    return false;
+  }
+  if (relay_clock_by_slot[slot_id].inEvade) {
+    return false;
+  }
+  if (relay_in_final_action_turn && relay_final_action_for && relay_final_action_for !== slot_id) {
+    return false;
+  }
+  return true;
+}
+function relay_emit_turn_start_snapshot() {
+  const deadlines = {
+    player1: relay_clock_by_slot.player1.deadlineAt,
+    player2: relay_clock_by_slot.player2.deadlineAt
+  };
+  const timer_seconds = {
+    player1: relay_clock_by_slot.player1.seconds,
+    player2: relay_clock_by_slot.player2.seconds
+  };
+  const timer_phase = {
+    player1: relay_clock_by_slot.player1.phase,
+    player2: relay_clock_by_slot.player2.phase
+  };
+  const evade = {
+    player1: relay_clock_by_slot.player1.inEvade,
+    player2: relay_clock_by_slot.player2.inEvade
+  };
+  emit_local_post({
+    $: "turn_start",
+    turn: relay_turn,
+    deadline_at: Math.max(deadlines.player1, deadlines.player2),
+    intents: { player1: relay_intent_locked.player1, player2: relay_intent_locked.player2 },
+    deadlines,
+    timer_seconds,
+    timer_phase,
+    evade,
+    final_action_for: relay_final_action_for
+  });
+}
+function relay_slot_took_faint(log, slot_id) {
+  return log.some((entry) => {
+    if (entry.type !== "faint") {
+      return false;
+    }
+    const data = entry.data;
+    return data?.slot === slot_id;
+  });
+}
+function relay_slot_caused_faint(log, slot_id) {
+  return log.some((entry) => {
+    if (entry.type === "damage") {
+      const data = entry.data;
+      return data?.slot === slot_id && typeof data.after === "number" && data.after <= 0;
+    }
+    if (entry.type === "leech_drain") {
+      const data = entry.data;
+      return data?.slot === slot_id && typeof data.after === "number" && data.after <= 0;
+    }
+    return false;
+  });
+}
+function relay_advance_clock_after_turn(slot_id, reset_to_five) {
+  const clock = relay_clock_by_slot[slot_id];
+  if (clock.inEvade || clock.phase === "evade") {
+    clock.inEvade = true;
+    clock.phase = "evade";
+    clock.seconds = 0;
+    clock.deadlineAt = 0;
+    return;
+  }
+  if (clock.phase === "scout") {
+    clock.phase = "normal";
+    clock.windowIndex = 0;
+    clock.seconds = ACTION_TIMER_SECONDS[0];
+    clock.deadlineAt = 0;
+    return;
+  }
+  if (reset_to_five) {
+    clock.windowIndex = 0;
+    clock.seconds = ACTION_TIMER_SECONDS[0];
+    clock.deadlineAt = 0;
+    return;
+  }
+  const next_window = clock.windowIndex + 1;
+  if (next_window >= ACTION_TIMER_SECONDS.length) {
+    clock.windowIndex = ACTION_TIMER_SECONDS.length;
+    clock.phase = "evade";
+    clock.inEvade = true;
+    clock.seconds = 0;
+    clock.deadlineAt = 0;
+    return;
+  }
+  clock.windowIndex = next_window;
+  clock.seconds = ACTION_TIMER_SECONDS[next_window];
+  clock.deadlineAt = 0;
+}
+function relay_finalize_turn() {
   if (!relay_state || relay_ended) {
+    return;
+  }
+  if (!relay_intent_locked.player1 || !relay_intent_locked.player2) {
+    return;
+  }
+  let turn_state = relay_state;
+  const pre_turn_log = [];
+  for (const slot_apply of PLAYER_SLOTS) {
+    if (!turn_state.pendingSwitch[slot_apply]) {
+      continue;
+    }
+    const target_candidate = relay_forced_switch_intents[slot_apply];
+    if (typeof target_candidate !== "number" || !Number.isInteger(target_candidate)) {
+      return;
+    }
+    const switch_result = apply_forced_switch(turn_state, slot_apply, target_candidate);
+    if (switch_result.error) {
+      return;
+    }
+    turn_state = switch_result.state;
+    pre_turn_log.push(...switch_result.log);
+  }
+  const was_final_action_turn = relay_in_final_action_turn;
+  const resolved_intents = {
+    player1: relay_intents.player1,
+    player2: relay_intents.player2
+  };
+  const { state, log } = resolve_turn(turn_state, resolved_intents);
+  relay_state = state;
+  const combined_log = [...pre_turn_log, ...log];
+  for (const slot_id of PLAYER_SLOTS) {
+    const premove = relay_premove_by_slot[slot_id];
+    if (!premove.active) {
+      continue;
+    }
+    const took_faint = relay_slot_took_faint(log, slot_id);
+    if (took_faint && premove.cursor < PREMOVE_TURN_COUNT - 1) {
+      premove.active = false;
+      premove.interrupted = true;
+      premove.cursor = PREMOVE_TURN_COUNT;
+      premove.steps = null;
+      combined_log.push({
+        type: "premove_interrupted",
+        turn: relay_turn,
+        summary: `${slot_id} premove interrupted after taking a knockout`,
+        data: { slot: slot_id }
+      });
+      continue;
+    }
+    if (relay_action_from_premove[slot_id]) {
+      premove.cursor += 1;
+      if (premove.cursor >= PREMOVE_TURN_COUNT) {
+        premove.active = false;
+        premove.steps = null;
+      }
+    }
+  }
+  for (const slot_id of PLAYER_SLOTS) {
+    const intent = relay_intents[slot_id];
+    if (intent) {
+      relay_last_action[slot_id] = intent;
+    }
+  }
+  for (const slot_id of PLAYER_SLOTS) {
+    const caused_faint = relay_slot_caused_faint(log, slot_id);
+    const should_reset = caused_faint && !relay_action_from_premove[slot_id] && relay_clock_by_slot[slot_id].phase === "normal";
+    relay_advance_clock_after_turn(slot_id, should_reset);
+  }
+  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log: combined_log });
+  if (relay_state.status === "ended") {
+    relay_ended = true;
+    relay_reset_match_to_lobby();
+    return;
+  }
+  const evade_player1 = relay_clock_by_slot.player1.inEvade;
+  const evade_player2 = relay_clock_by_slot.player2.inEvade;
+  if (evade_player1 && evade_player2) {
+    relay_state.status = "ended";
+    relay_state.winner = undefined;
+    relay_ended = true;
+    emit_local_post({
+      $: "state",
+      turn: relay_turn,
+      state: relay_state,
+      log: [
+        {
+          type: "time_end",
+          turn: relay_turn,
+          summary: "Both players reached Evade. Match ended.",
+          data: { mode: "double_evade" }
+        }
+      ]
+    });
+    relay_reset_match_to_lobby();
+    return;
+  }
+  if (was_final_action_turn && relay_final_action_for) {
+    relay_state.status = "ended";
+    relay_state.winner = relay_final_action_for;
+    relay_ended = true;
+    emit_local_post({
+      $: "state",
+      turn: relay_turn,
+      state: relay_state,
+      log: [
+        {
+          type: "time_end",
+          turn: relay_turn,
+          summary: `${relay_final_action_for} wins after final action against Evade`,
+          data: { winner: relay_final_action_for, mode: "single_evade_final_action" }
+        }
+      ]
+    });
+    relay_reset_match_to_lobby();
+    return;
+  }
+  if (evade_player1 !== evade_player2) {
+    relay_final_action_for = evade_player1 ? "player2" : "player1";
+    relay_in_final_action_turn = true;
+  } else {
+    relay_final_action_for = null;
+    relay_in_final_action_turn = false;
+  }
+  relay_start_turn();
+}
+function relay_fallback_intent_for_timeout(slot_id) {
+  if (!relay_state) {
+    return null;
+  }
+  const premove_step = relay_premove_step_for_turn(slot_id);
+  if (premove_step) {
+    relay_action_from_premove[slot_id] = true;
+    const intent = relay_premove_step_intent(premove_step);
+    const prep2 = relay_prepare_validation_state(slot_id, relay_forced_switch_intents[slot_id]);
+    if (!prep2.error && prep2.validationState && validate_intent(prep2.validationState, slot_id, intent) === null) {
+      relay_forced_switch_intents[slot_id] = prep2.forcedTarget;
+      return intent;
+    }
+    return null;
+  }
+  const fallback = relay_last_action[slot_id];
+  if (!fallback) {
+    return null;
+  }
+  const prep = relay_prepare_validation_state(slot_id, relay_forced_switch_intents[slot_id]);
+  if (prep.error || !prep.validationState) {
+    return null;
+  }
+  if (validate_intent(prep.validationState, slot_id, fallback) !== null) {
+    return null;
+  }
+  relay_forced_switch_intents[slot_id] = prep.forcedTarget;
+  relay_action_from_premove[slot_id] = false;
+  return fallback;
+}
+function relay_timeout_slot_if_needed(slot_id, now_ms) {
+  if (!relay_state || relay_ended) {
+    return;
+  }
+  if (!relay_slot_requires_intent(slot_id) || relay_intent_locked[slot_id]) {
+    return;
+  }
+  const deadline = relay_clock_by_slot[slot_id].deadlineAt;
+  if (deadline <= 0 || now_ms < deadline) {
+    return;
+  }
+  if (relay_state.pendingSwitch[slot_id] && !Number.isInteger(relay_forced_switch_intents[slot_id])) {
+    relay_forced_switch_intents[slot_id] = relay_pick_first_alive_replacement(relay_state, slot_id);
+  }
+  const auto_intent = relay_fallback_intent_for_timeout(slot_id);
+  relay_mark_intent_locked(slot_id, auto_intent, relay_action_from_premove[slot_id]);
+  relay_emit_turn_start_snapshot();
+}
+function relay_start_turn() {
+  if (!relay_state || relay_ended || relay_state.status !== "running") {
     return;
   }
   relay_turn += 1;
   relay_state.turn = relay_turn;
-  relay_intents.player1 = null;
-  relay_intents.player2 = null;
-  relay_forced_switch_intents.player1 = null;
-  relay_forced_switch_intents.player2 = null;
-  emit_local_post({
-    $: "turn_start",
-    turn: relay_turn,
-    deadline_at: 0,
-    intents: { player1: false, player2: false }
-  });
+  relay_reset_turn_buffers();
+  const now_ms = Date.now();
+  for (const slot_id of PLAYER_SLOTS) {
+    const clock = relay_clock_by_slot[slot_id];
+    if (!relay_slot_requires_intent(slot_id)) {
+      clock.deadlineAt = 0;
+      clock.seconds = relay_timer_seconds_for_clock(clock);
+      relay_mark_intent_locked(slot_id, null, false, true);
+      continue;
+    }
+    const seconds = relay_timer_seconds_for_clock(clock);
+    clock.seconds = seconds;
+    clock.deadlineAt = seconds > 0 ? now_ms + seconds * 1000 : 0;
+  }
+  relay_emit_turn_start_snapshot();
+  relay_finalize_turn();
 }
 function relay_start_match_if_ready() {
   if (relay_state || relay_ended) {
@@ -3978,6 +4378,7 @@ function relay_start_match_if_ready() {
   }
   relay_state.status = "running";
   relay_turn = 0;
+  relay_reset_runtime_state();
   emit_local_post({ $: "state", turn: 0, state: relay_state, log: [] });
   relay_start_turn();
 }
@@ -4041,65 +4442,74 @@ function relay_handle_intent(data) {
   if (data.turn !== relay_turn) {
     return;
   }
-  let validation_state = relay_state;
-  if (relay_state.pendingSwitch[slot_id]) {
-    const forced_target_candidate = Number.isInteger(data.forcedSwitchTargetIndex) ? data.forcedSwitchTargetIndex : relay_forced_switch_intents[slot_id];
-    if (typeof forced_target_candidate !== "number" || !Number.isInteger(forced_target_candidate)) {
-      return;
-    }
-    const forced_target = forced_target_candidate;
-    const forced_preview = apply_forced_switch(relay_state, slot_id, forced_target);
-    if (forced_preview.error) {
-      return;
-    }
-    validation_state = forced_preview.state;
-    relay_forced_switch_intents[slot_id] = forced_target;
-  } else {
-    relay_forced_switch_intents[slot_id] = null;
-  }
-  const validation = validate_intent(validation_state, slot_id, data.intent);
-  if (validation) {
+  if (!relay_slot_requires_intent(slot_id)) {
     return;
   }
-  relay_intents[slot_id] = data.intent;
-  if (!relay_intents.player1 || !relay_intents.player2) {
+  if (relay_intent_locked[slot_id]) {
     return;
   }
-  for (const slot_check of PLAYER_SLOTS) {
-    if (relay_state.pendingSwitch[slot_check] && !Number.isInteger(relay_forced_switch_intents[slot_check])) {
-      return;
-    }
-  }
-  let turn_state = relay_state;
-  const pre_turn_log = [];
-  for (const slot_apply of PLAYER_SLOTS) {
-    if (!turn_state.pendingSwitch[slot_apply]) {
-      continue;
-    }
-    const target_candidate = relay_forced_switch_intents[slot_apply];
-    if (typeof target_candidate !== "number" || !Number.isInteger(target_candidate)) {
-      return;
-    }
-    const target_index = target_candidate;
-    const switch_result = apply_forced_switch(turn_state, slot_apply, target_index);
-    if (switch_result.error) {
-      return;
-    }
-    turn_state = switch_result.state;
-    pre_turn_log.push(...switch_result.log);
-  }
-  const { state, log } = resolve_turn(turn_state, {
-    player1: relay_intents.player1,
-    player2: relay_intents.player2
-  });
-  relay_state = state;
-  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log: [...pre_turn_log, ...log] });
-  if (relay_state.status === "ended") {
-    relay_ended = true;
-    relay_reset_match_to_lobby();
+  if (relay_premove_by_slot[slot_id].active && relay_turn <= PREMOVE_TURN_COUNT && data.intent.action !== "premove_plan") {
     return;
   }
-  relay_start_turn();
+  if (data.intent.action === "premove_plan") {
+    if (relay_turn !== 1 || relay_state.pendingSwitch[slot_id]) {
+      return;
+    }
+    const steps_input = data.intent.steps;
+    if (!Array.isArray(steps_input) || steps_input.length !== PREMOVE_TURN_COUNT) {
+      return;
+    }
+    const steps = [];
+    for (const raw_step of steps_input) {
+      if (!raw_step || typeof raw_step !== "object") {
+        return;
+      }
+      if (raw_step.action === "switch") {
+        if (!Number.isInteger(raw_step.targetIndex)) {
+          return;
+        }
+        steps.push({ action: "switch", targetIndex: raw_step.targetIndex });
+        continue;
+      }
+      if (raw_step.action === "use_move") {
+        if (!Number.isInteger(raw_step.moveIndex)) {
+          return;
+        }
+        steps.push({ action: "use_move", moveIndex: raw_step.moveIndex });
+        continue;
+      }
+      return;
+    }
+    const tuple_steps = [steps[0], steps[1], steps[2]];
+    const first_intent = relay_premove_step_intent(tuple_steps[0]);
+    const prep2 = relay_prepare_validation_state(slot_id, null);
+    if (prep2.error || !prep2.validationState || validate_intent(prep2.validationState, slot_id, first_intent) !== null) {
+      return;
+    }
+    relay_premove_by_slot[slot_id] = {
+      active: true,
+      interrupted: false,
+      cursor: 0,
+      steps: tuple_steps
+    };
+    relay_mark_intent_locked(slot_id, first_intent, true);
+    relay_emit_turn_start_snapshot();
+    relay_finalize_turn();
+    return;
+  }
+  const forced_target_candidate = typeof data.forcedSwitchTargetIndex === "number" && Number.isInteger(data.forcedSwitchTargetIndex) ? data.forcedSwitchTargetIndex : relay_forced_switch_intents[slot_id];
+  const prep = relay_prepare_validation_state(slot_id, forced_target_candidate);
+  if (prep.error || !prep.validationState) {
+    return;
+  }
+  const next_intent = data.intent;
+  if (validate_intent(prep.validationState, slot_id, next_intent) !== null) {
+    return;
+  }
+  relay_forced_switch_intents[slot_id] = prep.forcedTarget;
+  relay_mark_intent_locked(slot_id, next_intent, false);
+  relay_emit_turn_start_snapshot();
+  relay_finalize_turn();
 }
 function relay_handle_forced_switch(data) {
   if (!relay_state || relay_ended) {
@@ -4111,6 +4521,9 @@ function relay_handle_forced_switch(data) {
   }
   const slot_id = relay_slot_by_id.get(id);
   if (!slot_id) {
+    return;
+  }
+  if (!relay_slot_requires_intent(slot_id) || relay_intent_locked[slot_id]) {
     return;
   }
   if (!relay_state.pendingSwitch[slot_id]) {
@@ -4127,6 +4540,7 @@ function relay_handle_forced_switch(data) {
     return;
   }
   relay_forced_switch_intents[slot_id] = data.targetIndex;
+  relay_emit_turn_start_snapshot();
 }
 function relay_handle_surrender(data) {
   if (!relay_state || relay_ended || "loser" in data) {
@@ -4186,6 +4600,15 @@ function relay_consume_post(data, seen_at) {
     default:
       return;
   }
+}
+function relay_tick(now_ms = Date.now()) {
+  if (!relay_state || relay_ended || relay_state.status !== "running") {
+    return;
+  }
+  for (const slot_id of PLAYER_SLOTS) {
+    relay_timeout_slot_if_needed(slot_id, now_ms);
+  }
+  relay_finalize_turn();
 }
 function consume_network_message(message) {
   const seen_at = typeof message?.server_time === "number" ? message.server_time : Date.now();
@@ -4546,20 +4969,67 @@ function render_participants() {
   }
 }
 function update_deadline() {
+  const viewer_slot = slot;
+  const enemy_slot = viewer_slot ? relay_other_slot(viewer_slot) : null;
+  if (viewer_slot && !is_spectator) {
+    if (evade_by_slot[viewer_slot] || timer_phase_by_slot[viewer_slot] === "evade") {
+      status_deadline.textContent = "EVADE";
+    } else if (final_action_for && final_action_for !== viewer_slot) {
+      status_deadline.textContent = "LOCK";
+    } else {
+      const my_deadline = deadline_by_slot[viewer_slot];
+      if (my_deadline <= 0) {
+        status_deadline.textContent = "--:--";
+      } else {
+        const remaining2 = Math.max(0, my_deadline - Date.now());
+        const minutes2 = Math.floor(remaining2 / 60000);
+        const seconds2 = Math.floor(remaining2 % 60000 / 1000);
+        status_deadline.textContent = `${minutes2.toString().padStart(2, "0")}:${seconds2.toString().padStart(2, "0")}`;
+      }
+    }
+    if (status_enemy_timer && enemy_slot) {
+      let enemy_label = "waiting";
+      if (evade_by_slot[enemy_slot] || timer_phase_by_slot[enemy_slot] === "evade") {
+        enemy_label = "evade";
+      } else if (final_action_for && final_action_for !== enemy_slot) {
+        enemy_label = "blocked";
+      } else {
+        enemy_label = timer_phase_by_slot[enemy_slot] === "scout" ? "scout" : `${timer_seconds_by_slot[enemy_slot]}s`;
+      }
+      status_enemy_timer.textContent = `Opp ${enemy_label}`;
+    }
+    return;
+  }
   if (deadline_at <= 0) {
     status_deadline.textContent = "--:--";
+    if (status_enemy_timer) {
+      status_enemy_timer.textContent = "";
+    }
     return;
   }
   const remaining = Math.max(0, deadline_at - Date.now());
   const minutes = Math.floor(remaining / 60000);
   const seconds = Math.floor(remaining % 60000 / 1000);
   status_deadline.textContent = `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+  if (status_enemy_timer) {
+    status_enemy_timer.textContent = "";
+  }
+}
+function local_slot_can_act_now() {
+  if (!slot || is_spectator) {
+    return false;
+  }
+  if (evade_by_slot[slot] || timer_phase_by_slot[slot] === "evade") {
+    return false;
+  }
+  if (final_action_for && final_action_for !== slot) {
+    return false;
+  }
+  return true;
 }
 function reset_premove_state() {
   premove_state = "idle";
   premove_plan = [null, null, null];
-  premove_last_auto_sent_turn = 0;
-  premove_last_blocked_turn_logged = 0;
   update_premove_ui();
 }
 function current_preview_active_moves() {
@@ -4601,16 +5071,15 @@ function update_premove_ui() {
   if (!premove_btn || !premove_status) {
     return;
   }
-  const can_start = !!slot && !is_spectator && match_started && current_turn === 1 && !has_pending_switch() && selected_intent_turn !== 1 && premove_state === "idle";
+  const can_start = !!slot && !is_spectator && match_started && current_turn === 1 && local_slot_can_act_now() && !has_pending_switch() && selected_intent_turn !== 1 && premove_state === "idle";
   premove_btn.classList.remove("active");
   if (premove_state === "collecting") {
     premove_btn.textContent = "Cancelar";
     premove_btn.disabled = false;
     premove_btn.classList.add("active");
   } else if (premove_is_locked_turn()) {
-    const waiting_send = selected_intent_turn !== current_turn;
-    premove_btn.textContent = waiting_send ? "Enviar premove" : "Premove ativo";
-    premove_btn.disabled = !waiting_send;
+    premove_btn.textContent = "Premove ativo";
+    premove_btn.disabled = true;
     premove_btn.classList.add("active");
   } else {
     premove_btn.textContent = "Premove";
@@ -4630,7 +5099,7 @@ function update_premove_ui() {
   premove_status.textContent = `Premove local pronto | ${steps.join(" | ")}${live_marker}`;
 }
 function start_premove_collection() {
-  if (!slot || is_spectator || !match_started) {
+  if (!slot || is_spectator || !match_started || !local_slot_can_act_now()) {
     append_log("premove indisponivel agora");
     return;
   }
@@ -4659,39 +5128,28 @@ function cancel_premove_collection() {
   append_log("premove cancelado");
   update_action_controls();
 }
-function try_send_premove_intent_for_current_turn() {
-  if (!premove_is_locked_turn()) {
-    return;
-  }
+function submit_premove_plan() {
   if (!slot || is_spectator) {
-    return;
+    return false;
   }
-  if (selected_intent_turn === current_turn) {
-    return;
+  const planned = premove_plan;
+  if (!planned[0] || !planned[1] || !planned[2]) {
+    return false;
   }
-  if (premove_last_auto_sent_turn === current_turn) {
-    return;
+  const to_step = (step) => step.action === "switch" ? { action: "switch", targetIndex: step.targetIndex } : { action: "use_move", moveIndex: step.moveIndex };
+  const intent = {
+    action: "premove_plan",
+    steps: [to_step(planned[0]), to_step(planned[1]), to_step(planned[2])]
+  };
+  if (!post_turn_intent(intent)) {
+    return false;
   }
-  const planned_step = premove_plan[current_turn - 1];
-  if (!planned_step) {
-    return;
-  }
-  if (has_pending_switch()) {
-    if (premove_last_blocked_turn_logged !== current_turn) {
-      append_log(`premove T${current_turn} aguardando replacement`);
-      premove_last_blocked_turn_logged = current_turn;
-    }
-    return;
-  }
-  const planned_intent = planned_step.action === "switch" ? { action: "switch", targetIndex: planned_step.targetIndex } : { action: "use_move", moveIndex: planned_step.moveIndex };
-  if (!post_turn_intent(planned_intent)) {
-    return;
-  }
-  premove_last_auto_sent_turn = current_turn;
-  premove_last_blocked_turn_logged = 0;
-  selected_intent = planned_intent;
+  selected_intent = intent;
   selected_intent_turn = current_turn;
-  append_log(`premove executado no T${current_turn}: ${premove_step_label(planned_step)}`);
+  premove_state = "locked";
+  append_log("premove pronto: sequencia T1-T3 enviada");
+  update_action_controls();
+  return true;
 }
 function collect_premove_move(moveIndex) {
   if (!premove_is_collecting_turn()) {
@@ -4707,9 +5165,7 @@ function collect_premove_move(moveIndex) {
   premove_plan[next_index] = step;
   append_log(`premove T${next_index + 1}: ${premove_step_label(step)}`);
   if (next_index + 1 >= PREMOVE_TURN_COUNT) {
-    premove_state = "locked";
-    append_log("premove pronto: T1-T3 salvos localmente");
-    try_send_premove_intent_for_current_turn();
+    submit_premove_plan();
   }
   update_action_controls();
   return true;
@@ -4748,9 +5204,7 @@ function collect_premove_switch(targetIndex) {
   premove_plan[next_index] = step;
   append_log(`premove T${next_index + 1}: ${premove_step_label(step)}`);
   if (next_index + 1 >= PREMOVE_TURN_COUNT) {
-    premove_state = "locked";
-    append_log("premove pronto: T1-T3 salvos localmente");
-    try_send_premove_intent_for_current_turn();
+    submit_premove_plan();
   }
   update_action_controls();
   return true;
@@ -5462,7 +5916,7 @@ function update_bench(state, viewer_slot) {
   const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
   const my_bench = me.team.map((_, idx) => idx).filter((idx) => idx !== me.activeIndex);
   const opp_bench = opp.team.map((_, idx) => idx).filter((idx) => idx !== opp.activeIndex);
-  const can_switch = !!slot && slot === viewer_slot && match_started && !is_spectator && (!!has_pending_switch() || current_turn > 0);
+  const can_switch = !!slot && slot === viewer_slot && match_started && !is_spectator && local_slot_can_act_now() && (!!has_pending_switch() || current_turn > 0);
   player_bench_slots.forEach((slot_el, i) => {
     const idx = my_bench[i] ?? null;
     const mon = idx !== null ? me.team[idx] : null;
@@ -5477,13 +5931,15 @@ function update_bench(state, viewer_slot) {
 function update_action_controls() {
   clear_finished_premove_if_needed();
   const has_team = selected.length === 3;
+  const local_can_act = local_slot_can_act_now();
+  const blocked_by_evade = !!(slot && (evade_by_slot[slot] || timer_phase_by_slot[slot] === "evade"));
   const pending_switch = has_pending_switch();
   const forced_switch_ready = !relay_server_managed && has_forced_switch_target_for_current_turn();
   const premove_collecting_turn = premove_is_collecting_turn();
   const premove_locked_turn = premove_is_locked_turn();
   const premove_step_for_turn = premove_locked_turn ? premove_plan[current_turn - 1] : null;
   const premove_move_index_for_turn = premove_step_for_turn?.action === "use_move" ? premove_step_for_turn.moveIndex : null;
-  const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || pending_switch && !forced_switch_ready;
+  const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || !local_can_act || pending_switch && !forced_switch_ready;
   if (!has_team) {
     move_buttons.forEach((btn, index) => {
       btn.textContent = `Move ${index + 1}`;
@@ -5522,6 +5978,9 @@ function update_action_controls() {
     } else if (premove_locked_turn) {
       btn.textContent = planned_for_this_turn ? `${index + 1}. ${label} (premove)` : `${index + 1}. ${label}`;
       btn.disabled = true;
+    } else if (!local_can_act) {
+      btn.textContent = blocked_by_evade ? `${index + 1}. ${label} (Evade)` : `${index + 1}. ${label} (bloqueado)`;
+      btn.disabled = true;
     } else if (locked_by_choice_band) {
       btn.textContent = `${index + 1}. ${label} (Choice Band lock)`;
       btn.disabled = true;
@@ -5539,7 +5998,7 @@ function update_action_controls() {
     btn.classList.toggle("selected-intent", is_selected_move);
   });
   if (switch_btn) {
-    const switch_disabled = !match_started || !slot || is_spectator || current_turn <= 0;
+    const switch_disabled = !match_started || !slot || is_spectator || !local_can_act || current_turn <= 0;
     switch_btn.disabled = switch_disabled;
   }
   const show_surrender = match_started && !!slot && !is_spectator;
@@ -5598,6 +6057,10 @@ function can_send_intent() {
   if (is_spectator) {
     return false;
   }
+  if (!local_slot_can_act_now()) {
+    append_log("acao bloqueada neste turno");
+    return false;
+  }
   return true;
 }
 function send_move_intent(moveIndex) {
@@ -5608,14 +6071,17 @@ function send_move_intent(moveIndex) {
     append_log(`premove ativo: T${current_turn} ja foi definido`);
     return;
   }
+  if (selected_intent_turn === current_turn) {
+    append_log("intent ja travado neste turno");
+    return;
+  }
   if (!post_turn_intent({ action: "use_move", moveIndex })) {
     return;
   }
-  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
   selected_intent = { action: "use_move", moveIndex };
   selected_intent_turn = current_turn;
   update_action_controls();
-  append_log(was_selected ? "intent updated" : "intent sent");
+  append_log("intent sent");
 }
 function send_switch_intent(targetIndex) {
   if (!has_pending_switch() && collect_premove_switch(targetIndex)) {
@@ -5629,7 +6095,6 @@ function send_switch_intent(targetIndex) {
     if (relay_server_managed) {
       if (try_post({ $: "forced_switch", targetIndex, player_id })) {
         close_switch_modal();
-        try_send_premove_intent_for_current_turn();
         update_action_controls();
       }
       return;
@@ -5638,24 +6103,20 @@ function send_switch_intent(targetIndex) {
     forced_switch_target_turn = current_turn;
     append_log("replacement selected (hidden until turn resolves)");
     close_switch_modal();
-    if (selected_intent_turn === current_turn && selected_intent) {
-      const reposted = post_turn_intent(selected_intent);
-      if (reposted) {
-        append_log("intent updated");
-      }
-    }
-    try_send_premove_intent_for_current_turn();
     update_action_controls();
+    return;
+  }
+  if (selected_intent_turn === current_turn) {
+    append_log("intent ja travado neste turno");
     return;
   }
   if (!post_turn_intent({ action: "switch", targetIndex })) {
     return;
   }
-  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
   selected_intent = { action: "switch", targetIndex };
   selected_intent_turn = current_turn;
   update_action_controls();
-  append_log(was_selected ? "intent updated" : "intent sent");
+  append_log("intent sent");
 }
 function send_surrender() {
   if (!match_started || is_spectator || !slot)
@@ -5801,6 +6262,11 @@ function reset_to_lobby_view() {
   latest_state = null;
   current_turn = 0;
   deadline_at = 0;
+  deadline_by_slot = { player1: 0, player2: 0 };
+  timer_seconds_by_slot = { player1: 0, player2: 0 };
+  timer_phase_by_slot = { player1: "scout", player2: "scout" };
+  evade_by_slot = { player1: false, player2: false };
+  final_action_for = null;
   selected_intent = null;
   selected_intent_turn = 0;
   clear_forced_switch_target();
@@ -5816,9 +6282,13 @@ function reset_to_lobby_view() {
 function handle_turn_start(data) {
   current_turn = data.turn;
   deadline_at = data.deadline_at;
+  deadline_by_slot = data.deadlines ? { ...data.deadlines } : { player1: data.deadline_at, player2: data.deadline_at };
+  timer_seconds_by_slot = data.timer_seconds ? { ...data.timer_seconds } : { player1: 0, player2: 0 };
+  timer_phase_by_slot = data.timer_phase ? { ...data.timer_phase } : { player1: "normal", player2: "normal" };
+  evade_by_slot = data.evade ? { ...data.evade } : { player1: false, player2: false };
+  final_action_for = data.final_action_for ?? null;
   selected_intent = null;
   selected_intent_turn = 0;
-  premove_last_blocked_turn_logged = 0;
   clear_forced_switch_target();
   status_turn.textContent = `${current_turn}`;
   update_deadline();
@@ -5837,9 +6307,8 @@ function handle_turn_start(data) {
     prematch.style.display = "none";
     document.body.classList.remove("prematch-open");
   }
-  try_send_premove_intent_for_current_turn();
   update_action_controls();
-  if (slot && has_pending_switch() && !switch_modal.classList.contains("open")) {
+  if (slot && local_slot_can_act_now() && has_pending_switch() && !switch_modal.classList.contains("open")) {
     open_switch_modal("forced");
   }
 }
@@ -6236,15 +6705,13 @@ function handle_state(data) {
     }
   }
   update_action_controls();
-  try_send_premove_intent_for_current_turn();
-  update_action_controls();
   if (data.state.status === "ended" && prev_state?.status !== "ended") {
     append_match_end_marker();
   }
   if (data.state.status === "ended") {
     show_match_end(data.state.winner);
   }
-  if (slot && data.state.pendingSwitch?.[slot] && !switch_modal.classList.contains("open")) {
+  if (slot && local_slot_can_act_now() && data.state.pendingSwitch?.[slot] && !switch_modal.classList.contains("open")) {
     open_switch_modal("forced");
   }
 }
@@ -6317,6 +6784,10 @@ function handle_post(message) {
       handle_turn_start(data);
       return;
     case "intent_locked":
+      if (slot && data.slot === slot && data.turn === current_turn && selected_intent_turn !== current_turn) {
+        selected_intent = null;
+        selected_intent_turn = current_turn;
+      }
       append_log(`${data.slot} locked intent for turn ${data.turn}`);
       update_action_controls();
       return;
@@ -6379,8 +6850,7 @@ if (premove_btn) {
       return;
     }
     if (premove_is_locked_turn()) {
-      try_send_premove_intent_for_current_turn();
-      update_action_controls();
+      append_log("premove ja ativo");
       return;
     }
     start_premove_collection();
@@ -6502,6 +6972,12 @@ setInterval(() => {
   }
   relay_prune_inactive(Date.now());
 }, 5000);
+setInterval(() => {
+  if (relay_server_managed) {
+    return;
+  }
+  relay_tick(Date.now());
+}, 150);
 load_team_selection();
 render_roster();
 render_tabs();

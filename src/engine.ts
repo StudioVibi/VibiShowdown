@@ -1281,6 +1281,9 @@ function build_actions(intents: Record<PlayerSlot, PlayerIntent | null>, state: 
   for (const slot of SLOT_ORDER) {
     const intent = intents[slot];
     if (!intent) continue;
+    if (intent.action === "premove_plan") {
+      continue;
+    }
     if (intent.action === "switch") {
       actions.push({ player: slot, type: "switch", phase: "switch", targetIndex: intent.targetIndex });
     } else {
@@ -1544,6 +1547,9 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
   const player = state.players[slot];
   if (!player) {
     return "unknown player";
+  }
+  if (intent.action === "premove_plan") {
+    return "premove plan must be handled before turn resolution";
   }
   if (state.pendingSwitch[slot]) {
     return "pending switch";

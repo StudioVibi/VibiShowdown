@@ -402,6 +402,12 @@
         color: var(--accent);
       }
 
+      #status-enemy-timer {
+        min-width: 64px;
+        text-align: right;
+        color: var(--muted);
+      }
+
       .premove-btn {
         border: 1px solid rgba(110, 214, 255, 0.45);
         border-radius: 999px;
@@ -1589,6 +1595,7 @@
                   <button class="premove-btn" id="premove-btn" type="button">Premove</button>
                   <span>Turn <span id="status-turn">0</span></span>
                   <span id="status-deadline">--:--</span>
+                  <span id="status-enemy-timer"></span>
                 </div>
                 <div class="premove-status" id="premove-status"></div>
               </div>

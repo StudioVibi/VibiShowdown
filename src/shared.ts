@@ -79,9 +79,14 @@ export type GameState = {
   leechSeedSourceByTarget: Record<PlayerSlot, PlayerSlot | null>;
 };
 
+export type PremoveStep = { action: "switch"; targetIndex: number } | { action: "use_move"; moveIndex: number };
+
 export type PlayerIntent =
   | { action: "switch"; targetIndex: number }
-  | { action: "use_move"; moveIndex: number };
+  | { action: "use_move"; moveIndex: number }
+  | { action: "premove_plan"; steps: [PremoveStep, PremoveStep, PremoveStep] };
+
+export type TurnTimerPhase = "scout" | "normal" | "evade";
 
 export type EventLog = {
   type: string;
@@ -116,7 +121,17 @@ export type IntentPost = {
 };
 export type ForcedSwitchPost = { $: "forced_switch"; targetIndex: number; player_id?: string };
 export type IntentLockedPost = { $: "intent_locked"; slot: PlayerSlot; turn: number };
-export type TurnStartPost = { $: "turn_start"; turn: number; deadline_at: number; intents: Record<PlayerSlot, boolean> };
+export type TurnStartPost = {
+  $: "turn_start";
+  turn: number;
+  deadline_at: number;
+  intents: Record<PlayerSlot, boolean>;
+  deadlines?: Record<PlayerSlot, number>;
+  timer_seconds?: Record<PlayerSlot, number>;
+  timer_phase?: Record<PlayerSlot, TurnTimerPhase>;
+  evade?: Record<PlayerSlot, boolean>;
+  final_action_for?: PlayerSlot | null;
+};
 export type StatePost = { $: "state"; turn: number; state: GameState; log: EventLog[] };
 export type SurrenderRequestPost = { $: "surrender"; player_id?: string };
 export type SurrenderPost = { $: "surrender"; turn: number; loser: PlayerSlot; winner: PlayerSlot };
