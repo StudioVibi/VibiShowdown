@@ -2729,7 +2729,7 @@ function animate_hp_text(
 ): void {
   const target = side === "player" ? player_meta : enemy_meta;
   const start = performance.now();
-  const duration = 260;
+  const duration = 520;
   const raf_key = side;
   if (hp_animation[raf_key]) {
     cancelAnimationFrame(hp_animation[raf_key]!);
@@ -2870,7 +2870,7 @@ function animate_hp_bar(bar: HTMLSpanElement, from: number, to: number): void {
   bar.style.width = `${to}%`;
   window.setTimeout(() => {
     bar.classList.remove("hp-anim");
-  }, 450);
+  }, 1000);
 }
 
 function sprite_wrap(side: "player" | "enemy"): HTMLDivElement {
@@ -2942,25 +2942,26 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
   });
   if (steps.length > 0) {
     const is_premove_window = current_turn >= 1 && current_turn <= PREMOVE_TURN_COUNT;
-    const pacing = is_premove_window ? 1.35 : 1;
-    const step_gap = is_premove_window ? 180 : 60;
+    const pacing = is_premove_window ? 1.45 : 1.2;
+    const step_gap = is_premove_window ? 260 : 180;
+    const min_step_duration = is_premove_window ? 1300 : 1000;
     const paced = (value: number): number => Math.max(1, Math.round(value * pacing));
     let cursor = 0;
     for (const step of steps) {
       const base_duration =
-        step.kind === "damage" ? 760 : step.kind === "shield_hit" ? 900 : step.kind === "shield_on" ? 720 : 560;
-      const duration = paced(base_duration);
+        step.kind === "damage" ? 900 : step.kind === "shield_hit" ? 1100 : step.kind === "shield_on" ? 1000 : 900;
+      const duration = Math.max(min_step_duration, paced(base_duration));
       schedule_animation(() => {
         if (step.kind === "damage") {
           const attacker_wrap = sprite_wrap(step.attackerSide);
           const defender_wrap = sprite_wrap(step.defenderSide);
-          trigger_class(attacker_wrap, "jump", paced(360));
-          trigger_class(defender_wrap, "hit", paced(520));
+          trigger_class(attacker_wrap, "jump", paced(620));
+          trigger_class(defender_wrap, "hit", paced(820));
           const bar = step.defenderSide === "player" ? player_hp : enemy_hp;
           const from_percent = Math.max(0, Math.min(1, step.from / step.maxHp)) * 100;
           const to_percent = Math.max(0, Math.min(1, step.to / step.maxHp)) * 100;
           animate_hp_bar(bar, from_percent, to_percent);
-          animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, paced(220));
+          animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, paced(300));
           return;
         }
         if (step.kind === "shield_on") {
@@ -2971,13 +2972,13 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
         if (step.kind === "shield_hit") {
           const attacker_wrap = sprite_wrap(step.attackerSide);
           const defender_wrap = sprite_wrap(step.defenderSide);
-          trigger_class(attacker_wrap, "jump", paced(360));
-          trigger_shield_hit(defender_wrap, paced(920));
+          trigger_class(attacker_wrap, "jump", paced(620));
+          trigger_shield_hit(defender_wrap, paced(1100));
           return;
         }
         if (step.kind === "heal") {
           const wrap = sprite_wrap(step.side);
-          trigger_class(wrap, "heal", paced(440));
+          trigger_class(wrap, "heal", paced(700));
         }
       }, cursor);
       cursor += duration + step_gap;
