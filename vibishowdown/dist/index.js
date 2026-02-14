@@ -4579,6 +4579,9 @@ function premove_step_label(step) {
   if (!step) {
     return "--";
   }
+  if (step.action === "switch") {
+    return `Trocar -> ${step.targetName}`;
+  }
   return MOVE_LABELS[step.moveId] || step.moveId;
 }
 function premove_is_collecting_turn() {
@@ -4645,7 +4648,7 @@ function start_premove_collection() {
   }
   reset_premove_state();
   premove_state = "collecting";
-  append_log("premove ativado: escolha 3 jogadas (T1-T3)");
+  append_log("premove ativado: escolha 3 acoes (move ou switch) para T1-T3");
   update_action_controls();
 }
 function cancel_premove_collection() {
@@ -4680,12 +4683,13 @@ function try_send_premove_intent_for_current_turn() {
     }
     return;
   }
-  if (!post_turn_intent({ action: "use_move", moveIndex: planned_step.moveIndex })) {
+  const planned_intent = planned_step.action === "switch" ? { action: "switch", targetIndex: planned_step.targetIndex } : { action: "use_move", moveIndex: planned_step.moveIndex };
+  if (!post_turn_intent(planned_intent)) {
     return;
   }
   premove_last_auto_sent_turn = current_turn;
   premove_last_blocked_turn_logged = 0;
-  selected_intent = { action: "use_move", moveIndex: planned_step.moveIndex };
+  selected_intent = planned_intent;
   selected_intent_turn = current_turn;
   append_log(`premove executado no T${current_turn}: ${premove_step_label(planned_step)}`);
 }
@@ -4699,7 +4703,48 @@ function collect_premove_move(moveIndex) {
   }
   const active_moves = current_preview_active_moves();
   const move_id = active_moves[moveIndex] ?? "none";
-  const step = { moveIndex, moveId: move_id };
+  const step = { action: "use_move", moveIndex, moveId: move_id };
+  premove_plan[next_index] = step;
+  append_log(`premove T${next_index + 1}: ${premove_step_label(step)}`);
+  if (next_index + 1 >= PREMOVE_TURN_COUNT) {
+    premove_state = "locked";
+    append_log("premove pronto: T1-T3 salvos localmente");
+    try_send_premove_intent_for_current_turn();
+  }
+  update_action_controls();
+  return true;
+}
+function collect_premove_switch(targetIndex) {
+  if (!premove_is_collecting_turn()) {
+    return false;
+  }
+  const next_index = premove_plan.findIndex((step2) => step2 === null);
+  if (next_index < 0) {
+    return true;
+  }
+  if (!latest_state || !slot) {
+    append_log("premove: switch indisponivel agora");
+    return true;
+  }
+  const player = latest_state.players[slot];
+  if (targetIndex < 0 || targetIndex >= player.team.length) {
+    append_log("premove: switch invalido");
+    return true;
+  }
+  if (targetIndex === player.activeIndex) {
+    append_log("premove: ja esta ativo");
+    return true;
+  }
+  const target = player.team[targetIndex];
+  if (!target || target.hp <= 0) {
+    append_log("premove: alvo de switch sem HP");
+    return true;
+  }
+  const step = {
+    action: "switch",
+    targetIndex,
+    targetName: monster_label(target.id, target.name)
+  };
   premove_plan[next_index] = step;
   append_log(`premove T${next_index + 1}: ${premove_step_label(step)}`);
   if (next_index + 1 >= PREMOVE_TURN_COUNT) {
@@ -5419,6 +5464,7 @@ function update_action_controls() {
   const premove_collecting_turn = premove_is_collecting_turn();
   const premove_locked_turn = premove_is_locked_turn();
   const premove_step_for_turn = premove_locked_turn ? premove_plan[current_turn - 1] : null;
+  const premove_move_index_for_turn = premove_step_for_turn?.action === "use_move" ? premove_step_for_turn.moveIndex : null;
   const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || pending_switch && !forced_switch_ready;
   if (!has_team) {
     move_buttons.forEach((btn, index) => {
@@ -5451,7 +5497,7 @@ function update_action_controls() {
     const label = MOVE_LABELS[move] || move;
     const locked_by_choice_band = choice_band_locked_move !== null && index !== choice_band_locked_move;
     const is_locked_slot = choice_band_locked_move !== null && index === choice_band_locked_move;
-    const planned_for_this_turn = premove_step_for_turn?.moveIndex === index;
+    const planned_for_this_turn = premove_move_index_for_turn === index;
     if (premove_collecting_turn) {
       btn.textContent = `${index + 1}. ${label}`;
       btn.disabled = false;
@@ -5554,8 +5600,8 @@ function send_move_intent(moveIndex) {
   append_log(was_selected ? "intent updated" : "intent sent");
 }
 function send_switch_intent(targetIndex) {
-  if (!has_pending_switch() && premove_is_collecting_turn()) {
-    cancel_premove_collection();
+  if (!has_pending_switch() && collect_premove_switch(targetIndex)) {
+    return;
   }
   if (!has_pending_switch() && premove_is_locked_turn()) {
     append_log(`premove ativo: switch manual bloqueado ate o Turn ${PREMOVE_TURN_COUNT + 1}`);
