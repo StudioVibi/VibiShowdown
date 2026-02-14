@@ -353,22 +353,24 @@
         width: 42%;
         aspect-ratio: 1;
         border-radius: 50%;
-        background: rgba(200, 200, 200, 0.6);
+        background: rgba(204, 212, 224, 0.45);
         opacity: 0;
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%) scale(0.7);
-        box-shadow: 0 0 10px rgba(200, 200, 200, 0.35);
+        box-shadow:
+          0 0 10px rgba(195, 205, 220, 0.4),
+          0 0 24px rgba(195, 205, 220, 0.2);
         z-index: 2;
         pointer-events: none;
       }
 
       .sprite.shield-on .shield {
-        animation: shieldAppear 0.4s ease;
+        animation: shieldAppear 0.65s ease forwards;
       }
 
       .sprite.shield-hit .shield {
-        animation: shieldHit 0.45s ease;
+        animation: shieldHit 0.9s ease forwards;
       }
 
       .arena {
@@ -1467,30 +1469,46 @@
       @keyframes shieldAppear {
         0% {
           opacity: 0;
-          transform: translate(-50%, -50%) scale(0.6);
+          transform: translate(-50%, -50%) scale(0.62);
         }
-        60% {
-          opacity: 0.6;
+        55% {
+          opacity: 0.72;
           transform: translate(-50%, -50%) scale(1);
         }
         100% {
-          opacity: 0;
+          opacity: 0.45;
           transform: translate(-50%, -50%) scale(1);
         }
       }
 
       @keyframes shieldHit {
         0% {
-          opacity: 0.6;
-          background: rgba(200, 200, 200, 0.6);
+          opacity: 0.45;
+          background: rgba(204, 212, 224, 0.45);
+          box-shadow:
+            0 0 10px rgba(195, 205, 220, 0.4),
+            0 0 24px rgba(195, 205, 220, 0.2);
         }
-        35% {
-          opacity: 0.9;
-          background: rgba(255, 70, 70, 0.8);
+        45% {
+          opacity: 0.62;
+          background: rgba(204, 212, 224, 0.5);
+          box-shadow:
+            0 0 12px rgba(195, 205, 220, 0.45),
+            0 0 26px rgba(195, 205, 220, 0.24);
+        }
+        78% {
+          opacity: 0.92;
+          background: rgba(255, 76, 76, 0.82);
+          box-shadow:
+            0 0 14px rgba(255, 92, 92, 0.55),
+            0 0 30px rgba(255, 92, 92, 0.3);
         }
         100% {
           opacity: 0;
-          background: rgba(255, 70, 70, 0);
+          background: rgba(255, 76, 76, 0);
+          box-shadow:
+            0 0 0 rgba(255, 92, 92, 0),
+            0 0 0 rgba(255, 92, 92, 0);
         }
       }
 

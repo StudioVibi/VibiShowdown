@@ -4755,6 +4755,24 @@ function collect_premove_switch(targetIndex) {
   update_action_controls();
   return true;
 }
+function should_break_premove_on_taken_faint(log) {
+  if (!slot) {
+    return false;
+  }
+  if (premove_state !== "locked") {
+    return false;
+  }
+  if (current_turn >= PREMOVE_TURN_COUNT) {
+    return false;
+  }
+  return log.some((entry) => {
+    if (entry.type !== "faint") {
+      return false;
+    }
+    const data = entry.data;
+    return data?.slot === slot;
+  });
+}
 function show_warning(message) {
   config_warning.textContent = message;
 }
@@ -5922,6 +5940,8 @@ function update_panels(state, opts) {
   const opp = state.players[enemy_slot];
   const my_active = me.team[me.activeIndex];
   const opp_active = opp.team[opp.activeIndex];
+  const my_pending_replacement = !!state.pendingSwitch?.[viewer_slot] && my_active.hp <= 0;
+  const opp_pending_replacement = !!state.pendingSwitch?.[enemy_slot] && opp_active.hp <= 0;
   player_title.textContent = me.name || player_name;
   if (!opts?.skipMeta?.player) {
     player_meta.textContent = `Lv ${my_active.level} · HP ${my_active.hp}/${my_active.maxHp}`;
@@ -5929,9 +5949,17 @@ function update_panels(state, opts) {
   if (!opts?.skipBar?.player) {
     player_hp.style.width = `${Math.max(0, Math.min(1, my_active.hp / my_active.maxHp)) * 100}%`;
   }
-  player_sprite.src = icon_path(my_active.id);
-  player_sprite.alt = monster_label(my_active.id);
-  set_monster_tooltip(player_sprite_wrap, tooltip_from_state(my_active));
+  if (my_pending_replacement) {
+    player_sprite.removeAttribute("src");
+    player_sprite.alt = "";
+    player_sprite.style.visibility = "hidden";
+    set_monster_tooltip(player_sprite_wrap, null);
+  } else {
+    player_sprite.src = icon_path(my_active.id);
+    player_sprite.alt = monster_label(my_active.id);
+    player_sprite.style.visibility = "";
+    set_monster_tooltip(player_sprite_wrap, tooltip_from_state(my_active));
+  }
   enemy_title.textContent = opp.name || "Opponent";
   if (!opts?.skipMeta?.enemy) {
     enemy_meta.textContent = `Lv ${opp_active.level} · HP ${opp_active.hp}/${opp_active.maxHp}`;
@@ -5939,9 +5967,17 @@ function update_panels(state, opts) {
   if (!opts?.skipBar?.enemy) {
     enemy_hp.style.width = `${Math.max(0, Math.min(1, opp_active.hp / opp_active.maxHp)) * 100}%`;
   }
-  enemy_sprite.src = icon_path(opp_active.id);
-  enemy_sprite.alt = monster_label(opp_active.id);
-  set_monster_tooltip(enemy_sprite_wrap, tooltip_from_state(opp_active));
+  if (opp_pending_replacement) {
+    enemy_sprite.removeAttribute("src");
+    enemy_sprite.alt = "";
+    enemy_sprite.style.visibility = "hidden";
+    set_monster_tooltip(enemy_sprite_wrap, null);
+  } else {
+    enemy_sprite.src = icon_path(opp_active.id);
+    enemy_sprite.alt = monster_label(opp_active.id);
+    enemy_sprite.style.visibility = "";
+    set_monster_tooltip(enemy_sprite_wrap, tooltip_from_state(opp_active));
+  }
   render_effects(state, viewer_slot, viewer_slot, enemy_slot);
   update_bench(state, viewer_slot);
 }
@@ -6100,6 +6136,24 @@ function trigger_class(el, className, duration) {
     el.classList.remove(className);
   }, duration);
 }
+function trigger_shield_on(el) {
+  el.classList.remove("shield-hit");
+  el.classList.remove("shield-on");
+  el.offsetWidth;
+  el.classList.add("shield-on");
+}
+function trigger_shield_hit(el, duration) {
+  if (!el.classList.contains("shield-on")) {
+    el.classList.add("shield-on");
+  }
+  el.classList.remove("shield-hit");
+  el.offsetWidth;
+  el.classList.add("shield-hit");
+  window.setTimeout(() => {
+    el.classList.remove("shield-hit");
+    el.classList.remove("shield-on");
+  }, duration);
+}
 function handle_state(data) {
   const prev_state = latest_state;
   clear_animation_timers();
@@ -6126,50 +6180,59 @@ function handle_state(data) {
     }
   });
   if (steps.length > 0) {
+    const is_premove_window = current_turn >= 1 && current_turn <= PREMOVE_TURN_COUNT;
+    const pacing = is_premove_window ? 1.35 : 1;
+    const step_gap = is_premove_window ? 180 : 60;
+    const paced = (value) => Math.max(1, Math.round(value * pacing));
     let cursor = 0;
     for (const step of steps) {
-      const duration = step.kind === "damage" ? 650 : step.kind === "shield_hit" ? 420 : step.kind === "shield_on" ? 360 : 320;
+      const base_duration = step.kind === "damage" ? 760 : step.kind === "shield_hit" ? 900 : step.kind === "shield_on" ? 720 : 560;
+      const duration = paced(base_duration);
       schedule_animation(() => {
         if (step.kind === "damage") {
           const attacker_wrap = sprite_wrap(step.attackerSide);
           const defender_wrap = sprite_wrap(step.defenderSide);
-          trigger_class(attacker_wrap, "jump", 300);
-          trigger_class(defender_wrap, "hit", 420);
+          trigger_class(attacker_wrap, "jump", paced(360));
+          trigger_class(defender_wrap, "hit", paced(520));
           const bar = step.defenderSide === "player" ? player_hp : enemy_hp;
           const from_percent = Math.max(0, Math.min(1, step.from / step.maxHp)) * 100;
           const to_percent = Math.max(0, Math.min(1, step.to / step.maxHp)) * 100;
           animate_hp_bar(bar, from_percent, to_percent);
-          animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, 180);
+          animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, paced(220));
           return;
         }
         if (step.kind === "shield_on") {
           const wrap = sprite_wrap(step.side);
-          trigger_class(wrap, "shield-on", 400);
+          trigger_shield_on(wrap);
           return;
         }
         if (step.kind === "shield_hit") {
           const attacker_wrap = sprite_wrap(step.attackerSide);
           const defender_wrap = sprite_wrap(step.defenderSide);
-          trigger_class(attacker_wrap, "jump", 300);
-          trigger_class(defender_wrap, "shield-hit", 450);
+          trigger_class(attacker_wrap, "jump", paced(360));
+          trigger_shield_hit(defender_wrap, paced(920));
           return;
         }
         if (step.kind === "heal") {
           const wrap = sprite_wrap(step.side);
-          trigger_class(wrap, "heal", 360);
+          trigger_class(wrap, "heal", paced(440));
         }
       }, cursor);
-      cursor += duration;
+      cursor += duration + step_gap;
     }
     schedule_animation(() => {
       update_panels(data.state);
-    }, cursor + 50);
+    }, cursor + paced(80));
   } else {
     update_panels(data.state);
   }
   close_switch_modal();
   if (data.log.length) {
     log_events(data.log);
+    if (should_break_premove_on_taken_faint(data.log)) {
+      append_log(`premove encerrado: ${slot} tomou nocaute no T${current_turn}`);
+      reset_premove_state();
+    }
   }
   update_action_controls();
   try_send_premove_intent_for_current_turn();
