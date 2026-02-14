@@ -386,6 +386,8 @@
         display: flex;
         align-items: center;
         justify-content: flex-end;
+        flex-direction: column;
+        gap: 6px;
         font-size: 12px;
         color: var(--muted);
       }
@@ -396,6 +398,42 @@
         align-items: center;
         font-family: "Space Mono", monospace;
         color: var(--accent);
+      }
+
+      .premove-btn {
+        border: 1px solid rgba(110, 214, 255, 0.45);
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        color: #d8f4ff;
+        background: rgba(20, 47, 68, 0.55);
+        cursor: pointer;
+        transition: border-color 0.15s ease, opacity 0.15s ease;
+      }
+
+      .premove-btn:hover:not(:disabled) {
+        border-color: rgba(110, 214, 255, 0.8);
+      }
+
+      .premove-btn.active {
+        border-color: rgba(255, 207, 106, 0.7);
+        color: #ffe6b8;
+      }
+
+      .premove-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .premove-status {
+        min-height: 14px;
+        font-family: "Space Mono", monospace;
+        font-size: 10px;
+        letter-spacing: 0.02em;
+        color: var(--accent-2);
+        text-align: right;
       }
 
       .action-pad {
@@ -1530,9 +1568,11 @@
             <section class="arena">
               <div class="arena-top">
                 <div class="status-line">
+                  <button class="premove-btn" id="premove-btn" type="button">Premove</button>
                   <span>Turn <span id="status-turn">0</span></span>
                   <span id="status-deadline">--:--</span>
                 </div>
+                <div class="premove-status" id="premove-status"></div>
               </div>
               <div class="action-pad" id="action-pad">
                 <button class="action-btn" id="move-btn-0">Move 1</button>

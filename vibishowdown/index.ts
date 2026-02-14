@@ -122,6 +122,8 @@ const status_conn = document.getElementById("status-conn");
 const status_ping = document.getElementById("status-ping")!;
 const status_turn = document.getElementById("status-turn")!;
 const status_deadline = document.getElementById("status-deadline")!;
+const premove_btn = document.getElementById("premove-btn") as HTMLButtonElement | null;
+const premove_status = document.getElementById("premove-status") as HTMLDivElement | null;
 const status_ready = document.getElementById("status-ready");
 const status_opponent = document.getElementById("status-opponent");
 const chat_messages = document.getElementById("chat-messages")!;
@@ -200,6 +202,10 @@ const match_end_title = document.getElementById("match-end-title") as HTMLDivEle
 const match_end_sub = document.getElementById("match-end-sub") as HTMLDivElement;
 const match_end_btn = document.getElementById("match-end-btn") as HTMLButtonElement;
 
+type PremoveSlot = { moveIndex: number; moveId: string };
+type PremoveState = "idle" | "collecting" | "locked";
+const PREMOVE_TURN_COUNT = 3;
+
 status_room.textContent = room;
 status_name.textContent = player_name;
 player_title.textContent = player_name;
@@ -228,6 +234,10 @@ const selected: string[] = [];
 let active_tab: string | null = null;
 const tooltip_payload_by_element = new WeakMap<HTMLElement, MonsterTooltipPayload>();
 let active_tooltip_target: HTMLElement | null = null;
+let premove_state: PremoveState = "idle";
+let premove_plan: Array<PremoveSlot | null> = [null, null, null];
+let premove_last_auto_sent_turn = 0;
+let premove_last_blocked_turn_logged = 0;
 
 let relay_server_managed = false;
 let relay_ended = false;
@@ -1107,6 +1117,184 @@ function update_deadline(): void {
     .padStart(2, "0")}`;
 }
 
+function reset_premove_state(): void {
+  premove_state = "idle";
+  premove_plan = [null, null, null];
+  premove_last_auto_sent_turn = 0;
+  premove_last_blocked_turn_logged = 0;
+  update_premove_ui();
+}
+
+function current_preview_active_moves(): string[] {
+  if (latest_state && slot) {
+    const player_state = latest_state.players[slot];
+    const fallback_active = player_state.team[player_state.activeIndex];
+    const preview_active =
+      has_pending_switch() && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number"
+        ? player_state.team[forced_switch_target_index] ?? fallback_active
+        : fallback_active;
+    return preview_active.chosenMoves.slice();
+  }
+  const active_id = selected[0];
+  if (active_id) {
+    return get_config(active_id).moves.slice(0, 4);
+  }
+  return ["none", "none", "none", "none"];
+}
+
+function premove_step_label(step: PremoveSlot | null): string {
+  if (!step) {
+    return "--";
+  }
+  return MOVE_LABELS[step.moveId] || step.moveId;
+}
+
+function premove_is_collecting_turn(): boolean {
+  return premove_state === "collecting" && current_turn === 1;
+}
+
+function premove_is_locked_turn(turn: number = current_turn): boolean {
+  return premove_state === "locked" && turn >= 1 && turn <= PREMOVE_TURN_COUNT;
+}
+
+function clear_finished_premove_if_needed(): void {
+  if (premove_state !== "locked" || current_turn <= PREMOVE_TURN_COUNT) {
+    return;
+  }
+  append_log("premove encerrado (Turn 4 em diante)");
+  reset_premove_state();
+}
+
+function update_premove_ui(): void {
+  if (!premove_btn || !premove_status) {
+    return;
+  }
+  const can_start =
+    !!slot &&
+    !is_spectator &&
+    match_started &&
+    current_turn === 1 &&
+    !has_pending_switch() &&
+    selected_intent_turn !== 1 &&
+    premove_state === "idle";
+
+  premove_btn.classList.remove("active");
+  if (premove_state === "collecting") {
+    premove_btn.textContent = "Cancelar";
+    premove_btn.disabled = false;
+    premove_btn.classList.add("active");
+  } else if (premove_is_locked_turn()) {
+    const waiting_send = selected_intent_turn !== current_turn;
+    premove_btn.textContent = waiting_send ? "Enviar premove" : "Premove ativo";
+    premove_btn.disabled = !waiting_send;
+    premove_btn.classList.add("active");
+  } else {
+    premove_btn.textContent = "Premove";
+    premove_btn.disabled = !can_start;
+  }
+
+  if (premove_state === "idle") {
+    premove_status.textContent = "";
+    return;
+  }
+  const steps = premove_plan.map((step, index) => `T${index + 1}: ${premove_step_label(step)}`);
+  if (premove_state === "collecting") {
+    const filled = premove_plan.filter((step) => step !== null).length;
+    premove_status.textContent = `Premove local (${filled}/3) | ${steps.join(" | ")}`;
+    return;
+  }
+  const live_marker = premove_is_locked_turn() ? ` | executando T${current_turn}` : "";
+  premove_status.textContent = `Premove local pronto | ${steps.join(" | ")}${live_marker}`;
+}
+
+function start_premove_collection(): void {
+  if (!slot || is_spectator || !match_started) {
+    append_log("premove indisponivel agora");
+    return;
+  }
+  if (current_turn !== 1) {
+    append_log("premove so pode ser ativado no Turn 1");
+    return;
+  }
+  if (has_pending_switch()) {
+    append_log("premove indisponivel durante forced switch");
+    return;
+  }
+  if (selected_intent_turn === current_turn) {
+    append_log("intent do Turn 1 ja enviado");
+    return;
+  }
+  reset_premove_state();
+  premove_state = "collecting";
+  append_log("premove ativado: escolha 3 jogadas (T1-T3)");
+  update_action_controls();
+}
+
+function cancel_premove_collection(): void {
+  if (premove_state !== "collecting") {
+    return;
+  }
+  reset_premove_state();
+  append_log("premove cancelado");
+  update_action_controls();
+}
+
+function try_send_premove_intent_for_current_turn(): void {
+  if (!premove_is_locked_turn()) {
+    return;
+  }
+  if (!slot || is_spectator) {
+    return;
+  }
+  if (selected_intent_turn === current_turn) {
+    return;
+  }
+  if (premove_last_auto_sent_turn === current_turn) {
+    return;
+  }
+  const planned_step = premove_plan[current_turn - 1];
+  if (!planned_step) {
+    return;
+  }
+  if (has_pending_switch()) {
+    if (premove_last_blocked_turn_logged !== current_turn) {
+      append_log(`premove T${current_turn} aguardando replacement`);
+      premove_last_blocked_turn_logged = current_turn;
+    }
+    return;
+  }
+  if (!post_turn_intent({ action: "use_move", moveIndex: planned_step.moveIndex })) {
+    return;
+  }
+  premove_last_auto_sent_turn = current_turn;
+  premove_last_blocked_turn_logged = 0;
+  selected_intent = { action: "use_move", moveIndex: planned_step.moveIndex };
+  selected_intent_turn = current_turn;
+  append_log(`premove executado no T${current_turn}: ${premove_step_label(planned_step)}`);
+}
+
+function collect_premove_move(moveIndex: number): boolean {
+  if (!premove_is_collecting_turn()) {
+    return false;
+  }
+  const next_index = premove_plan.findIndex((step) => step === null);
+  if (next_index < 0) {
+    return true;
+  }
+  const active_moves = current_preview_active_moves();
+  const move_id = active_moves[moveIndex] ?? "none";
+  const step: PremoveSlot = { moveIndex, moveId: move_id };
+  premove_plan[next_index] = step;
+  append_log(`premove T${next_index + 1}: ${premove_step_label(step)}`);
+  if (next_index + 1 >= PREMOVE_TURN_COUNT) {
+    premove_state = "locked";
+    append_log("premove pronto: T1-T3 salvos localmente");
+    try_send_premove_intent_for_current_turn();
+  }
+  update_action_controls();
+  return true;
+}
+
 function show_warning(message: string): void {
   config_warning.textContent = message;
 }
@@ -1908,9 +2096,13 @@ function update_bench(state: GameState, viewer_slot: PlayerSlot): void {
 }
 
 function update_action_controls(): void {
+  clear_finished_premove_if_needed();
   const has_team = selected.length === 3;
   const pending_switch = has_pending_switch();
   const forced_switch_ready = !relay_server_managed && has_forced_switch_target_for_current_turn();
+  const premove_collecting_turn = premove_is_collecting_turn();
+  const premove_locked_turn = premove_is_locked_turn();
+  const premove_step_for_turn = premove_locked_turn ? premove_plan[current_turn - 1] : null;
   const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || (pending_switch && !forced_switch_ready);
   if (!has_team) {
     move_buttons.forEach((btn, index) => {
@@ -1919,6 +2111,7 @@ function update_action_controls(): void {
       btn.classList.remove("selected-intent");
     });
     if (switch_btn) switch_btn.disabled = true;
+    update_premove_ui();
     return;
   }
 
@@ -1946,7 +2139,14 @@ function update_action_controls(): void {
     const label = MOVE_LABELS[move] || move;
     const locked_by_choice_band = choice_band_locked_move !== null && index !== choice_band_locked_move;
     const is_locked_slot = choice_band_locked_move !== null && index === choice_band_locked_move;
-    if (locked_by_choice_band) {
+    const planned_for_this_turn = premove_step_for_turn?.moveIndex === index;
+    if (premove_collecting_turn) {
+      btn.textContent = `${index + 1}. ${label}`;
+      btn.disabled = false;
+    } else if (premove_locked_turn) {
+      btn.textContent = planned_for_this_turn ? `${index + 1}. ${label} (premove)` : `${index + 1}. ${label}`;
+      btn.disabled = true;
+    } else if (locked_by_choice_band) {
       btn.textContent = `${index + 1}. ${label} (Choice Band lock)`;
       btn.disabled = true;
     } else if (move === "protect" && guard_on_cooldown) {
@@ -1960,8 +2160,9 @@ function update_action_controls(): void {
       btn.disabled = controls_disabled;
     }
     const is_selected_move =
-      selected_intent_turn === current_turn && selected_intent?.action === "use_move" && selected_intent.moveIndex === index;
-    btn.classList.toggle("selected-intent", is_selected_move && !btn.disabled);
+      (selected_intent_turn === current_turn && selected_intent?.action === "use_move" && selected_intent.moveIndex === index) ||
+      (premove_locked_turn && planned_for_this_turn);
+    btn.classList.toggle("selected-intent", is_selected_move);
   });
   if (switch_btn) {
     const switch_disabled =
@@ -1980,6 +2181,7 @@ function update_action_controls(): void {
       update_bench(latest_state, viewer_slot);
     }
   }
+  update_premove_ui();
 }
 
 function has_pending_switch(): boolean {
@@ -2039,6 +2241,13 @@ function can_send_intent(): boolean {
 }
 
 function send_move_intent(moveIndex: number): void {
+  if (collect_premove_move(moveIndex)) {
+    return;
+  }
+  if (premove_is_locked_turn()) {
+    append_log(`premove ativo: T${current_turn} ja foi definido`);
+    return;
+  }
   if (!post_turn_intent({ action: "use_move", moveIndex })) {
     return;
   }
@@ -2050,10 +2259,19 @@ function send_move_intent(moveIndex: number): void {
 }
 
 function send_switch_intent(targetIndex: number): void {
+  if (!has_pending_switch() && premove_is_collecting_turn()) {
+    cancel_premove_collection();
+  }
+  if (!has_pending_switch() && premove_is_locked_turn()) {
+    append_log(`premove ativo: switch manual bloqueado ate o Turn ${PREMOVE_TURN_COUNT + 1}`);
+    return;
+  }
   if (has_pending_switch()) {
     if (relay_server_managed) {
       if (try_post({ $: "forced_switch", targetIndex, player_id })) {
         close_switch_modal();
+        try_send_premove_intent_for_current_turn();
+        update_action_controls();
       }
       return;
     }
@@ -2067,6 +2285,7 @@ function send_switch_intent(targetIndex: number): void {
         append_log("intent updated");
       }
     }
+    try_send_premove_intent_for_current_turn();
     update_action_controls();
     return;
   }
@@ -2234,6 +2453,7 @@ function reset_to_lobby_view(): void {
   selected_intent = null;
   selected_intent_turn = 0;
   clear_forced_switch_target();
+  reset_premove_state();
   close_switch_modal();
   match_end.classList.remove("open");
   prematch.style.display = "";
@@ -2248,13 +2468,16 @@ function handle_turn_start(data: { turn: number; deadline_at: number }): void {
   deadline_at = data.deadline_at;
   selected_intent = null;
   selected_intent_turn = 0;
+  premove_last_blocked_turn_logged = 0;
   clear_forced_switch_target();
   status_turn.textContent = `${current_turn}`;
   update_deadline();
   if (current_turn === 1) {
+    reset_premove_state();
     room_game_count += 1;
     append_match_start_marker(room_game_count);
   }
+  clear_finished_premove_if_needed();
   append_turn_marker(current_turn);
   if (!has_pending_switch()) {
     close_switch_modal();
@@ -2264,6 +2487,7 @@ function handle_turn_start(data: { turn: number; deadline_at: number }): void {
     prematch.style.display = "none";
     document.body.classList.remove("prematch-open");
   }
+  try_send_premove_intent_for_current_turn();
   update_action_controls();
   if (slot && has_pending_switch() && !switch_modal.classList.contains("open")) {
     open_switch_modal("forced");
@@ -2655,6 +2879,8 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
     log_events(data.log);
   }
   update_action_controls();
+  try_send_premove_intent_for_current_turn();
+  update_action_controls();
   if (data.state.status === "ended" && prev_state?.status !== "ended") {
     append_match_end_marker();
   }
@@ -2672,6 +2898,7 @@ function handle_post(message: any): void {
     case "assign":
       slot = data.slot;
       is_spectator = false;
+      reset_premove_state();
       set_player_name(data.slot, data.name);
       if (status_slot) status_slot.textContent = data.slot === "player1" ? "P1" : "P2";
       if (status_conn) status_conn.textContent = "synced";
@@ -2761,6 +2988,7 @@ function handle_post(message: any): void {
       is_ready = false;
       opponent_ready = false;
       opponent_name = null;
+      reset_premove_state();
       add_spectator(data.name);
       if (status_slot) status_slot.textContent = "spectator";
       player_meta.textContent = "Spectator";
@@ -2786,6 +3014,21 @@ move_buttons.forEach((btn, index) => {
     send_move_intent(index);
   });
 });
+
+if (premove_btn) {
+  premove_btn.addEventListener("click", () => {
+    if (premove_state === "collecting") {
+      cancel_premove_collection();
+      return;
+    }
+    if (premove_is_locked_turn()) {
+      try_send_premove_intent_for_current_turn();
+      update_action_controls();
+      return;
+    }
+    start_premove_collection();
+  });
+}
 
 if (switch_btn) {
   switch_btn.addEventListener("click", () => {
