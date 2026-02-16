@@ -2380,6 +2380,8 @@ function update_panels(
   const opp = state.players[enemy_slot];
   const my_active = me.team[me.activeIndex];
   const opp_active = opp.team[opp.activeIndex];
+  const my_pending_replacement = !!state.pendingSwitch?.[viewer_slot] && my_active.hp <= 0;
+  const opp_pending_replacement = !!state.pendingSwitch?.[enemy_slot] && opp_active.hp <= 0;
 
   player_title.textContent = me.name || player_name;
   if (!opts?.skipMeta?.player) {
@@ -2388,9 +2390,17 @@ function update_panels(
   if (!opts?.skipBar?.player) {
     player_hp.style.width = `${Math.max(0, Math.min(1, my_active.hp / my_active.maxHp)) * 100}%`;
   }
-  player_sprite.src = icon_path(my_active.id);
-  player_sprite.alt = monster_label(my_active.id);
-  set_monster_tooltip(player_sprite_wrap, tooltip_from_state(my_active));
+  if (my_pending_replacement) {
+    player_sprite.removeAttribute("src");
+    player_sprite.alt = "";
+    player_sprite.style.visibility = "hidden";
+    set_monster_tooltip(player_sprite_wrap, null);
+  } else {
+    player_sprite.src = icon_path(my_active.id);
+    player_sprite.alt = monster_label(my_active.id);
+    player_sprite.style.visibility = "";
+    set_monster_tooltip(player_sprite_wrap, tooltip_from_state(my_active));
+  }
 
   enemy_title.textContent = opp.name || "Opponent";
   if (!opts?.skipMeta?.enemy) {
@@ -2399,9 +2409,17 @@ function update_panels(
   if (!opts?.skipBar?.enemy) {
     enemy_hp.style.width = `${Math.max(0, Math.min(1, opp_active.hp / opp_active.maxHp)) * 100}%`;
   }
-  enemy_sprite.src = icon_path(opp_active.id);
-  enemy_sprite.alt = monster_label(opp_active.id);
-  set_monster_tooltip(enemy_sprite_wrap, tooltip_from_state(opp_active));
+  if (opp_pending_replacement) {
+    enemy_sprite.removeAttribute("src");
+    enemy_sprite.alt = "";
+    enemy_sprite.style.visibility = "hidden";
+    set_monster_tooltip(enemy_sprite_wrap, null);
+  } else {
+    enemy_sprite.src = icon_path(opp_active.id);
+    enemy_sprite.alt = monster_label(opp_active.id);
+    enemy_sprite.style.visibility = "";
+    set_monster_tooltip(enemy_sprite_wrap, tooltip_from_state(opp_active));
+  }
   render_effects(state, viewer_slot, viewer_slot, enemy_slot);
   update_bench(state, viewer_slot);
 }
@@ -2416,7 +2434,7 @@ function animate_hp_text(
 ): void {
   const target = side === "player" ? player_meta : enemy_meta;
   const start = performance.now();
-  const duration = 260;
+  const duration = 340;
   const raf_key = side;
   if (hp_animation[raf_key]) {
     cancelAnimationFrame(hp_animation[raf_key]!);
@@ -2557,7 +2575,7 @@ function animate_hp_bar(bar: HTMLSpanElement, from: number, to: number): void {
   bar.style.width = `${to}%`;
   window.setTimeout(() => {
     bar.classList.remove("hp-anim");
-  }, 450);
+  }, 760);
 }
 
 function sprite_wrap(side: "player" | "enemy"): HTMLDivElement {
@@ -2577,6 +2595,26 @@ function trigger_class(el: HTMLElement, className: string, duration: number): vo
   el.classList.add(className);
   window.setTimeout(() => {
     el.classList.remove(className);
+  }, duration);
+}
+
+function trigger_shield_on(el: HTMLElement): void {
+  el.classList.remove("shield-hit");
+  el.classList.remove("shield-on");
+  void el.offsetWidth;
+  el.classList.add("shield-on");
+}
+
+function trigger_shield_hit(el: HTMLElement, duration: number): void {
+  if (!el.classList.contains("shield-on")) {
+    el.classList.add("shield-on");
+  }
+  el.classList.remove("shield-hit");
+  void el.offsetWidth;
+  el.classList.add("shield-hit");
+  window.setTimeout(() => {
+    el.classList.remove("shield-hit");
+    el.classList.remove("shield-on");
   }, duration);
 }
 
@@ -2608,45 +2646,48 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
     }
   });
   if (steps.length > 0) {
+    const min_step_duration = 500;
+    const step_gap = 70;
     let cursor = 0;
     for (const step of steps) {
-      const duration =
-        step.kind === "damage" ? 650 : step.kind === "shield_hit" ? 420 : step.kind === "shield_on" ? 360 : 320;
+      const base_duration =
+        step.kind === "damage" ? 720 : step.kind === "shield_hit" ? 760 : step.kind === "shield_on" ? 620 : 560;
+      const duration = Math.max(min_step_duration, base_duration);
       schedule_animation(() => {
         if (step.kind === "damage") {
           const attacker_wrap = sprite_wrap(step.attackerSide);
           const defender_wrap = sprite_wrap(step.defenderSide);
-          trigger_class(attacker_wrap, "jump", 300);
-          trigger_class(defender_wrap, "hit", 420);
+          trigger_class(attacker_wrap, "jump", 420);
+          trigger_class(defender_wrap, "hit", 520);
           const bar = step.defenderSide === "player" ? player_hp : enemy_hp;
           const from_percent = Math.max(0, Math.min(1, step.from / step.maxHp)) * 100;
           const to_percent = Math.max(0, Math.min(1, step.to / step.maxHp)) * 100;
           animate_hp_bar(bar, from_percent, to_percent);
-          animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, 180);
+          animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, 220);
           return;
         }
         if (step.kind === "shield_on") {
           const wrap = sprite_wrap(step.side);
-          trigger_class(wrap, "shield-on", 400);
+          trigger_shield_on(wrap);
           return;
         }
         if (step.kind === "shield_hit") {
           const attacker_wrap = sprite_wrap(step.attackerSide);
           const defender_wrap = sprite_wrap(step.defenderSide);
-          trigger_class(attacker_wrap, "jump", 300);
-          trigger_class(defender_wrap, "shield-hit", 450);
+          trigger_class(attacker_wrap, "jump", 420);
+          trigger_shield_hit(defender_wrap, 820);
           return;
         }
         if (step.kind === "heal") {
           const wrap = sprite_wrap(step.side);
-          trigger_class(wrap, "heal", 360);
+          trigger_class(wrap, "heal", 520);
         }
       }, cursor);
-      cursor += duration;
+      cursor += duration + step_gap;
     }
     schedule_animation(() => {
       update_panels(data.state);
-    }, cursor + 50);
+    }, cursor + 60);
   } else {
     update_panels(data.state);
   }
