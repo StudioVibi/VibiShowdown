@@ -1,0 +1,52 @@
+Comparacao de branch: main..bullet
+Merge-base: 9b34423 (2026-02-13, "fix: stabilize lobby level persistence across rerenders")
+
+Commits exclusivos da bullet (ordem cronologica):
+
+1) 2026-02-13 | a617421 | balance: make belly drum grant x4 attack
+Arquivos alterados:
+- src/engine.ts
+- vibishowdown/index.ts
+- vibishowdown/dist/index.js
+Diff do commit: 10+ / 10-
+
+2) 2026-02-13 | b0b762f | feat: add turn-1 premove planning for first three turns
+Arquivos alterados:
+- vibishowdown/index.ts
+- vibishowdown/index.html
+- vibishowdown/dist/index.js
+Diff do commit: 504+ / 6-
+
+3) 2026-02-13 | fea2736 | feat: allow switch actions in turn-1 premove plan
+Arquivos alterados:
+- vibishowdown/index.ts
+- vibishowdown/dist/index.js
+Diff do commit: 113+ / 15-
+
+4) 2026-02-13 | ac044a9 | feat: refine premove visuals and hide sprites while awaiting replacement
+Arquivos alterados:
+- vibishowdown/index.ts
+- vibishowdown/index.html
+- vibishowdown/dist/index.js
+Diff do commit: 194+ / 47-
+
+5) 2026-02-13 | 593a959 | feat: slow down battle animation pacing and shield readability
+Arquivos alterados:
+- vibishowdown/index.ts
+- vibishowdown/index.html
+- vibishowdown/dist/index.js
+Diff do commit: 31+ / 29-
+
+6) 2026-02-14 | 4ee0280 | Implement authoritative scout/premove async timers and evade flow
+Arquivos alterados:
+- src/engine.ts
+- src/shared.ts
+- vibishowdown/index.ts
+- vibishowdown/index.html
+- vibishowdown/dist/index.js
+Diff do commit: 1307+ / 270-
+
+Resumo consolidado (main..bullet):
+- 5 arquivos alterados
+- 2010 insercoes
+- 228 remocoes
