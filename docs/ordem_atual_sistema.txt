@@ -50,36 +50,45 @@ Funcao central: resolve_turn(state, intents)
 
 Ordem exata atual:
 1. clone_state do estado recebido.
-2. build_actions a partir dos intents.
-3. Ordena fases por "order":
+2. reset de flags de guard e avaliacao de mindgame de tipo no inicio do turno:
+   - hierarquia: BUF > DEF > ATK > BUF
+   - empate de tipo nao gera efeito
+   - vitoria de tipo gera apenas evento/log `mindgame_bonus_ready` (sem efeito de gameplay por enquanto)
+3. build_actions a partir dos intents.
+4. Ordena fases por "order":
    - switch (0)
    - guard (1)
    - attack_01 (2)
-4. Para cada fase:
+5. Para cada fase:
    - filtra actions da fase
    - se houver duas actions, resolve iniciativa
    - executa action por action
-5. Fase final unica:
+   - apos cada action, checa fim imediato por HP zerado
+6. Fase final unica:
    - end_turn (ordem fixa por lista interna, sem iniciativa por atributos):
-     Focus Punch -> Wish -> Leftovers -> Leech Life
-   - em cada item da lista, quando precisar iterar os dois lados, desempate fixo:
-     player1 -> player2.
-6. Encerramento do turno:
+     Focus Punch -> Wish -> Leech Life
+7. Encerramento do turno:
    - decrement_cooldowns
    - reset_protect_flags no fim do turno
-7. Regra de vida/fim de partida:
-   - vida e unificada por player (nao por pokemon), fixa em 200.
-   - partida base tem 12 turnos.
-   - no turno 12, vence quem tiver mais vida.
-   - se empatar, entram turnos extras (max 5).
-   - no primeiro turno extra com vidas diferentes, encerra com vencedor.
-   - se continuar empatado ate o limite extra, encerra em empate.
+   - finalize de tiebreak de double KO (quando aplicavel)
+   - checagem de limite de turnos (12 + overtime ate 5)
+
+Regras de vida/fim de partida:
+- vida e unificada por player (nao por pokemon), fixa em 200.
+- se um lado chegar a 0 e o outro estiver acima de 0, a partida termina imediatamente.
+- se ambos chegarem a 0 no mesmo turno:
+  - ativa 1 turno extra de desempate (double KO tiebreak), com ambos resetados para 1 HP.
+  - no fim desse turno de desempate: HP diferente => vencedor; HP igual => empate.
+- partida base tem 12 turnos.
+- no turno 12, se HP estiver diferente, vence quem tiver mais vida.
+- se empatar, entram turnos extras (max 5), encerrando no primeiro turno com HP diferente.
+- se continuar empatado ate o limite extra, encerra em empate.
 
 Importante sobre passivas:
-- Passivas de item (ex: Leftovers) acontecem dentro da fase end_turn.
-- A logica da passiva fica no modulo de passivas:
-  src/data/passives.ts
-- O engine chama apply_passive_turn_effect(...) para cada player ativo.
+- Sistema de passivas esta temporariamente desativado no motor.
+- Todos os mons estao com passiva fixa `none` no cadastro atual.
+- A infraestrutura de passivas em `src/data/passives.ts` permanece no projeto para reativacao futura.
+- No lobby (pre-match), cada mon configura apenas 3 moves; campos de passiva/HP/EV nao aparecem.
 
 
 3) Onde alterar cada tipo de regra
@@ -87,7 +96,7 @@ Importante sobre passivas:
 Cadastro de dados:
 - Pokemons/defaults: src/data/pokemon.ts
 - Moves/catalogo: src/data/moves.ts
-- Passivas/catalogo + efeitos: src/data/passives.ts
+- Passivas/catalogo + efeitos (temporariamente desligados no combate): src/data/passives.ts
 - Check de integridade: src/data/integrity.ts
 
 Ordem de execucao:

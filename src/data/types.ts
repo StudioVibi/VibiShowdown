@@ -1,4 +1,4 @@
-import type { Stats } from "../shared.ts";
+import type { MonsterType, Stats } from "../shared.ts";
 
 export type DamageType = "scaled" | "true" | "flat";
 
@@ -24,6 +24,7 @@ export type MonsterCatalogEntry = {
   id: string;
   name: string;
   role: string;
+  type: MonsterType;
   stats: Stats;
   possibleMoves: string[];
   possiblePassives: string[];

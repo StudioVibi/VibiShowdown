@@ -1980,129 +1980,103 @@ var PASSIVE_BY_ID = PASSIVE_BY_ID_INTERNAL;
 function normalize_passive_id(passive_id) {
   return PASSIVE_BY_ID_INTERNAL.get(passive_id)?.id ?? passive_id;
 }
-function passive_spec(passive_id) {
-  return PASSIVE_BY_ID_INTERNAL.get(passive_id) ?? PASSIVE_BY_ID_INTERNAL.get("none");
-}
-function apply_leftovers(context) {
-  const { monster } = context;
-  const heal = mul_div_floor(monster.maxHp, 6, 100);
-  if (heal <= 0) {
-    return;
-  }
-  const before = monster.hp;
-  monster.hp = Math.min(monster.maxHp, monster.hp + heal);
-  const gained = monster.hp - before;
-  if (gained <= 0) {
-    return;
-  }
-  context.hp_changed.add(monster);
-  context.log.push({
-    type: "passive_heal",
-    turn: context.turn,
-    phase: context.phase,
-    summary: `${context.slot} Leftovers +${gained} HP`,
-    data: { slot: context.slot, amount: gained, passive: "leftovers" }
-  });
-}
-var NOOP_PASSIVE = () => {};
-var PASSIVE_TURN_EFFECTS = {
-  none: NOOP_PASSIVE,
-  leftovers: apply_leftovers,
-  choice_band: NOOP_PASSIVE
-};
-function apply_passive_turn_effect(passive_id, context) {
-  const normalized = passive_spec(passive_id).id;
-  const effect = PASSIVE_TURN_EFFECTS[normalized] ?? NOOP_PASSIVE;
-  effect(context);
-}
 
 // src/data/pokemon.ts
 function all_move_options() {
   return MOVE_OPTIONS.slice();
 }
-function all_passive_options() {
-  return PASSIVE_OPTIONS.slice();
+function type_for_index(index) {
+  const order = ["buf", "def", "atk"];
+  return order[index % order.length];
 }
 var MONSTER_ROSTER = [
   {
     id: "babydragon",
     name: "Baby Dragon",
     role: "Snorlax",
+    type: type_for_index(0),
     stats: { level: 100, maxHp: 575, attack: 438, defense: 250, speed: 105 },
     possibleMoves: all_move_options(),
-    possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "seismic_toss", "agility", "none"],
-    defaultPassive: "leftovers"
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultPassive: "none"
   },
   {
     id: "croni",
     name: "Croni",
     role: "Ninjask",
+    type: type_for_index(1),
     stats: { level: 100, maxHp: 163, attack: 355, defense: 167, speed: 646 },
     possibleMoves: all_move_options(),
-    possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "seismic_toss", "agility", "none"],
-    defaultPassive: "leftovers"
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultPassive: "none"
   },
   {
     id: "harpy",
     name: "Harpy",
     role: "Absol",
+    type: type_for_index(2),
     stats: { level: 100, maxHp: 180, attack: 521, defense: 230, speed: 292 },
     possibleMoves: all_move_options(),
-    possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "seismic_toss", "agility", "none"],
-    defaultPassive: "leftovers"
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultPassive: "none"
   },
   {
     id: "hoof",
     name: "Hoof",
     role: "Chansey",
+    type: type_for_index(3),
     stats: { level: 100, maxHp: 950, attack: 0, defense: 0, speed: 188 },
     possibleMoves: all_move_options(),
-    possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "seismic_toss", "agility", "none"],
-    defaultPassive: "leftovers"
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultPassive: "none"
   },
   {
     id: "knight",
     name: "Knight",
     role: "Metagross",
+    type: type_for_index(4),
     stats: { level: 100, maxHp: 242, attack: 542, defense: 521, speed: 271 },
     possibleMoves: all_move_options(),
-    possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "seismic_toss", "agility", "none"],
-    defaultPassive: "leftovers"
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultPassive: "none"
   },
   {
     id: "miren",
     name: "Miren",
     role: "Celebi",
+    type: type_for_index(5),
     stats: { level: 100, maxHp: 325, attack: 396, defense: 396, speed: 396 },
     possibleMoves: all_move_options(),
-    possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "seismic_toss", "agility", "none"],
-    defaultPassive: "leftovers"
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultPassive: "none"
   },
   {
     id: "panda",
     name: "Panda",
     role: "Cloyster",
+    type: type_for_index(6),
     stats: { level: 100, maxHp: 117, attack: 375, defense: 730, speed: 271 },
     possibleMoves: all_move_options(),
-    possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "seismic_toss", "agility", "none"],
-    defaultPassive: "leftovers"
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultPassive: "none"
   },
   {
     id: "valkyria",
     name: "Valkyria",
     role: "Aerodactyl",
+    type: type_for_index(7),
     stats: { level: 100, maxHp: 242, attack: 417, defense: 250, speed: 521 },
     possibleMoves: all_move_options(),
-    possiblePassives: all_passive_options(),
-    defaultMoves: ["return", "seismic_toss", "agility", "none"],
-    defaultPassive: "leftovers"
+    possiblePassives: ["none"],
+    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultPassive: "none"
   }
 ];
 var MONSTER_BY_ID = new Map(MONSTER_ROSTER.map((entry) => [entry.id, entry]));
@@ -2170,13 +2144,17 @@ function ensure(condition, message) {
 function ensure_int(value, message) {
   ensure(Number.isInteger(value), message);
 }
+function ensure_valid_type(monster) {
+  ensure(monster.type === "buf" || monster.type === "def" || monster.type === "atk", `${monster.id}: invalid type ${monster.type}`);
+}
 function assert_monster_integrity(monsters) {
   const monster_ids = new Set;
   for (const monster of monsters) {
     ensure(monster.id.length > 0, "monster id is required");
     ensure(!monster_ids.has(monster.id), `duplicate monster id: ${monster.id}`);
     monster_ids.add(monster.id);
-    ensure(monster.defaultMoves.length === 4, `${monster.id}: defaultMoves must contain exactly 4 entries`);
+    ensure(monster.defaultMoves.length === 3, `${monster.id}: defaultMoves must contain exactly 3 entries`);
+    ensure_valid_type(monster);
     const possible_moves = new Set(monster.possibleMoves);
     ensure(possible_moves.size > 0, `${monster.id}: possibleMoves cannot be empty`);
     for (const move_id of monster.possibleMoves) {
@@ -2199,6 +2177,8 @@ function assert_monster_integrity(monsters) {
     const normalized_default = normalize_passive_id(monster.defaultPassive);
     ensure(PASSIVE_BY_ID.has(monster.defaultPassive), `${monster.id}: unknown default passive: ${monster.defaultPassive}`);
     ensure(possible_passives.has(normalized_default), `${monster.id}: default passive not allowed: ${monster.defaultPassive}`);
+    ensure(normalized_default === "none", `${monster.id}: default passive must be none`);
+    ensure(possible_passives.size === 1 && possible_passives.has("none"), `${monster.id}: possiblePassives must be [none]`);
     ensure_int(monster.stats.level, `${monster.id}: level must be integer`);
     ensure_int(monster.stats.maxHp, `${monster.id}: maxHp must be integer`);
     ensure_int(monster.stats.attack, `${monster.id}: attack must be integer`);
@@ -2236,6 +2216,7 @@ var SHARED_HP_START = 200;
 var TURN_DURATION_MS = 5000;
 var BASE_TURN_LIMIT = 12;
 var EXTRA_TURN_LIMIT = 5;
+var ZERO_HP_TIEBREAKER_HP = 1;
 
 // src/engine.ts
 var INITIATIVE_DEFAULT = ["speed", "attack", "hp", "defense"];
@@ -2246,7 +2227,7 @@ var PHASES = [
 ];
 var END_PHASE_ID = "end_turn";
 var SLOT_ORDER = ["player1", "player2"];
-var END_TURN_EFFECT_ORDER = ["focus_punch", "wish", "leftovers", "leech_life"];
+var END_TURN_EFFECT_ORDER = ["focus_punch", "wish", "leech_life"];
 var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "none",
   "agility",
@@ -2305,6 +2286,7 @@ function clone_monster(monster) {
   return {
     id: monster.id,
     name: monster.name,
+    type: monster.type,
     hp: monster.hp,
     maxHp: monster.maxHp,
     level: monster.level,
@@ -2375,6 +2357,9 @@ function clone_state(state) {
     winner: state.winner,
     baseTurnLimit: Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1)),
     extraTurnLimit: Math.max(0, normalize_int(state.extraTurnLimit, EXTRA_TURN_LIMIT, 0)),
+    zeroHpTiebreakPending: !!state.zeroHpTiebreakPending,
+    zeroHpTiebreakResolved: !!state.zeroHpTiebreakResolved,
+    zeroHpTiebreakTurn: typeof state.zeroHpTiebreakTurn === "number" ? normalize_int(state.zeroHpTiebreakTurn, state.turn + 1, 1) : null,
     players: {
       player1: clone_player(state.players.player1),
       player2: clone_player(state.players.player2)
@@ -2430,6 +2415,121 @@ function sync_all_players_shared_hp(state) {
     sync_player_shared_hp(state, slot, shared_hp);
   }
 }
+function compare_monster_type(left, right) {
+  if (left === right) {
+    return 0;
+  }
+  if (left === "buf" && right === "def" || left === "def" && right === "atk" || left === "atk" && right === "buf") {
+    return 1;
+  }
+  return -1;
+}
+function apply_mindgame_bonus_event(state, log) {
+  const p1_active = active_monster(state.players.player1);
+  const p2_active = active_monster(state.players.player2);
+  const type_cmp = compare_monster_type(p1_active.type, p2_active.type);
+  if (type_cmp === 0) {
+    return;
+  }
+  const winner = type_cmp > 0 ? "player1" : "player2";
+  const loser = winner === "player1" ? "player2" : "player1";
+  const winner_active = winner === "player1" ? p1_active : p2_active;
+  const loser_active = loser === "player1" ? p1_active : p2_active;
+  log.push({
+    type: "mindgame_bonus_ready",
+    turn: state.turn,
+    summary: `${winner} won mindgame (${winner_active.type} > ${loser_active.type})`,
+    data: {
+      winner,
+      loser,
+      winnerType: winner_active.type,
+      loserType: loser_active.type,
+      winnerMonster: winner_active.id,
+      loserMonster: loser_active.id
+    }
+  });
+}
+function clear_zero_hp_tiebreak(state) {
+  state.zeroHpTiebreakPending = false;
+  state.zeroHpTiebreakTurn = null;
+}
+function end_match_with_winner(state, log, winner, summary, data) {
+  state.status = "ended";
+  state.winner = winner;
+  clear_zero_hp_tiebreak(state);
+  log.push({
+    type: "match_end",
+    turn: state.turn,
+    summary,
+    data: { winner, ...data ?? {} }
+  });
+}
+function end_match_draw(state, log, summary, data) {
+  state.status = "ended";
+  delete state.winner;
+  clear_zero_hp_tiebreak(state);
+  log.push({
+    type: "match_end",
+    turn: state.turn,
+    summary,
+    data: { ...data ?? {} }
+  });
+}
+function check_zero_hp_match_result(state, log) {
+  const p1_hp = state.players.player1.sharedHp;
+  const p2_hp = state.players.player2.sharedHp;
+  if (p1_hp > 0 && p2_hp > 0) {
+    return "continue";
+  }
+  if (p1_hp <= 0 && p2_hp > 0) {
+    end_match_with_winner(state, log, "player2", "player2 wins (enemy shared HP reached 0)", {
+      player1Hp: p1_hp,
+      player2Hp: p2_hp
+    });
+    return "ended";
+  }
+  if (p2_hp <= 0 && p1_hp > 0) {
+    end_match_with_winner(state, log, "player1", "player1 wins (enemy shared HP reached 0)", {
+      player1Hp: p1_hp,
+      player2Hp: p2_hp
+    });
+    return "ended";
+  }
+  const is_active_tiebreak_turn = state.zeroHpTiebreakPending && state.zeroHpTiebreakTurn === state.turn;
+  if (is_active_tiebreak_turn || state.zeroHpTiebreakResolved) {
+    end_match_draw(state, log, "draw (both sides reached 0 HP in tiebreak)", { player1Hp: p1_hp, player2Hp: p2_hp });
+    return "ended";
+  }
+  state.zeroHpTiebreakPending = true;
+  state.zeroHpTiebreakResolved = true;
+  state.zeroHpTiebreakTurn = state.turn + 1;
+  sync_player_shared_hp(state, "player1", ZERO_HP_TIEBREAKER_HP);
+  sync_player_shared_hp(state, "player2", ZERO_HP_TIEBREAKER_HP);
+  log.push({
+    type: "zero_hp_tiebreak_start",
+    turn: state.turn,
+    summary: "double KO detected: one extra tiebreak turn granted",
+    data: { tiebreakTurn: state.zeroHpTiebreakTurn, resetHp: ZERO_HP_TIEBREAKER_HP }
+  });
+  return "stop_turn";
+}
+function finalize_zero_hp_tiebreak_turn(state, log) {
+  const is_tiebreak_turn = state.zeroHpTiebreakPending && state.zeroHpTiebreakTurn === state.turn;
+  if (!is_tiebreak_turn || state.status === "ended") {
+    return;
+  }
+  const p1_hp = state.players.player1.sharedHp;
+  const p2_hp = state.players.player2.sharedHp;
+  if (p1_hp === p2_hp) {
+    end_match_draw(state, log, "draw (double KO tiebreak ended with equal HP)", { player1Hp: p1_hp, player2Hp: p2_hp });
+    return;
+  }
+  const winner = p1_hp > p2_hp ? "player1" : "player2";
+  end_match_with_winner(state, log, winner, `${winner} wins (double KO tiebreak)`, {
+    player1Hp: p1_hp,
+    player2Hp: p2_hp
+  });
+}
 function compare_initiative(a, b, stats) {
   for (const key of stats) {
     const diff = a[key] - b[key];
@@ -2464,25 +2564,6 @@ function decrement_cooldowns(state) {
         monster.protectCooldownTurns = next_guard_cooldown;
         monster.endureCooldownTurns = next_guard_cooldown;
       }
-    }
-  });
-}
-function apply_passives(state, log, hp_changed) {
-  for_each_player(state, (player) => {
-    const active = active_monster(player);
-    if (!is_alive(active))
-      return;
-    const before_hp = player.sharedHp;
-    apply_passive_turn_effect(active.chosenPassive, {
-      slot: player.slot,
-      monster: active,
-      turn: state.turn,
-      phase: END_PHASE_ID,
-      log,
-      hp_changed
-    });
-    if (active.hp !== before_hp) {
-      sync_player_shared_hp(state, player.slot, active.hp);
     }
   });
 }
@@ -2608,6 +2689,9 @@ function apply_leech_seed_end_turn(state, log, hp_changed) {
   }
 }
 function maybe_end_match_by_turn_limit(state, log) {
+  if (state.status === "ended" || state.zeroHpTiebreakPending) {
+    return;
+  }
   const base_turn_limit = Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1));
   const extra_turn_limit = Math.max(0, normalize_int(state.extraTurnLimit, EXTRA_TURN_LIMIT, 0));
   state.baseTurnLimit = base_turn_limit;
@@ -2620,26 +2704,15 @@ function maybe_end_match_by_turn_limit(state, log) {
   if (p1_hp !== p2_hp) {
     const winner = p1_hp > p2_hp ? "player1" : "player2";
     const overtime_turn2 = Math.max(0, state.turn - base_turn_limit);
-    state.status = "ended";
-    state.winner = winner;
-    log.push({
-      type: "match_end",
-      turn: state.turn,
-      summary: overtime_turn2 > 0 ? `${winner} wins (HP diff at overtime turn ${overtime_turn2})` : `${winner} wins (higher shared HP after ${base_turn_limit} turns)`,
-      data: { winner, player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurn: overtime_turn2 }
-    });
+    end_match_with_winner(state, log, winner, overtime_turn2 > 0 ? `${winner} wins (HP diff at overtime turn ${overtime_turn2})` : `${winner} wins (higher shared HP after ${base_turn_limit} turns)`, { player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurn: overtime_turn2 });
     return;
   }
   const overtime_turn = state.turn - base_turn_limit;
   if (overtime_turn <= 0) {
     if (extra_turn_limit <= 0) {
-      state.status = "ended";
-      delete state.winner;
-      log.push({
-        type: "match_end",
-        turn: state.turn,
-        summary: `draw after ${base_turn_limit} turns (equal shared HP)`,
-        data: { player1Hp: p1_hp, player2Hp: p2_hp }
+      end_match_draw(state, log, `draw after ${base_turn_limit} turns (equal shared HP)`, {
+        player1Hp: p1_hp,
+        player2Hp: p2_hp
       });
       return;
     }
@@ -2652,13 +2725,10 @@ function maybe_end_match_by_turn_limit(state, log) {
     return;
   }
   if (overtime_turn >= extra_turn_limit) {
-    state.status = "ended";
-    delete state.winner;
-    log.push({
-      type: "match_end",
-      turn: state.turn,
-      summary: `draw after ${base_turn_limit + extra_turn_limit} turns (equal shared HP)`,
-      data: { player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurnsPlayed: overtime_turn }
+    end_match_draw(state, log, `draw after ${base_turn_limit + extra_turn_limit} turns (equal shared HP)`, {
+      player1Hp: p1_hp,
+      player2Hp: p2_hp,
+      overtimeTurnsPlayed: overtime_turn
     });
   }
 }
@@ -2703,16 +2773,17 @@ function apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pe
     }
     return;
   }
-  if (effect_id === "leftovers") {
-    apply_passives(state, log, hp_changed);
-    return;
-  }
   apply_leech_seed_end_turn(state, log, hp_changed);
 }
 function apply_end_turn_phase(state, log, hp_changed, focus_punch_pending, took_damage_this_turn) {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
     apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn);
+    const progress = check_zero_hp_match_result(state, log);
+    if (progress !== "continue") {
+      return progress;
+    }
   }
+  return "continue";
 }
 function minimum_endure_hp(monster) {
   return Math.max(1, mul_div_ceil(monster.maxHp, 1, 100));
@@ -2799,9 +2870,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
     });
     return;
   }
-  const passive = passive_spec(attacker.chosenPassive);
-  const choice_band_active = passive.id === "choice_band";
-  const effective_attack = choice_band_active ? Math.max(0, mul_div_round(attacker.attack, 3, 2)) : attacker.attack;
+  const effective_attack = attacker.attack;
   const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
@@ -2873,9 +2942,8 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       });
     }
   }
-  const choice_band_detail = choice_band_active && damage_type !== "flat" ? `; Choice Band ATK boost: ${attacker.attack} -> ${effective_attack}` : "";
   if (spec.id === "return") {
-    const detail = `Return: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*${multiplier100}*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}${choice_band_detail}`;
+    const detail = `Return: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*${multiplier100}*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -2884,7 +2952,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "double_edge") {
-    const detail = `Double-Edge: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*120*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
+    const detail = `Double-Edge: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*120*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -2902,7 +2970,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "quick_attack") {
-    const detail = `Quick Attack: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*66*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; speed check ignored${choice_band_detail}`;
+    const detail = `Quick Attack: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*66*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}; speed check ignored`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -2911,7 +2979,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "focus_punch") {
-    const detail = `Focus Punch: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*150*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}${choice_band_detail}`;
+    const detail = `Focus Punch: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*150*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -2949,19 +3017,6 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
       }
     });
     return;
-  }
-  const passive = passive_spec(attacker.chosenPassive);
-  const choice_band_active = passive.id === "choice_band";
-  if (choice_band_active && attacker.choiceBandLockedMoveIndex === null && spec.id !== "none") {
-    attacker.choiceBandLockedMoveIndex = move_index;
-    const locked_move_id = attacker.chosenMoves[move_index] ?? "none";
-    log.push({
-      type: "choice_band_lock",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${attacker.name} is locked into ${locked_move_id} (slot ${move_index + 1})`,
-      data: { slot: player_slot, moveIndex: move_index, move: locked_move_id, passive: passive.id }
-    });
   }
   if (spec.id === "none") {
     log.push({
@@ -3393,9 +3448,11 @@ function create_initial_state(teams, names) {
         def: spec.stats.defense,
         spe: spec.stats.speed
       }, level, ev);
+      const resolved_type = monster.type === "buf" || monster.type === "def" || monster.type === "atk" ? monster.type : spec.type;
       return {
         id: monster.id,
         name: monster.id,
+        type: resolved_type,
         hp: shared_hp,
         maxHp: shared_hp,
         level,
@@ -3411,7 +3468,7 @@ function create_initial_state(teams, names) {
         screechDebuffActive: false,
         possibleMoves: monster.moves.slice(),
         possiblePassives: [monster.passive],
-        chosenMoves: monster.moves.slice(0, 4),
+        chosenMoves: monster.moves.slice(0, 3),
         chosenPassive: monster.passive,
         protectActiveThisTurn: false,
         endureActiveThisTurn: false,
@@ -3434,6 +3491,9 @@ function create_initial_state(teams, names) {
     status: "setup",
     baseTurnLimit: BASE_TURN_LIMIT,
     extraTurnLimit: EXTRA_TURN_LIMIT,
+    zeroHpTiebreakPending: false,
+    zeroHpTiebreakResolved: false,
+    zeroHpTiebreakTurn: null,
     players: {
       player1: build_player("player1"),
       player2: build_player("player2")
@@ -3476,9 +3536,14 @@ function resolve_turn(state, intents) {
   }
   next.pendingSwitch = empty_pending();
   reset_protect_flags(next);
+  apply_mindgame_bonus_event(next, log);
+  let progress = check_zero_hp_match_result(next, log);
   const actions = build_actions(intents, next);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
   for (const phase of phases) {
+    if (progress !== "continue") {
+      break;
+    }
     const phase_actions = actions.filter((action) => action.phase === phase.id);
     if (phase_actions.length === 0) {
       continue;
@@ -3486,7 +3551,6 @@ function resolve_turn(state, intents) {
     if (phase_actions.length >= 2) {
       phase_actions.sort((a, b) => compare_actions_for_phase(next, phase, a, b));
       const first = phase_actions[0];
-      const second = phase_actions[1];
       log.push({
         type: "initiative",
         turn: next.turn,
@@ -3505,18 +3569,29 @@ function resolve_turn(state, intents) {
             summary: `${action.player} is taunted and cannot switch`,
             data: { slot: action.player, action: "switch", untilTurn: next.tauntUntilTurn[action.player] }
           });
-          continue;
+        } else {
+          apply_switch(next, log, action.player, action.targetIndex);
         }
-        apply_switch(next, log, action.player, action.targetIndex);
       } else {
         apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
       }
+      progress = check_zero_hp_match_result(next, log);
+      if (progress !== "continue") {
+        break;
+      }
     }
   }
-  apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
+  if (progress === "continue") {
+    progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
+  }
   decrement_cooldowns(next);
   reset_protect_flags(next);
-  maybe_end_match_by_turn_limit(next, log);
+  if (next.status === "running") {
+    finalize_zero_hp_tiebreak_turn(next, log);
+  }
+  if (next.status === "running") {
+    maybe_end_match_by_turn_limit(next, log);
+  }
   return { state: next, log };
 }
 function apply_forced_switch(state, slot, targetIndex) {
@@ -3585,10 +3660,6 @@ function validate_intent(state, slot, intent) {
   if (intent.moveIndex < 0 || intent.moveIndex >= active.chosenMoves.length) {
     return "invalid move index";
   }
-  const passive = passive_spec(active.chosenPassive);
-  if (passive.id === "choice_band" && active.choiceBandLockedMoveIndex !== null && intent.moveIndex !== active.choiceBandLockedMoveIndex) {
-    return "choice band locked";
-  }
   const moveId = active.chosenMoves[intent.moveIndex] ?? "none";
   const guard_cooldown = Math.max(active.protectCooldownTurns, active.endureCooldownTurns);
   if (taunted && !is_attack_move(move_spec(moveId))) {
@@ -3604,7 +3675,7 @@ function validate_intent(state, slot, intent) {
 }
 
 // vibishowdown/index.ts
-var EV_KEYS = ["hp", "atk", "def", "spe"];
+var LOBBY_MOVE_SLOTS = 3;
 var PLAYER_SLOTS = ["player1", "player2"];
 var LAST_ROOM_KEY = "vibi_showdown_last_room";
 var LAST_PLAYER_NAME_KEY = "vibi_showdown_last_player_name";
@@ -3685,8 +3756,7 @@ var reset_status_btn = document.getElementById("reset-status-btn");
 var move_buttons = [
   document.getElementById("move-btn-0"),
   document.getElementById("move-btn-1"),
-  document.getElementById("move-btn-2"),
-  document.getElementById("move-btn-3")
+  document.getElementById("move-btn-2")
 ];
 var switch_btn = document.getElementById("switch-btn");
 var surrender_btn = document.getElementById("surrender-btn");
@@ -3705,7 +3775,6 @@ var slot_bench_a_img = document.getElementById("slot-bench-a-img");
 var slot_bench_b_img = document.getElementById("slot-bench-b-img");
 var monster_tabs = document.getElementById("monster-tabs");
 var moves_grid = document.getElementById("moves-grid");
-var stats_grid = document.getElementById("stats-grid");
 var config_warning = document.getElementById("config-warning");
 var player_bench_slots = [
   {
@@ -4325,9 +4394,6 @@ function monster_label(id, fallback = "mon") {
 function move_label(id) {
   return MOVE_LABELS[id] || id;
 }
-function passive_label(id) {
-  return PASSIVE_LABELS[id] || id;
-}
 function stat_label(value) {
   if (value === "attack")
     return "ATK";
@@ -4387,11 +4453,14 @@ function base_stats_for(monster_id, level) {
 function tooltip_from_config(monster_id) {
   const config = get_config(monster_id);
   const base = base_stats_for(monster_id, config.stats.level);
+  const spec = MONSTER_BY_ID.get(monster_id);
+  const type = spec?.type ?? "atk";
   return {
     id: monster_id,
     name: monster_label(monster_id),
-    passive: config.passive,
-    moves: config.moves.slice(0, 4),
+    type,
+    showHp: false,
+    moves: config.moves.slice(0, LOBBY_MOVE_SLOTS),
     current: {
       hp: config.stats.maxHp,
       maxHp: config.stats.maxHp,
@@ -4407,8 +4476,9 @@ function tooltip_from_state(mon) {
   return {
     id: mon.id,
     name: monster_label(mon.id),
-    passive: mon.chosenPassive,
-    moves: mon.chosenMoves.slice(0, 4),
+    type: mon.type,
+    showHp: true,
+    moves: mon.chosenMoves.slice(0, LOBBY_MOVE_SLOTS),
     current: {
       hp: Math.max(0, mon.hp),
       maxHp: mon.maxHp,
@@ -4459,25 +4529,29 @@ function render_monster_tooltip(payload) {
   title.className = "stat-tooltip-title";
   title.textContent = payload.name;
   stat_tooltip.appendChild(title);
-  const stats_grid2 = document.createElement("div");
-  stats_grid2.className = "stat-tooltip-grid";
-  stats_grid2.appendChild(tooltip_stat_row("ATK", payload.current.attack, payload.base.attack));
-  stats_grid2.appendChild(tooltip_stat_row("DEF", payload.current.defense, payload.base.defense));
-  stats_grid2.appendChild(tooltip_stat_row("SPE", payload.current.speed, payload.base.speed));
-  stats_grid2.appendChild(tooltip_stat_row("HP", payload.current.maxHp, payload.base.maxHp));
-  stat_tooltip.appendChild(stats_grid2);
-  const hp_line = document.createElement("div");
-  hp_line.className = "stat-tooltip-hp";
-  hp_line.textContent = `Vida atual: ${payload.current.hp}/${payload.current.maxHp}`;
-  stat_tooltip.appendChild(hp_line);
-  const passive_line = document.createElement("div");
-  passive_line.className = "stat-tooltip-passive";
-  passive_line.textContent = `Passive: ${passive_label(payload.passive)}`;
-  stat_tooltip.appendChild(passive_line);
+  const type_line = document.createElement("div");
+  type_line.className = "stat-tooltip-passive";
+  type_line.textContent = `Type: ${payload.type.toUpperCase()}`;
+  stat_tooltip.appendChild(type_line);
+  const stats_grid = document.createElement("div");
+  stats_grid.className = "stat-tooltip-grid";
+  stats_grid.appendChild(tooltip_stat_row("ATK", payload.current.attack, payload.base.attack));
+  stats_grid.appendChild(tooltip_stat_row("DEF", payload.current.defense, payload.base.defense));
+  stats_grid.appendChild(tooltip_stat_row("SPE", payload.current.speed, payload.base.speed));
+  if (payload.showHp) {
+    stats_grid.appendChild(tooltip_stat_row("HP", payload.current.maxHp, payload.base.maxHp));
+  }
+  stat_tooltip.appendChild(stats_grid);
+  if (payload.showHp) {
+    const hp_line = document.createElement("div");
+    hp_line.className = "stat-tooltip-hp";
+    hp_line.textContent = `Vida atual: ${payload.current.hp}/${payload.current.maxHp}`;
+    stat_tooltip.appendChild(hp_line);
+  }
   const moves_box = document.createElement("div");
   moves_box.className = "stat-tooltip-moves";
-  const moves = payload.moves.slice(0, 4);
-  while (moves.length < 4) {
+  const moves = payload.moves.slice(0, LOBBY_MOVE_SLOTS);
+  while (moves.length < LOBBY_MOVE_SLOTS) {
     moves.push("none");
   }
   moves.forEach((move, index) => {
@@ -4679,32 +4753,6 @@ function normalize_stat_value(key, value, fallback) {
   }
   return normalize_int(candidate, fallback, 0);
 }
-function read_ev_value(value, fallback) {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-function ev_total(ev) {
-  return EV_KEYS.reduce((sum, key) => sum + ev[key], 0);
-}
-function normalize_ev_spread(value, fallback = empty_ev_spread()) {
-  const source = typeof value === "object" && value !== null ? value : {};
-  return {
-    hp: read_ev_value(source.hp, fallback.hp),
-    atk: read_ev_value(source.atk, fallback.atk),
-    def: read_ev_value(source.def, fallback.def),
-    spe: read_ev_value(source.spe, fallback.spe)
-  };
-}
-function normalize_legacy_ev_from_stat_alloc(value) {
-  const source = typeof value === "object" && value !== null ? value : null;
-  if (!source)
-    return null;
-  return {
-    hp: read_ev_value(source.maxHp, 0),
-    atk: read_ev_value(source.attack, 0),
-    def: read_ev_value(source.defense, 0),
-    spe: read_ev_value(source.speed, 0)
-  };
-}
 function stats_from_base_level_ev(base, level, ev) {
   const final = calc_final_stats({
     hp: base.maxHp,
@@ -4740,17 +4788,22 @@ function coerce_config(spec, value) {
   const base_stats = normalize_stats(spec.stats, spec.stats);
   const base_level = normalize_stat_value("level", base_stats.level, 1);
   const base_ev = empty_ev_spread();
+  const default_stats = stats_from_base_level_ev(base_stats, base_level, base_ev);
+  const default_moves = spec.defaultMoves.slice(0, LOBBY_MOVE_SLOTS);
+  while (default_moves.length < LOBBY_MOVE_SLOTS) {
+    default_moves.push("none");
+  }
   const base = {
-    moves: spec.defaultMoves.slice(0, 4),
-    passive: spec.defaultPassive,
-    stats: stats_from_base_level_ev(base_stats, base_level, base_ev),
+    moves: default_moves,
+    passive: "none",
+    stats: default_stats,
     ev: base_ev
   };
   if (!value) {
     return base;
   }
-  const moves = Array.isArray(value.moves) ? value.moves.slice(0, 4) : base.moves.slice();
-  while (moves.length < 4) {
+  const moves = Array.isArray(value.moves) ? value.moves.slice(0, LOBBY_MOVE_SLOTS) : base.moves.slice();
+  while (moves.length < LOBBY_MOVE_SLOTS) {
     moves.push("none");
   }
   const allowed = new Set(spec.possibleMoves);
@@ -4762,21 +4815,11 @@ function coerce_config(spec, value) {
       moves[i] = "none";
     }
   }
-  const allowed_passives = new Set(spec.possiblePassives.map(normalize_passive_id));
-  let passive = normalize_passive_id(value.passive || base.passive);
-  const fallback_passive = normalize_passive_id(base.passive);
-  if (!allowed_passives.has(passive)) {
-    passive = allowed_passives.has(fallback_passive) ? fallback_passive : "none";
-  }
-  const level = normalize_stat_value("level", value.stats?.level, base.stats.level);
-  const legacy_ev = normalize_legacy_ev_from_stat_alloc(value.statAlloc);
-  const ev = normalize_ev_spread(value.ev ?? legacy_ev ?? base.ev, base.ev);
-  const stats = stats_from_base_level_ev(base_stats, level, ev);
   return {
     moves,
-    passive,
-    stats,
-    ev
+    passive: "none",
+    stats: default_stats,
+    ev: base_ev
   };
 }
 function get_config(monster_id) {
@@ -4810,8 +4853,8 @@ function get_config(monster_id) {
     existing.ev = coerced.ev;
     changed = true;
   }
-  const existing_moves = existing.moves.slice(0, 4);
-  const coerced_moves = coerced.moves.slice(0, 4);
+  const existing_moves = existing.moves.slice(0, LOBBY_MOVE_SLOTS);
+  const coerced_moves = coerced.moves.slice(0, LOBBY_MOVE_SLOTS);
   if (existing_moves.length !== coerced_moves.length || existing_moves.some((move, idx) => move !== coerced_moves[idx])) {
     existing.moves = coerced_moves;
     changed = true;
@@ -4835,7 +4878,7 @@ function reset_profile_stats_to_defaults() {
       changed = true;
     }
     profile.monsters[spec.id] = {
-      moves: config.moves.slice(0, 4),
+      moves: config.moves.slice(0, LOBBY_MOVE_SLOTS),
       passive: config.passive,
       stats: default_stats,
       ev: default_ev
@@ -4899,7 +4942,6 @@ function render_tabs() {
 }
 function render_config() {
   moves_grid.innerHTML = "";
-  stats_grid.innerHTML = "";
   if (!active_tab) {
     show_warning("Select 3 monsters to configure.");
     return;
@@ -4911,30 +4953,36 @@ function render_config() {
     return;
   }
   const config = get_config(active_tab);
-  const base_stats = normalize_stats(spec.stats, spec.stats);
-  config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
-  let moves_changed = false;
+  let changed = false;
   const unique_moves = new Set;
-  for (let i = 0;i < 4; i++) {
+  for (let i = 0;i < LOBBY_MOVE_SLOTS; i++) {
     const move = config.moves[i] ?? "none";
     if (move === "none") {
       if (config.moves[i] !== "none") {
         config.moves[i] = "none";
-        moves_changed = true;
+        changed = true;
       }
       continue;
     }
     if (unique_moves.has(move)) {
       config.moves[i] = "none";
-      moves_changed = true;
+      changed = true;
       continue;
     }
     unique_moves.add(move);
   }
-  if (moves_changed) {
+  while (config.moves.length < LOBBY_MOVE_SLOTS) {
+    config.moves.push("none");
+    changed = true;
+  }
+  if (config.moves.length > LOBBY_MOVE_SLOTS) {
+    config.moves = config.moves.slice(0, LOBBY_MOVE_SLOTS);
+    changed = true;
+  }
+  if (changed) {
     save_profile();
   }
-  for (let i = 0;i < 4; i++) {
+  for (let i = 0;i < LOBBY_MOVE_SLOTS; i++) {
     const label = document.createElement("label");
     label.textContent = `Move ${i + 1}`;
     const select = document.createElement("select");
@@ -4992,233 +5040,6 @@ function render_config() {
     label.appendChild(select);
     moves_grid.appendChild(label);
   }
-  const level_label = document.createElement("label");
-  level_label.textContent = "Lv";
-  const level_input = document.createElement("input");
-  level_input.type = "number";
-  level_input.min = `${LEVEL_MIN}`;
-  level_input.max = `${LEVEL_MAX}`;
-  level_input.value = `${config.stats.level}`;
-  level_input.disabled = is_ready && !match_started;
-  const read_level_input_value = () => {
-    const raw = level_input.value.trim();
-    if (!raw) {
-      return null;
-    }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) {
-      return null;
-    }
-    return parsed;
-  };
-  const apply_level_value = (next_value) => {
-    const normalized = normalize_stat_value("level", next_value, config.stats.level);
-    if (normalized !== config.stats.level) {
-      config.stats = stats_from_base_level_ev(base_stats, normalized, config.ev);
-      save_profile();
-    }
-    return normalized;
-  };
-  level_input.addEventListener("input", () => {
-    if (is_ready && !match_started)
-      return;
-    const value = read_level_input_value();
-    if (value === null) {
-      return;
-    }
-    apply_level_value(value);
-    clear_warning();
-  });
-  const commit_level_input = () => {
-    if (is_ready && !match_started)
-      return;
-    const value = read_level_input_value();
-    if (value === null) {
-      level_input.value = `${config.stats.level}`;
-      return;
-    }
-    const normalized = apply_level_value(value);
-    level_input.value = `${normalized}`;
-    clear_warning();
-    render_config();
-  };
-  level_input.addEventListener("change", commit_level_input);
-  level_input.addEventListener("blur", commit_level_input);
-  level_label.appendChild(level_input);
-  moves_grid.appendChild(level_label);
-  const passive_label2 = document.createElement("label");
-  passive_label2.textContent = "Passive";
-  const passive_select = document.createElement("select");
-  for (const passive of spec.possiblePassives) {
-    const option = document.createElement("option");
-    option.value = passive;
-    option.textContent = PASSIVE_LABELS[passive] || passive;
-    passive_select.appendChild(option);
-  }
-  passive_select.value = config.passive;
-  passive_select.disabled = is_ready && !match_started;
-  const apply_passive_value = (next_value) => {
-    if (config.passive === next_value) {
-      return;
-    }
-    config.passive = next_value;
-    save_profile();
-  };
-  passive_select.addEventListener("input", () => {
-    if (is_ready && !match_started)
-      return;
-    apply_passive_value(passive_select.value);
-    clear_warning();
-  });
-  passive_select.addEventListener("change", () => {
-    if (is_ready && !match_started)
-      return;
-    apply_passive_value(passive_select.value);
-    clear_warning();
-  });
-  passive_label2.appendChild(passive_select);
-  moves_grid.appendChild(passive_label2);
-  const points_summary = document.createElement("div");
-  points_summary.className = "stat-points-summary";
-  stats_grid.appendChild(points_summary);
-  const column_header = document.createElement("div");
-  column_header.className = "stat-alloc-header";
-  for (const heading of ["", "Base", "EV's", "", "Total"]) {
-    const header_cell = document.createElement("span");
-    header_cell.className = "stat-alloc-header-cell";
-    if (heading.length === 0) {
-      header_cell.classList.add("is-empty");
-      header_cell.textContent = " ";
-    } else {
-      header_cell.textContent = heading;
-    }
-    column_header.appendChild(header_cell);
-  }
-  stats_grid.appendChild(column_header);
-  const update_points_summary = () => {
-    const used = ev_total(config.ev);
-    const remaining = EV_TOTAL_MAX - used;
-    points_summary.textContent = `EVs: ${used}/${EV_TOTAL_MAX} (restante: ${Math.max(0, remaining)})`;
-  };
-  const stat_rows = [
-    ["hp", "HP"],
-    ["atk", "ATK"],
-    ["def", "DEF"],
-    ["spe", "SPE"]
-  ];
-  const stat_key_by_ev = {
-    hp: "maxHp",
-    atk: "attack",
-    def: "defense",
-    spe: "speed"
-  };
-  const calc_total_stat = (key) => {
-    const base = base_stats[stat_key_by_ev[key]];
-    const level = config.stats.level;
-    const ev_quarter = Math.floor(config.ev[key] / 4);
-    const scaled = Math.floor((2 * base + ev_quarter) * level / 100);
-    if (key === "hp") {
-      return scaled + level + 10;
-    }
-    return scaled + 5;
-  };
-  for (const [key, label_text] of stat_rows) {
-    const row = document.createElement("div");
-    row.className = "stat-alloc-row";
-    const stat_name = document.createElement("span");
-    stat_name.className = "stat-alloc-name";
-    stat_name.textContent = label_text;
-    const base_value = document.createElement("span");
-    base_value.className = "stat-static-value";
-    base_value.textContent = `${base_stats[stat_key_by_ev[key]]}`;
-    const alloc_input = document.createElement("input");
-    alloc_input.type = "number";
-    alloc_input.className = "stat-alloc-input";
-    alloc_input.min = "0";
-    alloc_input.max = `${EV_PER_STAT_MAX}`;
-    alloc_input.step = "1";
-    alloc_input.value = `${config.ev[key]}`;
-    alloc_input.disabled = is_ready && !match_started;
-    const alloc_slider = document.createElement("input");
-    alloc_slider.type = "range";
-    alloc_slider.className = "stat-alloc-slider";
-    alloc_slider.min = "0";
-    alloc_slider.max = `${EV_PER_STAT_MAX}`;
-    alloc_slider.value = `${config.ev[key]}`;
-    alloc_slider.disabled = is_ready && !match_started;
-    const result_value = document.createElement("span");
-    result_value.className = "stat-result-value";
-    result_value.textContent = `${calc_total_stat(key)}`;
-    const max_ev_for_key = () => {
-      const used_without_current = ev_total(config.ev) - config.ev[key];
-      return Math.min(EV_PER_STAT_MAX, Math.max(0, EV_TOTAL_MAX - used_without_current));
-    };
-    const apply_allocation_value = (next_raw, source) => {
-      const current = config.ev[key];
-      if (!Number.isFinite(next_raw)) {
-        alloc_input.value = `${current}`;
-        alloc_slider.value = `${current}`;
-        return;
-      }
-      if (source === "slider") {
-        const clamped = Math.max(0, Math.min(max_ev_for_key(), Math.floor(next_raw)));
-        const candidate2 = { ...config.ev, [key]: clamped };
-        config.ev = candidate2;
-        config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
-        alloc_input.value = `${clamped}`;
-        alloc_slider.value = `${clamped}`;
-        result_value.textContent = `${calc_total_stat(key)}`;
-        clear_warning();
-        update_points_summary();
-        save_profile();
-        return;
-      }
-      if (!Number.isInteger(next_raw)) {
-        show_warning(`EV ${key} must be integer.`);
-        alloc_input.value = `${current}`;
-        alloc_slider.value = `${current}`;
-        return;
-      }
-      const candidate = { ...config.ev, [key]: next_raw };
-      const ev_error = validate_ev_spread(candidate);
-      if (ev_error) {
-        show_warning(ev_error);
-        alloc_input.value = `${current}`;
-        alloc_slider.value = `${current}`;
-        return;
-      }
-      config.ev = candidate;
-      config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
-      alloc_input.value = `${next_raw}`;
-      alloc_slider.value = `${next_raw}`;
-      result_value.textContent = `${calc_total_stat(key)}`;
-      clear_warning();
-      update_points_summary();
-      save_profile();
-    };
-    alloc_input.addEventListener("change", () => {
-      if (is_ready && !match_started)
-        return;
-      const value = Number(alloc_input.value);
-      if (!Number.isFinite(value)) {
-        alloc_input.value = `${config.ev[key]}`;
-        return;
-      }
-      apply_allocation_value(value, "input");
-    });
-    alloc_slider.addEventListener("input", () => {
-      if (is_ready && !match_started)
-        return;
-      apply_allocation_value(Number(alloc_slider.value), "slider");
-    });
-    row.appendChild(stat_name);
-    row.appendChild(base_value);
-    row.appendChild(alloc_input);
-    row.appendChild(alloc_slider);
-    row.appendChild(result_value);
-    stats_grid.appendChild(row);
-  }
-  update_points_summary();
 }
 function set_edit_target(index) {
   if (is_ready && !match_started) {
@@ -5347,7 +5168,6 @@ function update_action_controls() {
   const active_id = selected[0];
   const config = get_config(active_id);
   let guard_on_cooldown = false;
-  let choice_band_locked_move = null;
   let active_moves = config.moves;
   if (latest_state && slot) {
     const player_state = latest_state.players[slot];
@@ -5355,26 +5175,18 @@ function update_action_controls() {
     const preview_active = pending_switch && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number" ? player_state.team[forced_switch_target_index] ?? fallback_active : fallback_active;
     guard_on_cooldown = Math.max(preview_active.protectCooldownTurns, preview_active.endureCooldownTurns) > 0;
     active_moves = preview_active.chosenMoves;
-    if (preview_active.chosenPassive === "choice_band") {
-      choice_band_locked_move = typeof preview_active.choiceBandLockedMoveIndex === "number" ? preview_active.choiceBandLockedMoveIndex : null;
-    }
   }
   move_buttons.forEach((btn, index) => {
     const move = active_moves[index] ?? "none";
     const label = MOVE_LABELS[move] || move;
-    const locked_by_choice_band = choice_band_locked_move !== null && index !== choice_band_locked_move;
-    const is_locked_slot = choice_band_locked_move !== null && index === choice_band_locked_move;
-    if (locked_by_choice_band) {
-      btn.textContent = `${index + 1}. ${label} (Choice Band lock)`;
-      btn.disabled = true;
-    } else if (move === "protect" && guard_on_cooldown) {
-      btn.textContent = is_locked_slot ? `${index + 1}. Protect (cooldown, locked)` : `${index + 1}. Protect (cooldown)`;
+    if (move === "protect" && guard_on_cooldown) {
+      btn.textContent = `${index + 1}. Protect (cooldown)`;
       btn.disabled = true;
     } else if (move === "endure" && guard_on_cooldown) {
-      btn.textContent = is_locked_slot ? `${index + 1}. Endure (cooldown, locked)` : `${index + 1}. Endure (cooldown)`;
+      btn.textContent = `${index + 1}. Endure (cooldown)`;
       btn.disabled = true;
     } else {
-      btn.textContent = is_locked_slot ? `${index + 1}. ${label} (locked)` : `${index + 1}. ${label}`;
+      btn.textContent = `${index + 1}. ${label}`;
       btn.disabled = controls_disabled;
     }
     const is_selected_move = selected_intent_turn === current_turn && selected_intent?.action === "use_move" && selected_intent.moveIndex === index;
@@ -5545,8 +5357,9 @@ function build_team_selection() {
     config.stats = stats;
     monsters.push({
       id,
-      moves: config.moves.slice(0, 4),
-      passive: config.passive,
+      type: spec.type,
+      moves: config.moves.slice(0, LOBBY_MOVE_SLOTS),
+      passive: "none",
       stats: { ...stats },
       ev: { ...config.ev }
     });
@@ -5650,6 +5463,9 @@ function handle_turn_start(data) {
   if (current_turn === BASE_TURN_LIMIT + 1) {
     append_log(`overtime started (max ${EXTRA_TURN_LIMIT} turns)`);
   }
+  if (latest_state?.zeroHpTiebreakPending && latest_state.zeroHpTiebreakTurn === current_turn) {
+    append_log("double KO tiebreak: final extra turn");
+  }
   append_turn_marker(current_turn);
   if (!has_pending_switch()) {
     close_switch_modal();
@@ -5723,9 +5539,6 @@ function render_effects(state, viewer_slot, player_slot, enemy_slot) {
     if (player_active.bellyDrumActive) {
       player_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 4)", "buff"));
     }
-    if (normalize_passive_id(player_active.chosenPassive) === "choice_band") {
-      player_effects.appendChild(effect_chip("Choice Band (myATK 1.5)", "passive"));
-    }
   }
   if (enemy_effects) {
     enemy_effects.innerHTML = "";
@@ -5746,9 +5559,6 @@ function render_effects(state, viewer_slot, player_slot, enemy_slot) {
     }
     if (enemy_active.bellyDrumActive) {
       enemy_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 4)", "buff"));
-    }
-    if (normalize_passive_id(enemy_active.chosenPassive) === "choice_band") {
-      enemy_effects.appendChild(effect_chip("Choice Band (myATK 1.5)", "passive"));
     }
   }
 }

@@ -14,6 +14,13 @@ function ensure_int(value: number, message: string): void {
   ensure(Number.isInteger(value), message);
 }
 
+function ensure_valid_type(monster: MonsterCatalogEntry): void {
+  ensure(
+    monster.type === "buf" || monster.type === "def" || monster.type === "atk",
+    `${monster.id}: invalid type ${monster.type}`
+  );
+}
+
 export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[]): void {
   const monster_ids = new Set<string>();
 
@@ -22,7 +29,8 @@ export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[
     ensure(!monster_ids.has(monster.id), `duplicate monster id: ${monster.id}`);
     monster_ids.add(monster.id);
 
-    ensure(monster.defaultMoves.length === 4, `${monster.id}: defaultMoves must contain exactly 4 entries`);
+    ensure(monster.defaultMoves.length === 3, `${monster.id}: defaultMoves must contain exactly 3 entries`);
+    ensure_valid_type(monster);
 
     const possible_moves = new Set(monster.possibleMoves);
     ensure(possible_moves.size > 0, `${monster.id}: possibleMoves cannot be empty`);
@@ -54,6 +62,8 @@ export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[
       possible_passives.has(normalized_default),
       `${monster.id}: default passive not allowed: ${monster.defaultPassive}`
     );
+    ensure(normalized_default === "none", `${monster.id}: default passive must be none`);
+    ensure(possible_passives.size === 1 && possible_passives.has("none"), `${monster.id}: possiblePassives must be [none]`);
 
     ensure_int(monster.stats.level, `${monster.id}: level must be integer`);
     ensure_int(monster.stats.maxHp, `${monster.id}: maxHp must be integer`);

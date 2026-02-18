@@ -6,9 +6,11 @@ export const SHARED_HP_START = 200;
 export const TURN_DURATION_MS = 5_000;
 export const BASE_TURN_LIMIT = 12;
 export const EXTRA_TURN_LIMIT = 5;
+export const ZERO_HP_TIEBREAKER_HP = 1;
 
 export type MoveId = "none" | "protect" | string;
 export type PassiveId = "none" | "leftovers" | "choice_band" | "regen_5pct" | string;
+export type MonsterType = "buf" | "def" | "atk";
 
 export type EVSpread = {
   hp: number;
@@ -29,6 +31,7 @@ export type MonsterConfig = {
   id: string;
   moves: MoveId[];
   passive: PassiveId;
+  type: MonsterType;
   stats: Stats;
   ev: EVSpread;
 };
@@ -41,6 +44,7 @@ export type TeamSelection = {
 export type MonsterState = {
   id: string;
   name: string;
+  type: MonsterType;
   hp: number;
   maxHp: number;
   level: number;
@@ -80,6 +84,9 @@ export type GameState = {
   winner?: PlayerSlot;
   baseTurnLimit: number;
   extraTurnLimit: number;
+  zeroHpTiebreakPending: boolean;
+  zeroHpTiebreakResolved: boolean;
+  zeroHpTiebreakTurn: number | null;
   players: Record<PlayerSlot, PlayerState>;
   pendingSwitch: Record<PlayerSlot, boolean>;
   pendingWish: Record<PlayerSlot, number | null>;

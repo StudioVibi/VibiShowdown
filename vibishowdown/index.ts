@@ -2,9 +2,7 @@ import { gen_name, load, on_sync, ping, post, watch } from "../src/client.ts";
 import {
   MONSTER_BY_ID as roster_by_id,
   MONSTER_ROSTER as roster,
-  MOVE_LABELS,
-  PASSIVE_LABELS,
-  normalize_passive_id
+  MOVE_LABELS
 } from "../src/data/index.ts";
 import type { MonsterCatalogEntry } from "../src/data/index.ts";
 import { apply_forced_switch, create_initial_state, resolve_turn, validate_intent } from "../src/engine.ts";
@@ -17,6 +15,7 @@ import type {
   EVSpread,
   EventLog,
   GameState,
+  MonsterType,
   MonsterState,
   PlayerIntent,
   PlayerSlot,
@@ -54,11 +53,14 @@ type TooltipValueState = "up" | "down" | "neutral";
 type MonsterTooltipPayload = {
   id: string;
   name: string;
-  passive: string;
+  type: MonsterType;
+  showHp: boolean;
   moves: string[];
   current: { hp: number; maxHp: number; attack: number; defense: number; speed: number };
   base: { maxHp: number; attack: number; defense: number; speed: number };
 };
+
+const LOBBY_MOVE_SLOTS = 3;
 
 const PLAYER_SLOTS: PlayerSlot[] = ["player1", "player2"];
 
@@ -156,8 +158,7 @@ const reset_status_btn = document.getElementById("reset-status-btn") as HTMLButt
 const move_buttons = [
   document.getElementById("move-btn-0") as HTMLButtonElement,
   document.getElementById("move-btn-1") as HTMLButtonElement,
-  document.getElementById("move-btn-2") as HTMLButtonElement,
-  document.getElementById("move-btn-3") as HTMLButtonElement
+  document.getElementById("move-btn-2") as HTMLButtonElement
 ];
 const switch_btn = document.getElementById("switch-btn") as HTMLButtonElement | null;
 const surrender_btn = document.getElementById("surrender-btn") as HTMLButtonElement;
@@ -177,7 +178,6 @@ const slot_bench_a_img = document.getElementById("slot-bench-a-img") as HTMLImag
 const slot_bench_b_img = document.getElementById("slot-bench-b-img") as HTMLImageElement;
 const monster_tabs = document.getElementById("monster-tabs");
 const moves_grid = document.getElementById("moves-grid")!;
-const stats_grid = document.getElementById("stats-grid")!;
 const config_warning = document.getElementById("config-warning")!;
 const player_bench_slots = [
   {
@@ -855,10 +855,6 @@ function move_label(id: string): string {
   return MOVE_LABELS[id] || id;
 }
 
-function passive_label(id: string): string {
-  return PASSIVE_LABELS[id] || id;
-}
-
 function stat_label(value: unknown): string {
   if (value === "attack") return "ATK";
   if (value === "defense") return "DEF";
@@ -927,11 +923,14 @@ function base_stats_for(monster_id: string, level?: number): { maxHp: number; at
 function tooltip_from_config(monster_id: string): MonsterTooltipPayload {
   const config = get_config(monster_id);
   const base = base_stats_for(monster_id, config.stats.level);
+  const spec = roster_by_id.get(monster_id);
+  const type = spec?.type ?? "atk";
   return {
     id: monster_id,
     name: monster_label(monster_id),
-    passive: config.passive,
-    moves: config.moves.slice(0, 4),
+    type,
+    showHp: false,
+    moves: config.moves.slice(0, LOBBY_MOVE_SLOTS),
     current: {
       hp: config.stats.maxHp,
       maxHp: config.stats.maxHp,
@@ -948,8 +947,9 @@ function tooltip_from_state(mon: MonsterState): MonsterTooltipPayload {
   return {
     id: mon.id,
     name: monster_label(mon.id),
-    passive: mon.chosenPassive,
-    moves: mon.chosenMoves.slice(0, 4),
+    type: mon.type,
+    showHp: true,
+    moves: mon.chosenMoves.slice(0, LOBBY_MOVE_SLOTS),
     current: {
       hp: Math.max(0, mon.hp),
       maxHp: mon.maxHp,
@@ -1005,28 +1005,32 @@ function render_monster_tooltip(payload: MonsterTooltipPayload): void {
   title.textContent = payload.name;
   stat_tooltip.appendChild(title);
 
+  const type_line = document.createElement("div");
+  type_line.className = "stat-tooltip-passive";
+  type_line.textContent = `Type: ${payload.type.toUpperCase()}`;
+  stat_tooltip.appendChild(type_line);
+
   const stats_grid = document.createElement("div");
   stats_grid.className = "stat-tooltip-grid";
   stats_grid.appendChild(tooltip_stat_row("ATK", payload.current.attack, payload.base.attack));
   stats_grid.appendChild(tooltip_stat_row("DEF", payload.current.defense, payload.base.defense));
   stats_grid.appendChild(tooltip_stat_row("SPE", payload.current.speed, payload.base.speed));
-  stats_grid.appendChild(tooltip_stat_row("HP", payload.current.maxHp, payload.base.maxHp));
+  if (payload.showHp) {
+    stats_grid.appendChild(tooltip_stat_row("HP", payload.current.maxHp, payload.base.maxHp));
+  }
   stat_tooltip.appendChild(stats_grid);
 
-  const hp_line = document.createElement("div");
-  hp_line.className = "stat-tooltip-hp";
-  hp_line.textContent = `Vida atual: ${payload.current.hp}/${payload.current.maxHp}`;
-  stat_tooltip.appendChild(hp_line);
-
-  const passive_line = document.createElement("div");
-  passive_line.className = "stat-tooltip-passive";
-  passive_line.textContent = `Passive: ${passive_label(payload.passive)}`;
-  stat_tooltip.appendChild(passive_line);
+  if (payload.showHp) {
+    const hp_line = document.createElement("div");
+    hp_line.className = "stat-tooltip-hp";
+    hp_line.textContent = `Vida atual: ${payload.current.hp}/${payload.current.maxHp}`;
+    stat_tooltip.appendChild(hp_line);
+  }
 
   const moves_box = document.createElement("div");
   moves_box.className = "stat-tooltip-moves";
-  const moves = payload.moves.slice(0, 4);
-  while (moves.length < 4) {
+  const moves = payload.moves.slice(0, LOBBY_MOVE_SLOTS);
+  while (moves.length < LOBBY_MOVE_SLOTS) {
     moves.push("none");
   }
   moves.forEach((move, index) => {
@@ -1336,10 +1340,15 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
   const base_stats = normalize_stats(spec.stats, spec.stats);
   const base_level = normalize_stat_value("level", base_stats.level, 1);
   const base_ev = empty_ev_spread();
+  const default_stats = stats_from_base_level_ev(base_stats, base_level, base_ev);
+  const default_moves = spec.defaultMoves.slice(0, LOBBY_MOVE_SLOTS);
+  while (default_moves.length < LOBBY_MOVE_SLOTS) {
+    default_moves.push("none");
+  }
   const base: MonsterConfig = {
-    moves: spec.defaultMoves.slice(0, 4),
-    passive: spec.defaultPassive,
-    stats: stats_from_base_level_ev(base_stats, base_level, base_ev),
+    moves: default_moves,
+    passive: "none",
+    stats: default_stats,
     ev: base_ev
   };
 
@@ -1347,8 +1356,8 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
     return base;
   }
 
-  const moves = Array.isArray(value.moves) ? value.moves.slice(0, 4) : base.moves.slice();
-  while (moves.length < 4) {
+  const moves = Array.isArray(value.moves) ? value.moves.slice(0, LOBBY_MOVE_SLOTS) : base.moves.slice();
+  while (moves.length < LOBBY_MOVE_SLOTS) {
     moves.push("none");
   }
   const allowed = new Set(spec.possibleMoves);
@@ -1360,23 +1369,12 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
       moves[i] = "none";
     }
   }
-  const allowed_passives = new Set(spec.possiblePassives.map(normalize_passive_id));
-  let passive = normalize_passive_id(value.passive || base.passive);
-  const fallback_passive = normalize_passive_id(base.passive);
-  if (!allowed_passives.has(passive)) {
-    passive = allowed_passives.has(fallback_passive) ? fallback_passive : "none";
-  }
-
-  const level = normalize_stat_value("level", value.stats?.level, base.stats.level);
-  const legacy_ev = normalize_legacy_ev_from_stat_alloc((value as { statAlloc?: unknown }).statAlloc);
-  const ev = normalize_ev_spread(value.ev ?? legacy_ev ?? base.ev, base.ev);
-  const stats = stats_from_base_level_ev(base_stats, level, ev);
 
   return {
     moves,
-    passive,
-    stats,
-    ev
+    passive: "none",
+    stats: default_stats,
+    ev: base_ev
   };
 }
 
@@ -1418,8 +1416,8 @@ function get_config(monster_id: string): MonsterConfig {
     existing.ev = coerced.ev;
     changed = true;
   }
-  const existing_moves = existing.moves.slice(0, 4);
-  const coerced_moves = coerced.moves.slice(0, 4);
+  const existing_moves = existing.moves.slice(0, LOBBY_MOVE_SLOTS);
+  const coerced_moves = coerced.moves.slice(0, LOBBY_MOVE_SLOTS);
   if (
     existing_moves.length !== coerced_moves.length ||
     existing_moves.some((move, idx) => move !== coerced_moves[idx])
@@ -1448,7 +1446,7 @@ function reset_profile_stats_to_defaults(): void {
       changed = true;
     }
     profile.monsters[spec.id] = {
-      moves: config.moves.slice(0, 4),
+      moves: config.moves.slice(0, LOBBY_MOVE_SLOTS),
       passive: config.passive,
       stats: default_stats,
       ev: default_ev
@@ -1524,7 +1522,6 @@ function render_tabs(): void {
 
 function render_config(): void {
   moves_grid.innerHTML = "";
-  stats_grid.innerHTML = "";
 
   if (!active_tab) {
     show_warning("Select 3 monsters to configure.");
@@ -1539,32 +1536,37 @@ function render_config(): void {
   }
 
   const config = get_config(active_tab);
-  const base_stats = normalize_stats(spec.stats, spec.stats);
-  config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
-
-  let moves_changed = false;
+  let changed = false;
   const unique_moves = new Set<string>();
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < LOBBY_MOVE_SLOTS; i++) {
     const move = config.moves[i] ?? "none";
     if (move === "none") {
       if (config.moves[i] !== "none") {
         config.moves[i] = "none";
-        moves_changed = true;
+        changed = true;
       }
       continue;
     }
     if (unique_moves.has(move)) {
       config.moves[i] = "none";
-      moves_changed = true;
+      changed = true;
       continue;
     }
     unique_moves.add(move);
   }
-  if (moves_changed) {
+  while (config.moves.length < LOBBY_MOVE_SLOTS) {
+    config.moves.push("none");
+    changed = true;
+  }
+  if (config.moves.length > LOBBY_MOVE_SLOTS) {
+    config.moves = config.moves.slice(0, LOBBY_MOVE_SLOTS);
+    changed = true;
+  }
+  if (changed) {
     save_profile();
   }
 
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < LOBBY_MOVE_SLOTS; i++) {
     const label = document.createElement("label");
     label.textContent = `Move ${i + 1}`;
     const select = document.createElement("select");
@@ -1624,247 +1626,6 @@ function render_config(): void {
     label.appendChild(select);
     moves_grid.appendChild(label);
   }
-
-  const level_label = document.createElement("label");
-  level_label.textContent = "Lv";
-  const level_input = document.createElement("input");
-  level_input.type = "number";
-  level_input.min = `${LEVEL_MIN}`;
-  level_input.max = `${LEVEL_MAX}`;
-  level_input.value = `${config.stats.level}`;
-  level_input.disabled = is_ready && !match_started;
-  const read_level_input_value = (): number | null => {
-    const raw = level_input.value.trim();
-    if (!raw) {
-      return null;
-    }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) {
-      return null;
-    }
-    return parsed;
-  };
-  const apply_level_value = (next_value: number): number => {
-    const normalized = normalize_stat_value("level", next_value, config.stats.level);
-    if (normalized !== config.stats.level) {
-      config.stats = stats_from_base_level_ev(base_stats, normalized, config.ev);
-      save_profile();
-    }
-    return normalized;
-  };
-  level_input.addEventListener("input", () => {
-    if (is_ready && !match_started) return;
-    const value = read_level_input_value();
-    if (value === null) {
-      return;
-    }
-    apply_level_value(value);
-    clear_warning();
-  });
-  const commit_level_input = (): void => {
-    if (is_ready && !match_started) return;
-    const value = read_level_input_value();
-    if (value === null) {
-      level_input.value = `${config.stats.level}`;
-      return;
-    }
-    const normalized = apply_level_value(value);
-    level_input.value = `${normalized}`;
-    clear_warning();
-    render_config();
-  };
-  level_input.addEventListener("change", commit_level_input);
-  level_input.addEventListener("blur", commit_level_input);
-  level_label.appendChild(level_input);
-  moves_grid.appendChild(level_label);
-
-  const passive_label = document.createElement("label");
-  passive_label.textContent = "Passive";
-  const passive_select = document.createElement("select");
-  for (const passive of spec.possiblePassives) {
-    const option = document.createElement("option");
-    option.value = passive;
-    option.textContent = PASSIVE_LABELS[passive] || passive;
-    passive_select.appendChild(option);
-  }
-  passive_select.value = config.passive;
-  passive_select.disabled = is_ready && !match_started;
-  const apply_passive_value = (next_value: string): void => {
-    if (config.passive === next_value) {
-      return;
-    }
-    config.passive = next_value;
-    save_profile();
-  };
-  passive_select.addEventListener("input", () => {
-    if (is_ready && !match_started) return;
-    apply_passive_value(passive_select.value);
-    clear_warning();
-  });
-  passive_select.addEventListener("change", () => {
-    if (is_ready && !match_started) return;
-    apply_passive_value(passive_select.value);
-    clear_warning();
-  });
-  passive_label.appendChild(passive_select);
-  moves_grid.appendChild(passive_label);
-
-  const points_summary = document.createElement("div");
-  points_summary.className = "stat-points-summary";
-  stats_grid.appendChild(points_summary);
-
-  const column_header = document.createElement("div");
-  column_header.className = "stat-alloc-header";
-  for (const heading of ["", "Base", "EV's", "", "Total"]) {
-    const header_cell = document.createElement("span");
-    header_cell.className = "stat-alloc-header-cell";
-    if (heading.length === 0) {
-      header_cell.classList.add("is-empty");
-      header_cell.textContent = " ";
-    } else {
-      header_cell.textContent = heading;
-    }
-    column_header.appendChild(header_cell);
-  }
-  stats_grid.appendChild(column_header);
-
-  const update_points_summary = (): void => {
-    const used = ev_total(config.ev);
-    const remaining = EV_TOTAL_MAX - used;
-    points_summary.textContent = `EVs: ${used}/${EV_TOTAL_MAX} (restante: ${Math.max(0, remaining)})`;
-  };
-
-  const stat_rows: Array<[EVStatKey, string]> = [
-    ["hp", "HP"],
-    ["atk", "ATK"],
-    ["def", "DEF"],
-    ["spe", "SPE"]
-  ];
-  const stat_key_by_ev: Record<EVStatKey, keyof Stats> = {
-    hp: "maxHp",
-    atk: "attack",
-    def: "defense",
-    spe: "speed"
-  };
-  const calc_total_stat = (key: EVStatKey): number => {
-    const base = base_stats[stat_key_by_ev[key]];
-    const level = config.stats.level;
-    const ev_quarter = Math.floor(config.ev[key] / 4);
-    const scaled = Math.floor(((2 * base + ev_quarter) * level) / 100);
-    if (key === "hp") {
-      return scaled + level + 10;
-    }
-    return scaled + 5;
-  };
-
-  for (const [key, label_text] of stat_rows) {
-    const row = document.createElement("div");
-    row.className = "stat-alloc-row";
-
-    const stat_name = document.createElement("span");
-    stat_name.className = "stat-alloc-name";
-    stat_name.textContent = label_text;
-
-    const base_value = document.createElement("span");
-    base_value.className = "stat-static-value";
-    base_value.textContent = `${base_stats[stat_key_by_ev[key]]}`;
-
-    const alloc_input = document.createElement("input");
-    alloc_input.type = "number";
-    alloc_input.className = "stat-alloc-input";
-    alloc_input.min = "0";
-    alloc_input.max = `${EV_PER_STAT_MAX}`;
-    alloc_input.step = "1";
-    alloc_input.value = `${config.ev[key]}`;
-    alloc_input.disabled = is_ready && !match_started;
-
-    const alloc_slider = document.createElement("input");
-    alloc_slider.type = "range";
-    alloc_slider.className = "stat-alloc-slider";
-    alloc_slider.min = "0";
-    alloc_slider.max = `${EV_PER_STAT_MAX}`;
-    alloc_slider.value = `${config.ev[key]}`;
-    alloc_slider.disabled = is_ready && !match_started;
-
-    const result_value = document.createElement("span");
-    result_value.className = "stat-result-value";
-    result_value.textContent = `${calc_total_stat(key)}`;
-
-    const max_ev_for_key = (): number => {
-      const used_without_current = ev_total(config.ev) - config.ev[key];
-      return Math.min(EV_PER_STAT_MAX, Math.max(0, EV_TOTAL_MAX - used_without_current));
-    };
-
-    const apply_allocation_value = (next_raw: number, source: "input" | "slider"): void => {
-      const current = config.ev[key];
-      if (!Number.isFinite(next_raw)) {
-        alloc_input.value = `${current}`;
-        alloc_slider.value = `${current}`;
-        return;
-      }
-
-      if (source === "slider") {
-        const clamped = Math.max(0, Math.min(max_ev_for_key(), Math.floor(next_raw)));
-        const candidate: EVSpread = { ...config.ev, [key]: clamped };
-        config.ev = candidate;
-        config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
-        alloc_input.value = `${clamped}`;
-        alloc_slider.value = `${clamped}`;
-        result_value.textContent = `${calc_total_stat(key)}`;
-        clear_warning();
-        update_points_summary();
-        save_profile();
-        return;
-      }
-
-      if (!Number.isInteger(next_raw)) {
-        show_warning(`EV ${key} must be integer.`);
-        alloc_input.value = `${current}`;
-        alloc_slider.value = `${current}`;
-        return;
-      }
-      const candidate: EVSpread = { ...config.ev, [key]: next_raw };
-      const ev_error = validate_ev_spread(candidate);
-      if (ev_error) {
-        show_warning(ev_error);
-        alloc_input.value = `${current}`;
-        alloc_slider.value = `${current}`;
-        return;
-      }
-      config.ev = candidate;
-      config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
-      alloc_input.value = `${next_raw}`;
-      alloc_slider.value = `${next_raw}`;
-      result_value.textContent = `${calc_total_stat(key)}`;
-      clear_warning();
-      update_points_summary();
-      save_profile();
-    };
-
-    alloc_input.addEventListener("change", () => {
-      if (is_ready && !match_started) return;
-      const value = Number(alloc_input.value);
-      if (!Number.isFinite(value)) {
-        alloc_input.value = `${config.ev[key]}`;
-        return;
-      }
-      apply_allocation_value(value, "input");
-    });
-
-    alloc_slider.addEventListener("input", () => {
-      if (is_ready && !match_started) return;
-      apply_allocation_value(Number(alloc_slider.value), "slider");
-    });
-
-    row.appendChild(stat_name);
-    row.appendChild(base_value);
-    row.appendChild(alloc_input);
-    row.appendChild(alloc_slider);
-    row.appendChild(result_value);
-    stats_grid.appendChild(row);
-  }
-
-  update_points_summary();
 }
 
 function set_edit_target(index: number): void {
@@ -2008,7 +1769,6 @@ function update_action_controls(): void {
   const active_id = selected[0];
   const config = get_config(active_id);
   let guard_on_cooldown = false;
-  let choice_band_locked_move: number | null = null;
   let active_moves = config.moves;
   if (latest_state && slot) {
     const player_state = latest_state.players[slot];
@@ -2019,27 +1779,18 @@ function update_action_controls(): void {
         : fallback_active;
     guard_on_cooldown = Math.max(preview_active.protectCooldownTurns, preview_active.endureCooldownTurns) > 0;
     active_moves = preview_active.chosenMoves;
-    if (preview_active.chosenPassive === "choice_band") {
-      choice_band_locked_move =
-        typeof preview_active.choiceBandLockedMoveIndex === "number" ? preview_active.choiceBandLockedMoveIndex : null;
-    }
   }
   move_buttons.forEach((btn, index) => {
     const move = active_moves[index] ?? "none";
     const label = MOVE_LABELS[move] || move;
-    const locked_by_choice_band = choice_band_locked_move !== null && index !== choice_band_locked_move;
-    const is_locked_slot = choice_band_locked_move !== null && index === choice_band_locked_move;
-    if (locked_by_choice_band) {
-      btn.textContent = `${index + 1}. ${label} (Choice Band lock)`;
-      btn.disabled = true;
-    } else if (move === "protect" && guard_on_cooldown) {
-      btn.textContent = is_locked_slot ? `${index + 1}. Protect (cooldown, locked)` : `${index + 1}. Protect (cooldown)`;
+    if (move === "protect" && guard_on_cooldown) {
+      btn.textContent = `${index + 1}. Protect (cooldown)`;
       btn.disabled = true;
     } else if (move === "endure" && guard_on_cooldown) {
-      btn.textContent = is_locked_slot ? `${index + 1}. Endure (cooldown, locked)` : `${index + 1}. Endure (cooldown)`;
+      btn.textContent = `${index + 1}. Endure (cooldown)`;
       btn.disabled = true;
     } else {
-      btn.textContent = is_locked_slot ? `${index + 1}. ${label} (locked)` : `${index + 1}. ${label}`;
+      btn.textContent = `${index + 1}. ${label}`;
       btn.disabled = controls_disabled;
     }
     const is_selected_move =
@@ -2230,8 +1981,9 @@ function build_team_selection(): TeamSelection | null {
     config.stats = stats;
     monsters.push({
       id,
-      moves: config.moves.slice(0, 4),
-      passive: config.passive,
+      type: spec.type,
+      moves: config.moves.slice(0, LOBBY_MOVE_SLOTS),
+      passive: "none",
       stats: { ...stats },
       ev: { ...config.ev }
     });
@@ -2340,6 +2092,9 @@ function handle_turn_start(data: { turn: number; deadline_at: number }): void {
   if (current_turn === BASE_TURN_LIMIT + 1) {
     append_log(`overtime started (max ${EXTRA_TURN_LIMIT} turns)`);
   }
+  if (latest_state?.zeroHpTiebreakPending && latest_state.zeroHpTiebreakTurn === current_turn) {
+    append_log("double KO tiebreak: final extra turn");
+  }
   append_turn_marker(current_turn);
   if (!has_pending_switch()) {
     close_switch_modal();
@@ -2377,7 +2132,7 @@ function log_events(log: EventLog[]): void {
   }
 }
 
-function effect_chip(label: string, kind: "seeded" | "drain" | "buff" | "debuff" | "passive"): HTMLSpanElement {
+function effect_chip(label: string, kind: "seeded" | "drain" | "buff" | "debuff"): HTMLSpanElement {
   const chip = document.createElement("span");
   chip.className = `effect-chip ${kind}`;
   const dot = document.createElement("span");
@@ -2423,9 +2178,6 @@ function render_effects(
     if (player_active.bellyDrumActive) {
       player_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 4)", "buff"));
     }
-    if (normalize_passive_id(player_active.chosenPassive) === "choice_band") {
-      player_effects.appendChild(effect_chip("Choice Band (myATK 1.5)", "passive"));
-    }
   }
 
   if (enemy_effects) {
@@ -2447,9 +2199,6 @@ function render_effects(
     }
     if (enemy_active.bellyDrumActive) {
       enemy_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 4)", "buff"));
-    }
-    if (normalize_passive_id(enemy_active.chosenPassive) === "choice_band") {
-      enemy_effects.appendChild(effect_chip("Choice Band (myATK 1.5)", "passive"));
     }
   }
 }

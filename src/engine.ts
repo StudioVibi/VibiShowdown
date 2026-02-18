@@ -1,12 +1,14 @@
 import {
   BASE_TURN_LIMIT,
   EXTRA_TURN_LIMIT,
+  ZERO_HP_TIEBREAKER_HP,
   SHARED_HP_START,
 } from "./shared.ts";
 import type {
   EVSpread,
   EventLog,
   GameState,
+  MonsterType,
   MonsterState,
   MoveId,
   PlayerIntent,
@@ -16,7 +18,6 @@ import type {
 } from "./shared.ts";
 import { MONSTER_BY_ID } from "./data/pokemon.ts";
 import { move_spec } from "./data/moves.ts";
-import { apply_passive_turn_effect, passive_spec } from "./data/passives.ts";
 import { mul_div_ceil, mul_div_floor, mul_div_round, normalize_int } from "./int_math.ts";
 import { LEVEL_MAX, LEVEL_MIN, calc_final_stats, validate_ev_spread } from "./stats_calc.ts";
 
@@ -37,7 +38,7 @@ const PHASES: Phase[] = [
 
 const END_PHASE_ID = "end_turn";
 const SLOT_ORDER = ["player1", "player2"] as const;
-const END_TURN_EFFECT_ORDER = ["focus_punch", "wish", "leftovers", "leech_life"] as const;
+const END_TURN_EFFECT_ORDER = ["focus_punch", "wish", "leech_life"] as const;
 type EndTurnEffectId = (typeof END_TURN_EFFECT_ORDER)[number];
 
 const TAUNT_BLOCKED_MOVE_IDS = new Set([
@@ -54,6 +55,8 @@ const TAUNT_BLOCKED_MOVE_IDS = new Set([
 type Action =
   | { player: PlayerSlot; type: "switch"; phase: string; targetIndex: number }
   | { player: PlayerSlot; type: "move"; phase: string; moveId: MoveId; moveIndex: number };
+
+type MatchProgress = "continue" | "stop_turn" | "ended";
 
 const INITIATIVE_WITHOUT_SPEED: Phase["initiative"] = ["attack", "hp", "defense"];
 
@@ -108,6 +111,7 @@ function clone_monster(monster: MonsterState): MonsterState {
   return {
     id: monster.id,
     name: monster.name,
+    type: monster.type,
     hp: monster.hp,
     maxHp: monster.maxHp,
     level: monster.level,
@@ -187,6 +191,10 @@ export function clone_state(state: GameState): GameState {
     winner: state.winner,
     baseTurnLimit: Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1)),
     extraTurnLimit: Math.max(0, normalize_int(state.extraTurnLimit, EXTRA_TURN_LIMIT, 0)),
+    zeroHpTiebreakPending: !!state.zeroHpTiebreakPending,
+    zeroHpTiebreakResolved: !!state.zeroHpTiebreakResolved,
+    zeroHpTiebreakTurn:
+      typeof state.zeroHpTiebreakTurn === "number" ? normalize_int(state.zeroHpTiebreakTurn, state.turn + 1, 1) : null,
     players: {
       player1: clone_player(state.players.player1),
       player2: clone_player(state.players.player2)
@@ -247,6 +255,130 @@ function sync_all_players_shared_hp(state: GameState): void {
   }
 }
 
+function compare_monster_type(left: MonsterType, right: MonsterType): number {
+  if (left === right) {
+    return 0;
+  }
+  if ((left === "buf" && right === "def") || (left === "def" && right === "atk") || (left === "atk" && right === "buf")) {
+    return 1;
+  }
+  return -1;
+}
+
+function apply_mindgame_bonus_event(state: GameState, log: EventLog[]): void {
+  const p1_active = active_monster(state.players.player1);
+  const p2_active = active_monster(state.players.player2);
+  const type_cmp = compare_monster_type(p1_active.type, p2_active.type);
+  if (type_cmp === 0) {
+    return;
+  }
+  const winner: PlayerSlot = type_cmp > 0 ? "player1" : "player2";
+  const loser: PlayerSlot = winner === "player1" ? "player2" : "player1";
+  const winner_active = winner === "player1" ? p1_active : p2_active;
+  const loser_active = loser === "player1" ? p1_active : p2_active;
+  log.push({
+    type: "mindgame_bonus_ready",
+    turn: state.turn,
+    summary: `${winner} won mindgame (${winner_active.type} > ${loser_active.type})`,
+    data: {
+      winner,
+      loser,
+      winnerType: winner_active.type,
+      loserType: loser_active.type,
+      winnerMonster: winner_active.id,
+      loserMonster: loser_active.id
+    }
+  });
+}
+
+function clear_zero_hp_tiebreak(state: GameState): void {
+  state.zeroHpTiebreakPending = false;
+  state.zeroHpTiebreakTurn = null;
+}
+
+function end_match_with_winner(state: GameState, log: EventLog[], winner: PlayerSlot, summary: string, data?: Record<string, unknown>): void {
+  state.status = "ended";
+  state.winner = winner;
+  clear_zero_hp_tiebreak(state);
+  log.push({
+    type: "match_end",
+    turn: state.turn,
+    summary,
+    data: { winner, ...(data ?? {}) }
+  });
+}
+
+function end_match_draw(state: GameState, log: EventLog[], summary: string, data?: Record<string, unknown>): void {
+  state.status = "ended";
+  delete state.winner;
+  clear_zero_hp_tiebreak(state);
+  log.push({
+    type: "match_end",
+    turn: state.turn,
+    summary,
+    data: { ...(data ?? {}) }
+  });
+}
+
+function check_zero_hp_match_result(state: GameState, log: EventLog[]): MatchProgress {
+  const p1_hp = state.players.player1.sharedHp;
+  const p2_hp = state.players.player2.sharedHp;
+  if (p1_hp > 0 && p2_hp > 0) {
+    return "continue";
+  }
+  if (p1_hp <= 0 && p2_hp > 0) {
+    end_match_with_winner(state, log, "player2", "player2 wins (enemy shared HP reached 0)", {
+      player1Hp: p1_hp,
+      player2Hp: p2_hp
+    });
+    return "ended";
+  }
+  if (p2_hp <= 0 && p1_hp > 0) {
+    end_match_with_winner(state, log, "player1", "player1 wins (enemy shared HP reached 0)", {
+      player1Hp: p1_hp,
+      player2Hp: p2_hp
+    });
+    return "ended";
+  }
+
+  const is_active_tiebreak_turn = state.zeroHpTiebreakPending && state.zeroHpTiebreakTurn === state.turn;
+  if (is_active_tiebreak_turn || state.zeroHpTiebreakResolved) {
+    end_match_draw(state, log, "draw (both sides reached 0 HP in tiebreak)", { player1Hp: p1_hp, player2Hp: p2_hp });
+    return "ended";
+  }
+
+  state.zeroHpTiebreakPending = true;
+  state.zeroHpTiebreakResolved = true;
+  state.zeroHpTiebreakTurn = state.turn + 1;
+  sync_player_shared_hp(state, "player1", ZERO_HP_TIEBREAKER_HP);
+  sync_player_shared_hp(state, "player2", ZERO_HP_TIEBREAKER_HP);
+  log.push({
+    type: "zero_hp_tiebreak_start",
+    turn: state.turn,
+    summary: "double KO detected: one extra tiebreak turn granted",
+    data: { tiebreakTurn: state.zeroHpTiebreakTurn, resetHp: ZERO_HP_TIEBREAKER_HP }
+  });
+  return "stop_turn";
+}
+
+function finalize_zero_hp_tiebreak_turn(state: GameState, log: EventLog[]): void {
+  const is_tiebreak_turn = state.zeroHpTiebreakPending && state.zeroHpTiebreakTurn === state.turn;
+  if (!is_tiebreak_turn || state.status === "ended") {
+    return;
+  }
+  const p1_hp = state.players.player1.sharedHp;
+  const p2_hp = state.players.player2.sharedHp;
+  if (p1_hp === p2_hp) {
+    end_match_draw(state, log, "draw (double KO tiebreak ended with equal HP)", { player1Hp: p1_hp, player2Hp: p2_hp });
+    return;
+  }
+  const winner: PlayerSlot = p1_hp > p2_hp ? "player1" : "player2";
+  end_match_with_winner(state, log, winner, `${winner} wins (double KO tiebreak)`, {
+    player1Hp: p1_hp,
+    player2Hp: p2_hp
+  });
+}
+
 function compare_initiative(a: MonsterState, b: MonsterState, stats: Phase["initiative"]): number {
   for (const key of stats) {
     const diff = a[key] - b[key];
@@ -294,22 +426,9 @@ function decrement_cooldowns(state: GameState): void {
 }
 
 function apply_passives(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
-  for_each_player(state, (player) => {
-    const active = active_monster(player);
-    if (!is_alive(active)) return;
-    const before_hp = player.sharedHp;
-    apply_passive_turn_effect(active.chosenPassive, {
-      slot: player.slot,
-      monster: active,
-      turn: state.turn,
-      phase: END_PHASE_ID,
-      log,
-      hp_changed
-    });
-    if (active.hp !== before_hp) {
-      sync_player_shared_hp(state, player.slot, active.hp);
-    }
-  });
+  void state;
+  void log;
+  void hp_changed;
 }
 
 function apply_pending_wish(state: GameState, log: EventLog[], slot: PlayerSlot, hp_changed: WeakSet<MonsterState>): void {
@@ -443,6 +562,9 @@ function apply_leech_seed_end_turn(state: GameState, log: EventLog[], hp_changed
 }
 
 function maybe_end_match_by_turn_limit(state: GameState, log: EventLog[]): void {
+  if (state.status === "ended" || state.zeroHpTiebreakPending) {
+    return;
+  }
   const base_turn_limit = Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1));
   const extra_turn_limit = Math.max(0, normalize_int(state.extraTurnLimit, EXTRA_TURN_LIMIT, 0));
   state.baseTurnLimit = base_turn_limit;
@@ -457,30 +579,24 @@ function maybe_end_match_by_turn_limit(state: GameState, log: EventLog[]): void 
   if (p1_hp !== p2_hp) {
     const winner: PlayerSlot = p1_hp > p2_hp ? "player1" : "player2";
     const overtime_turn = Math.max(0, state.turn - base_turn_limit);
-    state.status = "ended";
-    state.winner = winner;
-    log.push({
-      type: "match_end",
-      turn: state.turn,
-      summary:
-        overtime_turn > 0
-          ? `${winner} wins (HP diff at overtime turn ${overtime_turn})`
-          : `${winner} wins (higher shared HP after ${base_turn_limit} turns)`,
-      data: { winner, player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurn: overtime_turn }
-    });
+    end_match_with_winner(
+      state,
+      log,
+      winner,
+      overtime_turn > 0
+        ? `${winner} wins (HP diff at overtime turn ${overtime_turn})`
+        : `${winner} wins (higher shared HP after ${base_turn_limit} turns)`,
+      { player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurn: overtime_turn }
+    );
     return;
   }
 
   const overtime_turn = state.turn - base_turn_limit;
   if (overtime_turn <= 0) {
     if (extra_turn_limit <= 0) {
-      state.status = "ended";
-      delete state.winner;
-      log.push({
-        type: "match_end",
-        turn: state.turn,
-        summary: `draw after ${base_turn_limit} turns (equal shared HP)`,
-        data: { player1Hp: p1_hp, player2Hp: p2_hp }
+      end_match_draw(state, log, `draw after ${base_turn_limit} turns (equal shared HP)`, {
+        player1Hp: p1_hp,
+        player2Hp: p2_hp
       });
       return;
     }
@@ -494,13 +610,10 @@ function maybe_end_match_by_turn_limit(state: GameState, log: EventLog[]): void 
   }
 
   if (overtime_turn >= extra_turn_limit) {
-    state.status = "ended";
-    delete state.winner;
-    log.push({
-      type: "match_end",
-      turn: state.turn,
-      summary: `draw after ${base_turn_limit + extra_turn_limit} turns (equal shared HP)`,
-      data: { player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurnsPlayed: overtime_turn }
+    end_match_draw(state, log, `draw after ${base_turn_limit + extra_turn_limit} turns (equal shared HP)`, {
+      player1Hp: p1_hp,
+      player2Hp: p2_hp,
+      overtimeTurnsPlayed: overtime_turn
     });
   }
 }
@@ -560,10 +673,6 @@ function apply_end_turn_effect(
     }
     return;
   }
-  if (effect_id === "leftovers") {
-    apply_passives(state, log, hp_changed);
-    return;
-  }
   apply_leech_seed_end_turn(state, log, hp_changed);
 }
 
@@ -573,10 +682,15 @@ function apply_end_turn_phase(
   hp_changed: WeakSet<MonsterState>,
   focus_punch_pending: Record<PlayerSlot, boolean>,
   took_damage_this_turn: Record<PlayerSlot, boolean>
-): void {
+): MatchProgress {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
     apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn);
+    const progress = check_zero_hp_match_result(state, log);
+    if (progress !== "continue") {
+      return progress;
+    }
   }
+  return "continue";
 }
 
 function minimum_endure_hp(monster: MonsterState): number {
@@ -688,9 +802,7 @@ function apply_damage_move(
     return;
   }
 
-  const passive = passive_spec(attacker.chosenPassive);
-  const choice_band_active = passive.id === "choice_band";
-  const effective_attack = choice_band_active ? Math.max(0, mul_div_round(attacker.attack, 3, 2)) : attacker.attack;
+  const effective_attack = attacker.attack;
   const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
@@ -783,15 +895,10 @@ function apply_damage_move(
     }
   }
 
-  const choice_band_detail =
-    choice_band_active && damage_type !== "flat"
-      ? `; Choice Band ATK boost: ${attacker.attack} -> ${effective_attack}`
-      : "";
-
   if (spec.id === "return") {
     const detail = `Return: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*${multiplier100}*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
-    }${choice_band_detail}`;
+    }`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -802,7 +909,7 @@ function apply_damage_move(
   } else if (spec.id === "double_edge") {
     const detail = `Double-Edge: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*120*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
-    }; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})${choice_band_detail}`;
+    }; recoil = round(final/3) = ${recoil_damage} (${recoil_before} -> ${attacker.hp})`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -824,7 +931,7 @@ function apply_damage_move(
   } else if (spec.id === "quick_attack") {
     const detail = `Quick Attack: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*66*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
-    }; speed check ignored${choice_band_detail}`;
+    }; speed check ignored`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -835,7 +942,7 @@ function apply_damage_move(
   } else if (spec.id === "focus_punch") {
     const detail = `Focus Punch: dmg = floor(((((2*L)/5)+2)*P*A/D)/50)+2 = floor(((${level_term}*150*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
-    }${choice_band_detail}`;
+    }`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -886,21 +993,6 @@ function apply_move(
       }
     });
     return;
-  }
-
-  const passive = passive_spec(attacker.chosenPassive);
-  const choice_band_active = passive.id === "choice_band";
-
-  if (choice_band_active && attacker.choiceBandLockedMoveIndex === null && spec.id !== "none") {
-    attacker.choiceBandLockedMoveIndex = move_index;
-    const locked_move_id = attacker.chosenMoves[move_index] ?? "none";
-    log.push({
-      type: "choice_band_lock",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${attacker.name} is locked into ${locked_move_id} (slot ${move_index + 1})`,
-      data: { slot: player_slot, moveIndex: move_index, move: locked_move_id, passive: passive.id }
-    });
   }
 
   if (spec.id === "none") {
@@ -1361,9 +1453,12 @@ export function create_initial_state(
         level,
         ev
       );
+      const resolved_type: MonsterType =
+        monster.type === "buf" || monster.type === "def" || monster.type === "atk" ? monster.type : spec.type;
       return {
         id: monster.id,
         name: monster.id,
+        type: resolved_type,
         hp: shared_hp,
         maxHp: shared_hp,
         level,
@@ -1379,7 +1474,7 @@ export function create_initial_state(
         screechDebuffActive: false,
         possibleMoves: monster.moves.slice(),
         possiblePassives: [monster.passive],
-        chosenMoves: monster.moves.slice(0, 4),
+        chosenMoves: monster.moves.slice(0, 3),
         chosenPassive: monster.passive,
         protectActiveThisTurn: false,
         endureActiveThisTurn: false,
@@ -1403,6 +1498,9 @@ export function create_initial_state(
     status: "setup",
     baseTurnLimit: BASE_TURN_LIMIT,
     extraTurnLimit: EXTRA_TURN_LIMIT,
+    zeroHpTiebreakPending: false,
+    zeroHpTiebreakResolved: false,
+    zeroHpTiebreakTurn: null,
     players: {
       player1: build_player("player1"),
       player2: build_player("player2")
@@ -1452,10 +1550,15 @@ export function resolve_turn(
   next.pendingSwitch = empty_pending();
 
   reset_protect_flags(next);
+  apply_mindgame_bonus_event(next, log);
+  let progress = check_zero_hp_match_result(next, log);
   const actions = build_actions(intents, next);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
 
   for (const phase of phases) {
+    if (progress !== "continue") {
+      break;
+    }
     const phase_actions = actions.filter((action) => action.phase === phase.id);
     if (phase_actions.length === 0) {
       continue;
@@ -1464,7 +1567,6 @@ export function resolve_turn(
     if (phase_actions.length >= 2) {
       phase_actions.sort((a, b) => compare_actions_for_phase(next, phase, a, b));
       const first = phase_actions[0];
-      const second = phase_actions[1];
       log.push({
         type: "initiative",
         turn: next.turn,
@@ -1484,9 +1586,9 @@ export function resolve_turn(
             summary: `${action.player} is taunted and cannot switch`,
             data: { slot: action.player, action: "switch", untilTurn: next.tauntUntilTurn[action.player] }
           });
-          continue;
+        } else {
+          apply_switch(next, log, action.player, action.targetIndex);
         }
-        apply_switch(next, log, action.player, action.targetIndex);
       } else {
         apply_move(
           next,
@@ -1499,14 +1601,26 @@ export function resolve_turn(
           took_damage_this_turn
         );
       }
+      progress = check_zero_hp_match_result(next, log);
+      if (progress !== "continue") {
+        break;
+      }
     }
   }
 
-  apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
+  if (progress === "continue") {
+    progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
+  }
   decrement_cooldowns(next);
   // Clear guard flags after the turn resolves (so next turn starts unprotected/not-enduring).
   reset_protect_flags(next);
-  maybe_end_match_by_turn_limit(next, log);
+
+  if (next.status === "running") {
+    finalize_zero_hp_tiebreak_turn(next, log);
+  }
+  if (next.status === "running") {
+    maybe_end_match_by_turn_limit(next, log);
+  }
 
   return { state: next, log };
 }
@@ -1582,15 +1696,6 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
 
   if (intent.moveIndex < 0 || intent.moveIndex >= active.chosenMoves.length) {
     return "invalid move index";
-  }
-
-  const passive = passive_spec(active.chosenPassive);
-  if (
-    passive.id === "choice_band" &&
-    active.choiceBandLockedMoveIndex !== null &&
-    intent.moveIndex !== active.choiceBandLockedMoveIndex
-  ) {
-    return "choice band locked";
   }
 
   const moveId = active.chosenMoves[intent.moveIndex] ?? "none";
