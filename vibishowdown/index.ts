@@ -8,6 +8,11 @@ import {
 } from "../src/data/index.ts";
 import type { MonsterCatalogEntry } from "../src/data/index.ts";
 import { apply_forced_switch, create_initial_state, resolve_turn, validate_intent } from "../src/engine.ts";
+import {
+  BASE_TURN_LIMIT,
+  EXTRA_TURN_LIMIT,
+  TURN_DURATION_MS
+} from "../src/shared.ts";
 import type {
   EVSpread,
   EventLog,
@@ -233,6 +238,7 @@ let relay_server_managed = false;
 let relay_ended = false;
 let relay_turn = 0;
 let relay_state: GameState | null = null;
+let relay_turn_timeout_id: number | null = null;
 let relay_local_role: PlayerSlot | "spectator" | null = null;
 const RELAY_WATCHER_TTL_MS = 90_000;
 const RELAY_JOIN_HEARTBEAT_MS = 25_000;
@@ -371,6 +377,7 @@ function relay_recompute_slots_from_ready_order(): void {
 }
 
 function relay_reset_match_to_lobby(): void {
+  relay_clear_turn_timer();
   relay_state = null;
   relay_ended = false;
   relay_turn = 0;
@@ -432,20 +439,136 @@ function relay_prune_inactive(now_ms: number): void {
   relay_emit_snapshots();
 }
 
+function relay_clear_turn_timer(): void {
+  if (relay_turn_timeout_id === null) {
+    return;
+  }
+  window.clearTimeout(relay_turn_timeout_id);
+  relay_turn_timeout_id = null;
+}
+
+function relay_default_forced_switch_target(state: GameState, slot_id: PlayerSlot): number | null {
+  const player = state.players[slot_id];
+  for (let index = 0; index < player.team.length; index++) {
+    if (index === player.activeIndex) {
+      continue;
+    }
+    return index;
+  }
+  return null;
+}
+
+function relay_default_intent(state: GameState, slot_id: PlayerSlot): PlayerIntent {
+  const player = state.players[slot_id];
+  const active = player.team[player.activeIndex];
+  const none_index = active.chosenMoves.findIndex((move_id) => move_id === "none");
+  if (none_index >= 0) {
+    const none_intent: PlayerIntent = { action: "use_move", moveIndex: none_index };
+    if (!validate_intent(state, slot_id, none_intent)) {
+      return none_intent;
+    }
+  }
+  for (let index = 0; index < active.chosenMoves.length; index++) {
+    const candidate: PlayerIntent = { action: "use_move", moveIndex: index };
+    if (!validate_intent(state, slot_id, candidate)) {
+      return candidate;
+    }
+  }
+  return { action: "use_move", moveIndex: 0 };
+}
+
+function relay_try_resolve_turn(trigger: "intent" | "timeout"): void {
+  if (!relay_state || relay_ended) {
+    return;
+  }
+
+  if (trigger === "timeout") {
+    for (const slot_id of PLAYER_SLOTS) {
+      if (relay_intents[slot_id]) {
+        continue;
+      }
+      let validation_state = relay_state;
+      if (relay_state.pendingSwitch[slot_id]) {
+        const forced_target =
+          relay_forced_switch_intents[slot_id] ?? relay_default_forced_switch_target(relay_state, slot_id);
+        if (typeof forced_target === "number") {
+          const forced_preview = apply_forced_switch(relay_state, slot_id, forced_target);
+          if (!forced_preview.error) {
+            relay_forced_switch_intents[slot_id] = forced_target;
+            validation_state = forced_preview.state;
+          }
+        }
+      }
+      relay_intents[slot_id] = relay_default_intent(validation_state, slot_id);
+      emit_local_post({ $: "intent_locked", slot: slot_id, turn: relay_turn });
+    }
+  }
+
+  if (!relay_intents.player1 || !relay_intents.player2) {
+    return;
+  }
+  for (const slot_check of PLAYER_SLOTS) {
+    if (relay_state.pendingSwitch[slot_check] && !Number.isInteger(relay_forced_switch_intents[slot_check])) {
+      return;
+    }
+  }
+
+  let turn_state = relay_state;
+  const pre_turn_log: EventLog[] = [];
+  for (const slot_apply of PLAYER_SLOTS) {
+    if (!turn_state.pendingSwitch[slot_apply]) {
+      continue;
+    }
+    const target_candidate = relay_forced_switch_intents[slot_apply];
+    if (typeof target_candidate !== "number" || !Number.isInteger(target_candidate)) {
+      return;
+    }
+    const switch_result = apply_forced_switch(turn_state, slot_apply, target_candidate);
+    if (switch_result.error) {
+      return;
+    }
+    turn_state = switch_result.state;
+    pre_turn_log.push(...switch_result.log);
+  }
+  const { state, log } = resolve_turn(turn_state, {
+    player1: relay_intents.player1,
+    player2: relay_intents.player2
+  });
+  relay_state = state;
+  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log: [...pre_turn_log, ...log] });
+  if (relay_state.status === "ended") {
+    relay_ended = true;
+    relay_reset_match_to_lobby();
+    return;
+  }
+  relay_start_turn();
+}
+
+function relay_on_turn_timeout(expected_turn: number): void {
+  if (expected_turn !== relay_turn) {
+    return;
+  }
+  relay_try_resolve_turn("timeout");
+}
+
 function relay_start_turn(): void {
   if (!relay_state || relay_ended) {
     return;
   }
+  relay_clear_turn_timer();
   relay_turn += 1;
   relay_state.turn = relay_turn;
   relay_intents.player1 = null;
   relay_intents.player2 = null;
   relay_forced_switch_intents.player1 = null;
   relay_forced_switch_intents.player2 = null;
+  const deadline_at = Date.now() + TURN_DURATION_MS;
+  const scheduled_turn = relay_turn;
+  relay_turn_timeout_id = window.setTimeout(() => relay_on_turn_timeout(scheduled_turn), TURN_DURATION_MS);
   emit_local_post({
     $: "turn_start",
     turn: relay_turn,
-    deadline_at: 0,
+    deadline_at,
     intents: { player1: false, player2: false }
   });
 }
@@ -573,44 +696,7 @@ function relay_handle_intent(data: Extract<RoomPost, { $: "intent" }>): void {
   }
   // Last selection in the turn wins for the same slot.
   relay_intents[slot_id] = data.intent;
-  if (!relay_intents.player1 || !relay_intents.player2) {
-    return;
-  }
-  for (const slot_check of PLAYER_SLOTS) {
-    if (relay_state.pendingSwitch[slot_check] && !Number.isInteger(relay_forced_switch_intents[slot_check])) {
-      return;
-    }
-  }
-  let turn_state = relay_state;
-  const pre_turn_log: EventLog[] = [];
-  for (const slot_apply of PLAYER_SLOTS) {
-    if (!turn_state.pendingSwitch[slot_apply]) {
-      continue;
-    }
-    const target_candidate = relay_forced_switch_intents[slot_apply];
-    if (typeof target_candidate !== "number" || !Number.isInteger(target_candidate)) {
-      return;
-    }
-    const target_index = target_candidate;
-    const switch_result = apply_forced_switch(turn_state, slot_apply, target_index);
-    if (switch_result.error) {
-      return;
-    }
-    turn_state = switch_result.state;
-    pre_turn_log.push(...switch_result.log);
-  }
-  const { state, log } = resolve_turn(turn_state, {
-    player1: relay_intents.player1,
-    player2: relay_intents.player2
-  });
-  relay_state = state;
-  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log: [...pre_turn_log, ...log] });
-  if (relay_state.status === "ended") {
-    relay_ended = true;
-    relay_reset_match_to_lobby();
-    return;
-  }
-  relay_start_turn();
+  relay_try_resolve_turn("intent");
 }
 
 function relay_handle_forced_switch(data: Extract<RoomPost, { $: "forced_switch" }>): void {
@@ -633,9 +719,6 @@ function relay_handle_forced_switch(data: Extract<RoomPost, { $: "forced_switch"
     return;
   }
   if (data.targetIndex === player.activeIndex) {
-    return;
-  }
-  if (player.team[data.targetIndex].hp <= 0) {
     return;
   }
   relay_forced_switch_intents[slot_id] = data.targetIndex;
@@ -1877,7 +1960,7 @@ function set_bench_slot(slot: BenchSlotEl, mon: MonsterState | null, index: numb
   slot.btn.classList.remove("empty");
   slot.btn.dataset.index = `${index}`;
   set_monster_tooltip(slot.btn, tooltip);
-  slot.btn.disabled = !enabled || mon.hp <= 0;
+  slot.btn.disabled = !enabled;
   slot.img.src = icon_path(mon.id);
   slot.img.alt = monster_label(mon.id);
   slot.img.style.display = "";
@@ -2107,9 +2190,8 @@ function open_switch_modal(mode: "intent" | "forced" = "intent"): void {
   } else {
     for (const entry of options) {
       const button = document.createElement("button");
-      const is_alive = entry.mon.hp > 0;
-      button.disabled = !is_alive;
-      button.textContent = `${entry.mon.name}${is_alive ? "" : " (fainted)"}`;
+      button.disabled = false;
+      button.textContent = `${entry.mon.name}`;
       button.addEventListener("click", () => {
         if (mode === "intent") {
           send_switch_intent(entry.index);
@@ -2254,6 +2336,9 @@ function handle_turn_start(data: { turn: number; deadline_at: number }): void {
   if (current_turn === 1) {
     room_game_count += 1;
     append_match_start_marker(room_game_count);
+  }
+  if (current_turn === BASE_TURN_LIMIT + 1) {
+    append_log(`overtime started (max ${EXTRA_TURN_LIMIT} turns)`);
   }
   append_turn_marker(current_turn);
   if (!has_pending_switch()) {

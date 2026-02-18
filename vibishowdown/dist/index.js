@@ -2231,6 +2231,12 @@ if (is_integrity_entrypoint()) {
 // src/data/index.ts
 assert_monster_integrity(MONSTER_ROSTER);
 
+// src/shared.ts
+var SHARED_HP_START = 200;
+var TURN_DURATION_MS = 5000;
+var BASE_TURN_LIMIT = 12;
+var EXTRA_TURN_LIMIT = 5;
+
 // src/engine.ts
 var INITIATIVE_DEFAULT = ["speed", "attack", "hp", "defense"];
 var PHASES = [
@@ -2348,18 +2354,27 @@ function is_attack_move(spec) {
   return !TAUNT_BLOCKED_MOVE_IDS.has(spec.id);
 }
 function clone_player(player) {
+  const active = player.team[player.activeIndex] ?? player.team[0];
+  const fallback_max_hp = active ? normalize_int(active.maxHp, SHARED_HP_START, 1) : SHARED_HP_START;
+  const shared_hp_max = Math.max(1, normalize_int(player.sharedHpMax, fallback_max_hp, 1));
+  const fallback_shared_hp = active ? normalize_int(active.hp, shared_hp_max, 0) : shared_hp_max;
+  const shared_hp = Math.max(0, Math.min(shared_hp_max, normalize_int(player.sharedHp, fallback_shared_hp, 0)));
   return {
     slot: player.slot,
     name: player.name,
+    sharedHp: shared_hp,
+    sharedHpMax: shared_hp_max,
     team: player.team.map(clone_monster),
     activeIndex: player.activeIndex
   };
 }
 function clone_state(state) {
-  return {
+  const cloned = {
     turn: state.turn,
     status: state.status,
     winner: state.winner,
+    baseTurnLimit: Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1)),
+    extraTurnLimit: Math.max(0, normalize_int(state.extraTurnLimit, EXTRA_TURN_LIMIT, 0)),
     players: {
       player1: clone_player(state.players.player1),
       player2: clone_player(state.players.player2)
@@ -2382,12 +2397,38 @@ function clone_state(state) {
       player2: state.leechSeedSourceByTarget?.player2 ?? null
     }
   };
+  sync_all_players_shared_hp(cloned);
+  return cloned;
 }
 function active_monster(player) {
   return player.team[player.activeIndex];
 }
 function other_slot(slot) {
   return slot === "player1" ? "player2" : "player1";
+}
+function sync_player_shared_hp(state, slot, next_hp) {
+  const player = state.players[slot];
+  const max_hp = Math.max(1, normalize_int(player.sharedHpMax, SHARED_HP_START, 1));
+  const clamped = Math.max(0, Math.min(max_hp, normalize_int(next_hp, max_hp, 0)));
+  player.sharedHpMax = max_hp;
+  player.sharedHp = clamped;
+  for (const monster of player.team) {
+    monster.maxHp = max_hp;
+    monster.hp = clamped;
+  }
+  return clamped;
+}
+function sync_all_players_shared_hp(state) {
+  for (const slot of SLOT_ORDER) {
+    const player = state.players[slot];
+    const active = player.team[player.activeIndex] ?? player.team[0];
+    const fallback_max_hp = active ? normalize_int(active.maxHp, SHARED_HP_START, 1) : SHARED_HP_START;
+    const shared_hp_max = Math.max(1, normalize_int(player.sharedHpMax, fallback_max_hp, 1));
+    player.sharedHpMax = shared_hp_max;
+    const fallback_shared_hp = active ? normalize_int(active.hp, shared_hp_max, 0) : shared_hp_max;
+    const shared_hp = Math.max(0, Math.min(shared_hp_max, normalize_int(player.sharedHp, fallback_shared_hp, 0)));
+    sync_player_shared_hp(state, slot, shared_hp);
+  }
 }
 function compare_initiative(a, b, stats) {
   for (const key of stats) {
@@ -2399,20 +2440,7 @@ function compare_initiative(a, b, stats) {
   return 0;
 }
 function is_alive(monster) {
-  return monster.hp > 0;
-}
-function any_alive(player) {
-  return player.team.some((monster) => monster.hp > 0);
-}
-function first_alive_bench(player) {
-  for (let i = 0;i < player.team.length; i++) {
-    if (i === player.activeIndex)
-      continue;
-    if (player.team[i].hp > 0) {
-      return i;
-    }
-  }
-  return null;
+  return monster.maxHp > 0;
 }
 function for_each_player(state, fn) {
   for (const slot of SLOT_ORDER) {
@@ -2444,6 +2472,7 @@ function apply_passives(state, log, hp_changed) {
     const active = active_monster(player);
     if (!is_alive(active))
       return;
+    const before_hp = player.sharedHp;
     apply_passive_turn_effect(active.chosenPassive, {
       slot: player.slot,
       monster: active,
@@ -2452,6 +2481,9 @@ function apply_passives(state, log, hp_changed) {
       log,
       hp_changed
     });
+    if (active.hp !== before_hp) {
+      sync_player_shared_hp(state, player.slot, active.hp);
+    }
   });
 }
 function apply_pending_wish(state, log, slot, hp_changed) {
@@ -2460,12 +2492,12 @@ function apply_pending_wish(state, log, slot, hp_changed) {
   }
   const player = state.players[slot];
   const target = active_monster(player);
-  const before_hp = target.hp;
-  const wish_heal = Math.max(0, mul_div_round(target.maxHp, 1, 2));
-  const after_hp = Math.min(target.maxHp, Math.max(0, before_hp + wish_heal));
+  const before_hp = player.sharedHp;
+  const wish_heal = Math.max(0, mul_div_round(player.sharedHpMax, 1, 2));
+  const after_hp = Math.min(player.sharedHpMax, Math.max(0, before_hp + wish_heal));
   state.pendingWish[slot] = null;
   if (after_hp !== before_hp) {
-    target.hp = after_hp;
+    sync_player_shared_hp(state, slot, after_hp);
     hp_changed.add(target);
     log.push({
       type: "wish_heal",
@@ -2523,14 +2555,14 @@ function apply_leech_seed_end_turn(state, log, hp_changed) {
       state.leechSeedSourceByTarget[target_slot] = null;
       continue;
     }
-    const target_before = target.hp;
-    const drained_from_max = mul_div_floor(target.maxHp, 1, 8);
+    const target_before = target_player.sharedHp;
+    const drained_from_max = mul_div_floor(target_player.sharedHpMax, 1, 8);
     const drained = Math.min(target_before, Math.max(0, drained_from_max));
     const target_after = target_before - drained;
     if (drained <= 0) {
       continue;
     }
-    target.hp = target_after;
+    sync_player_shared_hp(state, target_slot, target_after);
     hp_changed.add(target);
     log.push({
       type: "leech_drain",
@@ -2550,11 +2582,11 @@ function apply_leech_seed_end_turn(state, log, hp_changed) {
     const source_player = state.players[source_slot];
     const receiver = active_monster(source_player);
     if (is_alive(receiver)) {
-      const heal_before = receiver.hp;
-      const heal_after = Math.min(receiver.maxHp, receiver.hp + drained);
+      const heal_before = source_player.sharedHp;
+      const heal_after = Math.min(source_player.sharedHpMax, source_player.sharedHp + drained);
       const healed = Math.max(0, heal_after - heal_before);
       if (healed > 0) {
-        receiver.hp = heal_after;
+        sync_player_shared_hp(state, source_slot, heal_after);
         hp_changed.add(receiver);
         log.push({
           type: "leech_heal",
@@ -2573,42 +2605,62 @@ function apply_leech_seed_end_turn(state, log, hp_changed) {
         });
       }
     }
-    if (target_before > 0 && target_after === 0) {
-      log.push({
-        type: "faint",
-        turn: state.turn,
-        phase: END_PHASE_ID,
-        summary: `${target.name} fainted`,
-        data: { slot: target_slot, target: target.id }
-      });
-    }
-    handle_faint(state, log, target_slot);
   }
 }
-function check_match_end(state, log) {
-  if (!any_alive(state.players.player1)) {
+function maybe_end_match_by_turn_limit(state, log) {
+  const base_turn_limit = Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1));
+  const extra_turn_limit = Math.max(0, normalize_int(state.extraTurnLimit, EXTRA_TURN_LIMIT, 0));
+  state.baseTurnLimit = base_turn_limit;
+  state.extraTurnLimit = extra_turn_limit;
+  if (state.turn < base_turn_limit) {
+    return;
+  }
+  const p1_hp = state.players.player1.sharedHp;
+  const p2_hp = state.players.player2.sharedHp;
+  if (p1_hp !== p2_hp) {
+    const winner = p1_hp > p2_hp ? "player1" : "player2";
+    const overtime_turn2 = Math.max(0, state.turn - base_turn_limit);
     state.status = "ended";
-    state.winner = "player2";
+    state.winner = winner;
     log.push({
       type: "match_end",
       turn: state.turn,
-      summary: "player2 wins (all monsters down)",
-      data: { winner: "player2" }
+      summary: overtime_turn2 > 0 ? `${winner} wins (HP diff at overtime turn ${overtime_turn2})` : `${winner} wins (higher shared HP after ${base_turn_limit} turns)`,
+      data: { winner, player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurn: overtime_turn2 }
     });
-    return true;
+    return;
   }
-  if (!any_alive(state.players.player2)) {
+  const overtime_turn = state.turn - base_turn_limit;
+  if (overtime_turn <= 0) {
+    if (extra_turn_limit <= 0) {
+      state.status = "ended";
+      delete state.winner;
+      log.push({
+        type: "match_end",
+        turn: state.turn,
+        summary: `draw after ${base_turn_limit} turns (equal shared HP)`,
+        data: { player1Hp: p1_hp, player2Hp: p2_hp }
+      });
+      return;
+    }
+    log.push({
+      type: "overtime_start",
+      turn: state.turn,
+      summary: `tie after ${base_turn_limit} turns (${p1_hp} x ${p2_hp}); overtime started (max ${extra_turn_limit})`,
+      data: { player1Hp: p1_hp, player2Hp: p2_hp, maxExtraTurns: extra_turn_limit }
+    });
+    return;
+  }
+  if (overtime_turn >= extra_turn_limit) {
     state.status = "ended";
-    state.winner = "player1";
+    delete state.winner;
     log.push({
       type: "match_end",
       turn: state.turn,
-      summary: "player1 wins (all monsters down)",
-      data: { winner: "player1" }
+      summary: `draw after ${base_turn_limit + extra_turn_limit} turns (equal shared HP)`,
+      data: { player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurnsPlayed: overtime_turn }
     });
-    return true;
   }
-  return false;
 }
 function apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending, took_damage_this_turn) {
   const spec = move_spec("focus_punch");
@@ -2659,37 +2711,14 @@ function apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pe
 }
 function apply_end_turn_phase(state, log, hp_changed, focus_punch_pending, took_damage_this_turn) {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
-    if (state.status === "ended") {
-      break;
-    }
     apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn);
-    if (check_match_end(state, log)) {
-      break;
-    }
   }
-}
-function handle_faint(state, log, slot) {
-  const player = state.players[slot];
-  if (is_alive(active_monster(player))) {
-    return;
-  }
-  const next_index = first_alive_bench(player);
-  if (next_index === null) {
-    return;
-  }
-  state.pendingSwitch[slot] = true;
-  log.push({
-    type: "forced_switch_pending",
-    turn: state.turn,
-    summary: `${slot} must choose a replacement`,
-    data: { slot }
-  });
 }
 function minimum_endure_hp(monster) {
   return Math.max(1, mul_div_ceil(monster.maxHp, 1, 100));
 }
 function apply_damage_with_endure(state, log, phase, slot, monster, attempted_damage, hp_changed, took_damage_this_turn) {
-  const before = monster.hp;
+  const before = state.players[slot].sharedHp;
   if (before <= 0 || attempted_damage <= 0) {
     return { before, after: before, applied: 0 };
   }
@@ -2736,13 +2765,13 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
       });
     }
   }
-  monster.hp = after;
-  const applied = before - after;
+  const final_after = sync_player_shared_hp(state, slot, after);
+  const applied = before - final_after;
   if (applied > 0) {
     hp_changed.add(monster);
     took_damage_this_turn[slot] = true;
   }
-  return { before, after, applied };
+  return { before, after: final_after, applied };
 }
 function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, took_damage_this_turn) {
   const player = state.players[player_slot];
@@ -2818,15 +2847,6 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       after: defender_result.after
     }
   });
-  if (defender_result.before > 0 && defender_result.after === 0) {
-    log.push({
-      type: "faint",
-      turn: state.turn,
-      phase: phase_id,
-      summary: `${defender.name} fainted`,
-      data: { slot: opponent_slot, target: defender.id }
-    });
-  }
   const recoil_num = spec.recoilNumerator ?? 0;
   const recoil_den = spec.recoilDenominator ?? 1;
   let recoil_damage = 0;
@@ -2851,15 +2871,6 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
           after: recoil_result.after
         }
       });
-      if (recoil_result.before > 0 && recoil_result.after === 0) {
-        log.push({
-          type: "faint",
-          turn: state.turn,
-          phase: phase_id,
-          summary: `${attacker.name} fainted`,
-          data: { slot: player_slot, target: attacker.id }
-        });
-      }
     }
   }
   const choice_band_detail = choice_band_active && damage_type !== "flat" ? `; Choice Band ATK boost: ${attacker.attack} -> ${effective_attack}` : "";
@@ -2908,10 +2919,6 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       summary: detail,
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
-  }
-  handle_faint(state, log, opponent_slot);
-  if (recoil_num > 0 && recoil_den > 0) {
-    handle_faint(state, log, player_slot);
   }
 }
 function apply_move(state, log, player_slot, move_id, move_index, hp_changed, focus_punch_pending, took_damage_this_turn) {
@@ -3065,7 +3072,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     return;
   }
   if (spec.id === "belly_drum") {
-    const before_hp = attacker.hp;
+    const before_hp = player.sharedHp;
     if (before_hp * 2 <= attacker.maxHp) {
       log.push({
         type: "belly_drum_failed",
@@ -3080,7 +3087,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     const hp_cost = mul_div_floor(before_hp, 1, 2);
     const after_hp = Math.max(0, before_hp - hp_cost);
     const after_attack = Math.max(0, mul_div_round(before_attack, 4, 1));
-    attacker.hp = after_hp;
+    sync_player_shared_hp(state, player_slot, after_hp);
     attacker.attack = after_attack;
     attacker.bellyDrumActive = true;
     const hp_spent = Math.max(0, before_hp - after_hp);
@@ -3225,13 +3232,13 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     return;
   }
   if (spec.id === "pain_split") {
-    const before_user_hp = attacker.hp;
-    const before_target_hp = defender.hp;
+    const before_user_hp = player.sharedHp;
+    const before_target_hp = opponent.sharedHp;
     const shared_hp = Math.max(1, mul_div_floor(before_user_hp + before_target_hp, 1, 2));
     const after_user_hp = Math.min(attacker.maxHp, shared_hp);
     const after_target_hp = Math.min(defender.maxHp, shared_hp);
-    attacker.hp = after_user_hp;
-    defender.hp = after_target_hp;
+    sync_player_shared_hp(state, player_slot, after_user_hp);
+    sync_player_shared_hp(state, other_slot(player_slot), after_target_hp);
     if (after_user_hp !== before_user_hp) {
       hp_changed.add(attacker);
     }
@@ -3315,6 +3322,7 @@ function apply_switch(state, log, player_slot, targetIndex) {
   clear_leech_seed_on_target_switch(state, log, player_slot);
   outgoing.choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
+  sync_player_shared_hp(state, player_slot, player.sharedHp);
   log.push({
     type: "switch",
     turn: state.turn,
@@ -3365,6 +3373,7 @@ function create_initial_state(teams, names) {
   };
   const build_player = (slot) => {
     const selection = teams[slot];
+    const shared_hp = SHARED_HP_START;
     const team = selection.monsters.map((monster) => {
       const spec = MONSTER_BY_ID.get(monster.id);
       if (!spec) {
@@ -3387,8 +3396,8 @@ function create_initial_state(teams, names) {
       return {
         id: monster.id,
         name: monster.id,
-        hp: final_stats.hpMax,
-        maxHp: final_stats.hpMax,
+        hp: shared_hp,
+        maxHp: shared_hp,
         level,
         baseAttack: final_stats.atk,
         baseDefense: final_stats.def,
@@ -3414,13 +3423,17 @@ function create_initial_state(teams, names) {
     return {
       slot,
       name: names[slot],
+      sharedHp: shared_hp,
+      sharedHpMax: shared_hp,
       team,
       activeIndex: Math.min(Math.max(selection.activeIndex, 0), team.length - 1)
     };
   };
-  return {
+  const initial_state = {
     turn: 0,
     status: "setup",
+    baseTurnLimit: BASE_TURN_LIMIT,
+    extraTurnLimit: EXTRA_TURN_LIMIT,
     players: {
       player1: build_player("player1"),
       player2: build_player("player2")
@@ -3431,6 +3444,8 @@ function create_initial_state(teams, names) {
     leechSeedActiveByTarget: empty_leech_seed_active(),
     leechSeedSourceByTarget: empty_leech_seed_sources()
   };
+  sync_all_players_shared_hp(initial_state);
+  return initial_state;
 }
 function resolve_turn(state, intents) {
   const next = clone_state(state);
@@ -3438,6 +3453,9 @@ function resolve_turn(state, intents) {
   const hp_changed_this_turn = new WeakSet;
   const focus_punch_pending = { player1: false, player2: false };
   const took_damage_this_turn = { player1: false, player2: false };
+  sync_all_players_shared_hp(next);
+  next.baseTurnLimit = Math.max(1, normalize_int(next.baseTurnLimit, BASE_TURN_LIMIT, 1));
+  next.extraTurnLimit = Math.max(0, normalize_int(next.extraTurnLimit, EXTRA_TURN_LIMIT, 0));
   if (next.status !== "running") {
     return { state: next, log };
   }
@@ -3456,10 +3474,10 @@ function resolve_turn(state, intents) {
   if (!next.leechSeedSourceByTarget) {
     next.leechSeedSourceByTarget = empty_leech_seed_sources();
   }
+  next.pendingSwitch = empty_pending();
   reset_protect_flags(next);
   const actions = build_actions(intents, next);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
-  let match_ended_in_main_phases = false;
   for (const phase of phases) {
     const phase_actions = actions.filter((action) => action.phase === phase.id);
     if (phase_actions.length === 0) {
@@ -3493,20 +3511,12 @@ function resolve_turn(state, intents) {
       } else {
         apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
       }
-      if (check_match_end(next, log)) {
-        match_ended_in_main_phases = true;
-        break;
-      }
-    }
-    if (match_ended_in_main_phases) {
-      break;
     }
   }
-  if (!match_ended_in_main_phases) {
-    apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
-  }
+  apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
   decrement_cooldowns(next);
   reset_protect_flags(next);
+  maybe_end_match_by_turn_limit(next, log);
   return { state: next, log };
 }
 function apply_forced_switch(state, slot, targetIndex) {
@@ -3537,6 +3547,7 @@ function apply_forced_switch(state, slot, targetIndex) {
   clear_leech_seed_on_target_switch(next, log, slot);
   outgoing.choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
+  sync_player_shared_hp(next, slot, player.sharedHp);
   next.pendingSwitch[slot] = false;
   log.push({
     type: "forced_switch",
@@ -3750,6 +3761,7 @@ var relay_server_managed = false;
 var relay_ended = false;
 var relay_turn = 0;
 var relay_state = null;
+var relay_turn_timeout_id = null;
 var relay_local_role = null;
 var RELAY_WATCHER_TTL_MS = 90000;
 var RELAY_JOIN_HEARTBEAT_MS = 25000;
@@ -3867,6 +3879,7 @@ function relay_recompute_slots_from_ready_order() {
   }
 }
 function relay_reset_match_to_lobby() {
+  relay_clear_turn_timer();
   relay_state = null;
   relay_ended = false;
   relay_turn = 0;
@@ -3924,20 +3937,127 @@ function relay_prune_inactive(now_ms) {
   relay_emit_local_role();
   relay_emit_snapshots();
 }
+function relay_clear_turn_timer() {
+  if (relay_turn_timeout_id === null) {
+    return;
+  }
+  window.clearTimeout(relay_turn_timeout_id);
+  relay_turn_timeout_id = null;
+}
+function relay_default_forced_switch_target(state, slot_id) {
+  const player = state.players[slot_id];
+  for (let index = 0;index < player.team.length; index++) {
+    if (index === player.activeIndex) {
+      continue;
+    }
+    return index;
+  }
+  return null;
+}
+function relay_default_intent(state, slot_id) {
+  const player = state.players[slot_id];
+  const active = player.team[player.activeIndex];
+  const none_index = active.chosenMoves.findIndex((move_id) => move_id === "none");
+  if (none_index >= 0) {
+    const none_intent = { action: "use_move", moveIndex: none_index };
+    if (!validate_intent(state, slot_id, none_intent)) {
+      return none_intent;
+    }
+  }
+  for (let index = 0;index < active.chosenMoves.length; index++) {
+    const candidate = { action: "use_move", moveIndex: index };
+    if (!validate_intent(state, slot_id, candidate)) {
+      return candidate;
+    }
+  }
+  return { action: "use_move", moveIndex: 0 };
+}
+function relay_try_resolve_turn(trigger) {
+  if (!relay_state || relay_ended) {
+    return;
+  }
+  if (trigger === "timeout") {
+    for (const slot_id of PLAYER_SLOTS) {
+      if (relay_intents[slot_id]) {
+        continue;
+      }
+      let validation_state = relay_state;
+      if (relay_state.pendingSwitch[slot_id]) {
+        const forced_target = relay_forced_switch_intents[slot_id] ?? relay_default_forced_switch_target(relay_state, slot_id);
+        if (typeof forced_target === "number") {
+          const forced_preview = apply_forced_switch(relay_state, slot_id, forced_target);
+          if (!forced_preview.error) {
+            relay_forced_switch_intents[slot_id] = forced_target;
+            validation_state = forced_preview.state;
+          }
+        }
+      }
+      relay_intents[slot_id] = relay_default_intent(validation_state, slot_id);
+      emit_local_post({ $: "intent_locked", slot: slot_id, turn: relay_turn });
+    }
+  }
+  if (!relay_intents.player1 || !relay_intents.player2) {
+    return;
+  }
+  for (const slot_check of PLAYER_SLOTS) {
+    if (relay_state.pendingSwitch[slot_check] && !Number.isInteger(relay_forced_switch_intents[slot_check])) {
+      return;
+    }
+  }
+  let turn_state = relay_state;
+  const pre_turn_log = [];
+  for (const slot_apply of PLAYER_SLOTS) {
+    if (!turn_state.pendingSwitch[slot_apply]) {
+      continue;
+    }
+    const target_candidate = relay_forced_switch_intents[slot_apply];
+    if (typeof target_candidate !== "number" || !Number.isInteger(target_candidate)) {
+      return;
+    }
+    const switch_result = apply_forced_switch(turn_state, slot_apply, target_candidate);
+    if (switch_result.error) {
+      return;
+    }
+    turn_state = switch_result.state;
+    pre_turn_log.push(...switch_result.log);
+  }
+  const { state, log } = resolve_turn(turn_state, {
+    player1: relay_intents.player1,
+    player2: relay_intents.player2
+  });
+  relay_state = state;
+  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log: [...pre_turn_log, ...log] });
+  if (relay_state.status === "ended") {
+    relay_ended = true;
+    relay_reset_match_to_lobby();
+    return;
+  }
+  relay_start_turn();
+}
+function relay_on_turn_timeout(expected_turn) {
+  if (expected_turn !== relay_turn) {
+    return;
+  }
+  relay_try_resolve_turn("timeout");
+}
 function relay_start_turn() {
   if (!relay_state || relay_ended) {
     return;
   }
+  relay_clear_turn_timer();
   relay_turn += 1;
   relay_state.turn = relay_turn;
   relay_intents.player1 = null;
   relay_intents.player2 = null;
   relay_forced_switch_intents.player1 = null;
   relay_forced_switch_intents.player2 = null;
+  const deadline_at2 = Date.now() + TURN_DURATION_MS;
+  const scheduled_turn = relay_turn;
+  relay_turn_timeout_id = window.setTimeout(() => relay_on_turn_timeout(scheduled_turn), TURN_DURATION_MS);
   emit_local_post({
     $: "turn_start",
     turn: relay_turn,
-    deadline_at: 0,
+    deadline_at: deadline_at2,
     intents: { player1: false, player2: false }
   });
 }
@@ -4055,44 +4175,7 @@ function relay_handle_intent(data) {
     return;
   }
   relay_intents[slot_id] = data.intent;
-  if (!relay_intents.player1 || !relay_intents.player2) {
-    return;
-  }
-  for (const slot_check of PLAYER_SLOTS) {
-    if (relay_state.pendingSwitch[slot_check] && !Number.isInteger(relay_forced_switch_intents[slot_check])) {
-      return;
-    }
-  }
-  let turn_state = relay_state;
-  const pre_turn_log = [];
-  for (const slot_apply of PLAYER_SLOTS) {
-    if (!turn_state.pendingSwitch[slot_apply]) {
-      continue;
-    }
-    const target_candidate = relay_forced_switch_intents[slot_apply];
-    if (typeof target_candidate !== "number" || !Number.isInteger(target_candidate)) {
-      return;
-    }
-    const target_index = target_candidate;
-    const switch_result = apply_forced_switch(turn_state, slot_apply, target_index);
-    if (switch_result.error) {
-      return;
-    }
-    turn_state = switch_result.state;
-    pre_turn_log.push(...switch_result.log);
-  }
-  const { state, log } = resolve_turn(turn_state, {
-    player1: relay_intents.player1,
-    player2: relay_intents.player2
-  });
-  relay_state = state;
-  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log: [...pre_turn_log, ...log] });
-  if (relay_state.status === "ended") {
-    relay_ended = true;
-    relay_reset_match_to_lobby();
-    return;
-  }
-  relay_start_turn();
+  relay_try_resolve_turn("intent");
 }
 function relay_handle_forced_switch(data) {
   if (!relay_state || relay_ended) {
@@ -4114,9 +4197,6 @@ function relay_handle_forced_switch(data) {
     return;
   }
   if (data.targetIndex === player.activeIndex) {
-    return;
-  }
-  if (player.team[data.targetIndex].hp <= 0) {
     return;
   }
   relay_forced_switch_intents[slot_id] = data.targetIndex;
@@ -5227,7 +5307,7 @@ function set_bench_slot(slot2, mon, index, enabled) {
   slot2.btn.classList.remove("empty");
   slot2.btn.dataset.index = `${index}`;
   set_monster_tooltip(slot2.btn, tooltip);
-  slot2.btn.disabled = !enabled || mon.hp <= 0;
+  slot2.btn.disabled = !enabled;
   slot2.img.src = icon_path(mon.id);
   slot2.img.alt = monster_label(mon.id);
   slot2.img.style.display = "";
@@ -5427,9 +5507,8 @@ function open_switch_modal(mode = "intent") {
   } else {
     for (const entry of options) {
       const button = document.createElement("button");
-      const is_alive2 = entry.mon.hp > 0;
-      button.disabled = !is_alive2;
-      button.textContent = `${entry.mon.name}${is_alive2 ? "" : " (fainted)"}`;
+      button.disabled = false;
+      button.textContent = `${entry.mon.name}`;
       button.addEventListener("click", () => {
         if (mode === "intent") {
           send_switch_intent(entry.index);
@@ -5567,6 +5646,9 @@ function handle_turn_start(data) {
   if (current_turn === 1) {
     room_game_count += 1;
     append_match_start_marker(room_game_count);
+  }
+  if (current_turn === BASE_TURN_LIMIT + 1) {
+    append_log(`overtime started (max ${EXTRA_TURN_LIMIT} turns)`);
   }
   append_turn_marker(current_turn);
   if (!has_pending_switch()) {

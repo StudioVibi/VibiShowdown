@@ -1,3 +1,8 @@
+import {
+  BASE_TURN_LIMIT,
+  EXTRA_TURN_LIMIT,
+  SHARED_HP_START,
+} from "./shared.ts";
 import type {
   EVSpread,
   EventLog,
@@ -160,19 +165,28 @@ function is_attack_move(spec: { id: string; phaseId: string }): boolean {
 }
 
 function clone_player(player: PlayerState): PlayerState {
+  const active = player.team[player.activeIndex] ?? player.team[0];
+  const fallback_max_hp = active ? normalize_int(active.maxHp, SHARED_HP_START, 1) : SHARED_HP_START;
+  const shared_hp_max = Math.max(1, normalize_int(player.sharedHpMax, fallback_max_hp, 1));
+  const fallback_shared_hp = active ? normalize_int(active.hp, shared_hp_max, 0) : shared_hp_max;
+  const shared_hp = Math.max(0, Math.min(shared_hp_max, normalize_int(player.sharedHp, fallback_shared_hp, 0)));
   return {
     slot: player.slot,
     name: player.name,
+    sharedHp: shared_hp,
+    sharedHpMax: shared_hp_max,
     team: player.team.map(clone_monster),
     activeIndex: player.activeIndex
   };
 }
 
 export function clone_state(state: GameState): GameState {
-  return {
+  const cloned: GameState = {
     turn: state.turn,
     status: state.status,
     winner: state.winner,
+    baseTurnLimit: Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1)),
+    extraTurnLimit: Math.max(0, normalize_int(state.extraTurnLimit, EXTRA_TURN_LIMIT, 0)),
     players: {
       player1: clone_player(state.players.player1),
       player2: clone_player(state.players.player2)
@@ -195,6 +209,8 @@ export function clone_state(state: GameState): GameState {
       player2: state.leechSeedSourceByTarget?.player2 ?? null
     }
   };
+  sync_all_players_shared_hp(cloned);
+  return cloned;
 }
 
 function active_monster(player: PlayerState): MonsterState {
@@ -203,6 +219,32 @@ function active_monster(player: PlayerState): MonsterState {
 
 function other_slot(slot: PlayerSlot): PlayerSlot {
   return slot === "player1" ? "player2" : "player1";
+}
+
+function sync_player_shared_hp(state: GameState, slot: PlayerSlot, next_hp: number): number {
+  const player = state.players[slot];
+  const max_hp = Math.max(1, normalize_int(player.sharedHpMax, SHARED_HP_START, 1));
+  const clamped = Math.max(0, Math.min(max_hp, normalize_int(next_hp, max_hp, 0)));
+  player.sharedHpMax = max_hp;
+  player.sharedHp = clamped;
+  for (const monster of player.team) {
+    monster.maxHp = max_hp;
+    monster.hp = clamped;
+  }
+  return clamped;
+}
+
+function sync_all_players_shared_hp(state: GameState): void {
+  for (const slot of SLOT_ORDER) {
+    const player = state.players[slot];
+    const active = player.team[player.activeIndex] ?? player.team[0];
+    const fallback_max_hp = active ? normalize_int(active.maxHp, SHARED_HP_START, 1) : SHARED_HP_START;
+    const shared_hp_max = Math.max(1, normalize_int(player.sharedHpMax, fallback_max_hp, 1));
+    player.sharedHpMax = shared_hp_max;
+    const fallback_shared_hp = active ? normalize_int(active.hp, shared_hp_max, 0) : shared_hp_max;
+    const shared_hp = Math.max(0, Math.min(shared_hp_max, normalize_int(player.sharedHp, fallback_shared_hp, 0)));
+    sync_player_shared_hp(state, slot, shared_hp);
+  }
 }
 
 function compare_initiative(a: MonsterState, b: MonsterState, stats: Phase["initiative"]): number {
@@ -220,21 +262,7 @@ function find_phase(phaseId: string): Phase | undefined {
 }
 
 function is_alive(monster: MonsterState): boolean {
-  return monster.hp > 0;
-}
-
-function any_alive(player: PlayerState): boolean {
-  return player.team.some((monster) => monster.hp > 0);
-}
-
-function first_alive_bench(player: PlayerState): number | null {
-  for (let i = 0; i < player.team.length; i++) {
-    if (i === player.activeIndex) continue;
-    if (player.team[i].hp > 0) {
-      return i;
-    }
-  }
-  return null;
+  return monster.maxHp > 0;
 }
 
 function for_each_player(state: GameState, fn: (player: PlayerState) => void): void {
@@ -269,6 +297,7 @@ function apply_passives(state: GameState, log: EventLog[], hp_changed: WeakSet<M
   for_each_player(state, (player) => {
     const active = active_monster(player);
     if (!is_alive(active)) return;
+    const before_hp = player.sharedHp;
     apply_passive_turn_effect(active.chosenPassive, {
       slot: player.slot,
       monster: active,
@@ -277,6 +306,9 @@ function apply_passives(state: GameState, log: EventLog[], hp_changed: WeakSet<M
       log,
       hp_changed
     });
+    if (active.hp !== before_hp) {
+      sync_player_shared_hp(state, player.slot, active.hp);
+    }
   });
 }
 
@@ -287,13 +319,13 @@ function apply_pending_wish(state: GameState, log: EventLog[], slot: PlayerSlot,
 
   const player = state.players[slot];
   const target = active_monster(player);
-  const before_hp = target.hp;
-  const wish_heal = Math.max(0, mul_div_round(target.maxHp, 1, 2));
-  const after_hp = Math.min(target.maxHp, Math.max(0, before_hp + wish_heal));
+  const before_hp = player.sharedHp;
+  const wish_heal = Math.max(0, mul_div_round(player.sharedHpMax, 1, 2));
+  const after_hp = Math.min(player.sharedHpMax, Math.max(0, before_hp + wish_heal));
   state.pendingWish[slot] = null;
 
   if (after_hp !== before_hp) {
-    target.hp = after_hp;
+    sync_player_shared_hp(state, slot, after_hp);
     hp_changed.add(target);
     log.push({
       type: "wish_heal",
@@ -355,14 +387,14 @@ function apply_leech_seed_end_turn(state: GameState, log: EventLog[], hp_changed
       continue;
     }
 
-    const target_before = target.hp;
-    const drained_from_max = mul_div_floor(target.maxHp, 1, 8);
+    const target_before = target_player.sharedHp;
+    const drained_from_max = mul_div_floor(target_player.sharedHpMax, 1, 8);
     const drained = Math.min(target_before, Math.max(0, drained_from_max));
     const target_after = target_before - drained;
     if (drained <= 0) {
       continue;
     }
-    target.hp = target_after;
+    sync_player_shared_hp(state, target_slot, target_after);
     hp_changed.add(target);
     log.push({
       type: "leech_drain",
@@ -383,11 +415,11 @@ function apply_leech_seed_end_turn(state: GameState, log: EventLog[], hp_changed
     const source_player = state.players[source_slot];
     const receiver = active_monster(source_player);
     if (is_alive(receiver)) {
-      const heal_before = receiver.hp;
-      const heal_after = Math.min(receiver.maxHp, receiver.hp + drained);
+      const heal_before = source_player.sharedHp;
+      const heal_after = Math.min(source_player.sharedHpMax, source_player.sharedHp + drained);
       const healed = Math.max(0, heal_after - heal_before);
       if (healed > 0) {
-        receiver.hp = heal_after;
+        sync_player_shared_hp(state, source_slot, heal_after);
         hp_changed.add(receiver);
         log.push({
           type: "leech_heal",
@@ -407,43 +439,70 @@ function apply_leech_seed_end_turn(state: GameState, log: EventLog[], hp_changed
       }
     }
 
-    if (target_before > 0 && target_after === 0) {
-      log.push({
-        type: "faint",
-        turn: state.turn,
-        phase: END_PHASE_ID,
-        summary: `${target.name} fainted`,
-        data: { slot: target_slot, target: target.id }
-      });
-    }
-    handle_faint(state, log, target_slot);
   }
 }
 
-function check_match_end(state: GameState, log: EventLog[]): boolean {
-  if (!any_alive(state.players.player1)) {
+function maybe_end_match_by_turn_limit(state: GameState, log: EventLog[]): void {
+  const base_turn_limit = Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1));
+  const extra_turn_limit = Math.max(0, normalize_int(state.extraTurnLimit, EXTRA_TURN_LIMIT, 0));
+  state.baseTurnLimit = base_turn_limit;
+  state.extraTurnLimit = extra_turn_limit;
+
+  if (state.turn < base_turn_limit) {
+    return;
+  }
+
+  const p1_hp = state.players.player1.sharedHp;
+  const p2_hp = state.players.player2.sharedHp;
+  if (p1_hp !== p2_hp) {
+    const winner: PlayerSlot = p1_hp > p2_hp ? "player1" : "player2";
+    const overtime_turn = Math.max(0, state.turn - base_turn_limit);
     state.status = "ended";
-    state.winner = "player2";
+    state.winner = winner;
     log.push({
       type: "match_end",
       turn: state.turn,
-      summary: "player2 wins (all monsters down)",
-      data: { winner: "player2" }
+      summary:
+        overtime_turn > 0
+          ? `${winner} wins (HP diff at overtime turn ${overtime_turn})`
+          : `${winner} wins (higher shared HP after ${base_turn_limit} turns)`,
+      data: { winner, player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurn: overtime_turn }
     });
-    return true;
+    return;
   }
-  if (!any_alive(state.players.player2)) {
+
+  const overtime_turn = state.turn - base_turn_limit;
+  if (overtime_turn <= 0) {
+    if (extra_turn_limit <= 0) {
+      state.status = "ended";
+      delete state.winner;
+      log.push({
+        type: "match_end",
+        turn: state.turn,
+        summary: `draw after ${base_turn_limit} turns (equal shared HP)`,
+        data: { player1Hp: p1_hp, player2Hp: p2_hp }
+      });
+      return;
+    }
+    log.push({
+      type: "overtime_start",
+      turn: state.turn,
+      summary: `tie after ${base_turn_limit} turns (${p1_hp} x ${p2_hp}); overtime started (max ${extra_turn_limit})`,
+      data: { player1Hp: p1_hp, player2Hp: p2_hp, maxExtraTurns: extra_turn_limit }
+    });
+    return;
+  }
+
+  if (overtime_turn >= extra_turn_limit) {
     state.status = "ended";
-    state.winner = "player1";
+    delete state.winner;
     log.push({
       type: "match_end",
       turn: state.turn,
-      summary: "player1 wins (all monsters down)",
-      data: { winner: "player1" }
+      summary: `draw after ${base_turn_limit + extra_turn_limit} turns (equal shared HP)`,
+      data: { player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurnsPlayed: overtime_turn }
     });
-    return true;
   }
-  return false;
 }
 
 function apply_focus_punch_end_turn(
@@ -516,32 +575,8 @@ function apply_end_turn_phase(
   took_damage_this_turn: Record<PlayerSlot, boolean>
 ): void {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
-    if (state.status === "ended") {
-      break;
-    }
     apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn);
-    if (check_match_end(state, log)) {
-      break;
-    }
   }
-}
-
-function handle_faint(state: GameState, log: EventLog[], slot: PlayerSlot): void {
-  const player = state.players[slot];
-  if (is_alive(active_monster(player))) {
-    return;
-  }
-  const next_index = first_alive_bench(player);
-  if (next_index === null) {
-    return;
-  }
-  state.pendingSwitch[slot] = true;
-  log.push({
-    type: "forced_switch_pending",
-    turn: state.turn,
-    summary: `${slot} must choose a replacement`,
-    data: { slot }
-  });
 }
 
 function minimum_endure_hp(monster: MonsterState): number {
@@ -558,7 +593,7 @@ function apply_damage_with_endure(
   hp_changed: WeakSet<MonsterState>,
   took_damage_this_turn: Record<PlayerSlot, boolean>
 ): { before: number; after: number; applied: number } {
-  const before = monster.hp;
+  const before = state.players[slot].sharedHp;
   if (before <= 0 || attempted_damage <= 0) {
     return { before, after: before, applied: 0 };
   }
@@ -608,13 +643,13 @@ function apply_damage_with_endure(
     }
   }
 
-  monster.hp = after;
-  const applied = before - after;
+  const final_after = sync_player_shared_hp(state, slot, after);
+  const applied = before - final_after;
   if (applied > 0) {
     hp_changed.add(monster);
     took_damage_this_turn[slot] = true;
   }
-  return { before, after, applied };
+  return { before, after: final_after, applied };
 }
 
 function apply_damage_move(
@@ -712,16 +747,6 @@ function apply_damage_move(
     }
   });
 
-  if (defender_result.before > 0 && defender_result.after === 0) {
-    log.push({
-      type: "faint",
-      turn: state.turn,
-      phase: phase_id,
-      summary: `${defender.name} fainted`,
-      data: { slot: opponent_slot, target: defender.id }
-    });
-  }
-
   const recoil_num = spec.recoilNumerator ?? 0;
   const recoil_den = spec.recoilDenominator ?? 1;
   let recoil_damage = 0;
@@ -755,15 +780,6 @@ function apply_damage_move(
           after: recoil_result.after
         }
       });
-      if (recoil_result.before > 0 && recoil_result.after === 0) {
-        log.push({
-          type: "faint",
-          turn: state.turn,
-          phase: phase_id,
-          summary: `${attacker.name} fainted`,
-          data: { slot: player_slot, target: attacker.id }
-        });
-      }
     }
   }
 
@@ -829,10 +845,6 @@ function apply_damage_move(
     });
   }
 
-  handle_faint(state, log, opponent_slot);
-  if (recoil_num > 0 && recoil_den > 0) {
-    handle_faint(state, log, player_slot);
-  }
 }
 
 function apply_move(
@@ -1005,7 +1017,7 @@ function apply_move(
   }
 
   if (spec.id === "belly_drum") {
-    const before_hp = attacker.hp;
+    const before_hp = player.sharedHp;
     if (before_hp * 2 <= attacker.maxHp) {
       log.push({
         type: "belly_drum_failed",
@@ -1021,7 +1033,7 @@ function apply_move(
     const hp_cost = mul_div_floor(before_hp, 1, 2);
     const after_hp = Math.max(0, before_hp - hp_cost);
     const after_attack = Math.max(0, mul_div_round(before_attack, 4, 1));
-    attacker.hp = after_hp;
+    sync_player_shared_hp(state, player_slot, after_hp);
     attacker.attack = after_attack;
     attacker.bellyDrumActive = true;
 
@@ -1174,14 +1186,14 @@ function apply_move(
   }
 
   if (spec.id === "pain_split") {
-    const before_user_hp = attacker.hp;
-    const before_target_hp = defender.hp;
+    const before_user_hp = player.sharedHp;
+    const before_target_hp = opponent.sharedHp;
     const shared_hp = Math.max(1, mul_div_floor(before_user_hp + before_target_hp, 1, 2));
     const after_user_hp = Math.min(attacker.maxHp, shared_hp);
     const after_target_hp = Math.min(defender.maxHp, shared_hp);
 
-    attacker.hp = after_user_hp;
-    defender.hp = after_target_hp;
+    sync_player_shared_hp(state, player_slot, after_user_hp);
+    sync_player_shared_hp(state, other_slot(player_slot), after_target_hp);
     if (after_user_hp !== before_user_hp) {
       hp_changed.add(attacker);
     }
@@ -1268,6 +1280,7 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
   clear_leech_seed_on_target_switch(state, log, player_slot);
   outgoing.choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
+  sync_player_shared_hp(state, player_slot, player.sharedHp);
   log.push({
     type: "switch",
     turn: state.turn,
@@ -1324,6 +1337,7 @@ export function create_initial_state(
 
   const build_player = (slot: PlayerSlot): PlayerState => {
     const selection = teams[slot];
+    const shared_hp = SHARED_HP_START;
     const team = selection.monsters.map((monster) => {
       const spec = MONSTER_BY_ID.get(monster.id);
       if (!spec) {
@@ -1350,8 +1364,8 @@ export function create_initial_state(
       return {
         id: monster.id,
         name: monster.id,
-        hp: final_stats.hpMax,
-        maxHp: final_stats.hpMax,
+        hp: shared_hp,
+        maxHp: shared_hp,
         level,
         baseAttack: final_stats.atk,
         baseDefense: final_stats.def,
@@ -1377,14 +1391,18 @@ export function create_initial_state(
     return {
       slot,
       name: names[slot],
+      sharedHp: shared_hp,
+      sharedHpMax: shared_hp,
       team,
       activeIndex: Math.min(Math.max(selection.activeIndex, 0), team.length - 1)
     };
   };
 
-  return {
+  const initial_state: GameState = {
     turn: 0,
     status: "setup",
+    baseTurnLimit: BASE_TURN_LIMIT,
+    extraTurnLimit: EXTRA_TURN_LIMIT,
     players: {
       player1: build_player("player1"),
       player2: build_player("player2")
@@ -1395,6 +1413,8 @@ export function create_initial_state(
     leechSeedActiveByTarget: empty_leech_seed_active(),
     leechSeedSourceByTarget: empty_leech_seed_sources()
   };
+  sync_all_players_shared_hp(initial_state);
+  return initial_state;
 }
 
 export function resolve_turn(
@@ -1406,6 +1426,9 @@ export function resolve_turn(
   const hp_changed_this_turn = new WeakSet<MonsterState>();
   const focus_punch_pending: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   const took_damage_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
+  sync_all_players_shared_hp(next);
+  next.baseTurnLimit = Math.max(1, normalize_int(next.baseTurnLimit, BASE_TURN_LIMIT, 1));
+  next.extraTurnLimit = Math.max(0, normalize_int(next.extraTurnLimit, EXTRA_TURN_LIMIT, 0));
 
   if (next.status !== "running") {
     return { state: next, log };
@@ -1426,11 +1449,11 @@ export function resolve_turn(
   if (!next.leechSeedSourceByTarget) {
     next.leechSeedSourceByTarget = empty_leech_seed_sources();
   }
+  next.pendingSwitch = empty_pending();
 
   reset_protect_flags(next);
   const actions = build_actions(intents, next);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
-  let match_ended_in_main_phases = false;
 
   for (const phase of phases) {
     const phase_actions = actions.filter((action) => action.phase === phase.id);
@@ -1476,24 +1499,14 @@ export function resolve_turn(
           took_damage_this_turn
         );
       }
-
-      if (check_match_end(next, log)) {
-        match_ended_in_main_phases = true;
-        break;
-      }
-    }
-
-    if (match_ended_in_main_phases) {
-      break;
     }
   }
 
-  if (!match_ended_in_main_phases) {
-    apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
-  }
+  apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
   decrement_cooldowns(next);
   // Clear guard flags after the turn resolves (so next turn starts unprotected/not-enduring).
   reset_protect_flags(next);
+  maybe_end_match_by_turn_limit(next, log);
 
   return { state: next, log };
 }
@@ -1530,6 +1543,7 @@ export function apply_forced_switch(
   clear_leech_seed_on_target_switch(next, log, slot);
   outgoing.choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
+  sync_player_shared_hp(next, slot, player.sharedHp);
   next.pendingSwitch[slot] = false;
   log.push({
     type: "forced_switch",

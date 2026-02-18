@@ -31,6 +31,9 @@ Fluxo de mensagem recebida (consume_network_message):
 4. Caso contrario:
    - usa fallback cliente-deterministico (relay_consume_post)
    - reconstrui estado local a partir de join/ready/intent/forced_switch/surrender/chat.
+5. Em fallback cliente-deterministico:
+   - cada turno abre com deadline de 5s.
+   - se algum player nao enviar intent ate o deadline, o cliente fecha o turno com fallback deterministico.
 
 Observacao:
 - Mesmo com fallback deterministico, o endpoint permanece oficial:
@@ -56,16 +59,21 @@ Ordem exata atual:
    - filtra actions da fase
    - se houver duas actions, resolve iniciativa
    - executa action por action
-   - valida fim de partida apos cada action
 5. Fase final unica:
    - end_turn (ordem fixa por lista interna, sem iniciativa por atributos):
      Focus Punch -> Wish -> Leftovers -> Leech Life
    - em cada item da lista, quando precisar iterar os dois lados, desempate fixo:
      player1 -> player2.
-   - apos cada bloco dessa lista, o engine valida fim de partida (KO no fim do turno).
 6. Encerramento do turno:
    - decrement_cooldowns
    - reset_protect_flags no fim do turno
+7. Regra de vida/fim de partida:
+   - vida e unificada por player (nao por pokemon), fixa em 200.
+   - partida base tem 12 turnos.
+   - no turno 12, vence quem tiver mais vida.
+   - se empatar, entram turnos extras (max 5).
+   - no primeiro turno extra com vidas diferentes, encerra com vencedor.
+   - se continuar empatado ate o limite extra, encerra em empate.
 
 Importante sobre passivas:
 - Passivas de item (ex: Leftovers) acontecem dentro da fase end_turn.

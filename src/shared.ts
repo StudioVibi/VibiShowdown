@@ -2,6 +2,11 @@ export type RoomId = string;
 
 export type PlayerSlot = "player1" | "player2";
 
+export const SHARED_HP_START = 200;
+export const TURN_DURATION_MS = 5_000;
+export const BASE_TURN_LIMIT = 12;
+export const EXTRA_TURN_LIMIT = 5;
+
 export type MoveId = "none" | "protect" | string;
 export type PassiveId = "none" | "leftovers" | "choice_band" | "regen_5pct" | string;
 
@@ -63,6 +68,8 @@ export type MonsterState = {
 export type PlayerState = {
   slot: PlayerSlot;
   name: string;
+  sharedHp: number;
+  sharedHpMax: number;
   team: MonsterState[];
   activeIndex: number;
 };
@@ -71,6 +78,8 @@ export type GameState = {
   turn: number;
   status: "setup" | "running" | "ended";
   winner?: PlayerSlot;
+  baseTurnLimit: number;
+  extraTurnLimit: number;
   players: Record<PlayerSlot, PlayerState>;
   pendingSwitch: Record<PlayerSlot, boolean>;
   pendingWish: Record<PlayerSlot, number | null>;
