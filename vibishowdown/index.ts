@@ -179,6 +179,7 @@ const slot_bench_a_img = document.getElementById("slot-bench-a-img") as HTMLImag
 const slot_bench_b_img = document.getElementById("slot-bench-b-img") as HTMLImageElement;
 const monster_tabs = document.getElementById("monster-tabs");
 const moves_grid = document.getElementById("moves-grid")!;
+const stats_grid = document.getElementById("stats-grid")!;
 const config_warning = document.getElementById("config-warning")!;
 const player_bench_slots = [
   {
@@ -1366,7 +1367,6 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
   const base_stats = normalize_stats(spec.stats, spec.stats);
   const base_level = normalize_stat_value("level", base_stats.level, 1);
   const base_ev = empty_ev_spread();
-  const default_stats = stats_from_base_level_ev(base_stats, base_level, base_ev);
   const default_moves = spec.defaultMoves.slice(0, LOBBY_MOVE_SLOTS);
   while (default_moves.length < LOBBY_MOVE_SLOTS) {
     default_moves.push("none");
@@ -1374,7 +1374,7 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
   const base: MonsterConfig = {
     moves: default_moves,
     passive: "none",
-    stats: default_stats,
+    stats: stats_from_base_level_ev(base_stats, base_level, base_ev),
     ev: base_ev
   };
 
@@ -1395,12 +1395,16 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
       moves[i] = "none";
     }
   }
+  const level = normalize_stat_value("level", value.stats?.level, base.stats.level);
+  const legacy_ev = normalize_legacy_ev_from_stat_alloc((value as { statAlloc?: unknown }).statAlloc);
+  const ev = normalize_ev_spread(value.ev ?? legacy_ev ?? base.ev, base.ev);
+  const stats = stats_from_base_level_ev(base_stats, level, ev);
 
   return {
     moves,
     passive: "none",
-    stats: default_stats,
-    ev: base_ev
+    stats,
+    ev
   };
 }
 
@@ -1548,6 +1552,7 @@ function render_tabs(): void {
 
 function render_config(): void {
   moves_grid.innerHTML = "";
+  stats_grid.innerHTML = "";
 
   if (!active_tab) {
     show_warning("Select 3 monsters to configure.");
@@ -1562,6 +1567,9 @@ function render_config(): void {
   }
 
   const config = get_config(active_tab);
+  const base_stats = normalize_stats(spec.stats, spec.stats);
+  config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
+
   let changed = false;
   const unique_moves = new Set<string>();
   for (let i = 0; i < LOBBY_MOVE_SLOTS; i++) {
@@ -1652,6 +1660,216 @@ function render_config(): void {
     label.appendChild(select);
     moves_grid.appendChild(label);
   }
+
+  const level_label = document.createElement("label");
+  level_label.textContent = "Lv";
+  const level_input = document.createElement("input");
+  level_input.type = "number";
+  level_input.min = `${LEVEL_MIN}`;
+  level_input.max = `${LEVEL_MAX}`;
+  level_input.value = `${config.stats.level}`;
+  level_input.disabled = is_ready && !match_started;
+  const read_level_input_value = (): number | null => {
+    const raw = level_input.value.trim();
+    if (!raw) {
+      return null;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+    return parsed;
+  };
+  const apply_level_value = (next_value: number): number => {
+    const normalized = normalize_stat_value("level", next_value, config.stats.level);
+    if (normalized !== config.stats.level) {
+      config.stats = stats_from_base_level_ev(base_stats, normalized, config.ev);
+      save_profile();
+    }
+    return normalized;
+  };
+  level_input.addEventListener("input", () => {
+    if (is_ready && !match_started) return;
+    const value = read_level_input_value();
+    if (value === null) {
+      return;
+    }
+    apply_level_value(value);
+    clear_warning();
+  });
+  const commit_level_input = (): void => {
+    if (is_ready && !match_started) return;
+    const value = read_level_input_value();
+    if (value === null) {
+      level_input.value = `${config.stats.level}`;
+      return;
+    }
+    const normalized = apply_level_value(value);
+    level_input.value = `${normalized}`;
+    clear_warning();
+    render_config();
+  };
+  level_input.addEventListener("change", commit_level_input);
+  level_input.addEventListener("blur", commit_level_input);
+  level_label.appendChild(level_input);
+  moves_grid.appendChild(level_label);
+
+  const points_summary = document.createElement("div");
+  points_summary.className = "stat-points-summary";
+  stats_grid.appendChild(points_summary);
+
+  const column_header = document.createElement("div");
+  column_header.className = "stat-alloc-header";
+  for (const heading of ["", "Base", "EV's", "", "Total"]) {
+    const header_cell = document.createElement("span");
+    header_cell.className = "stat-alloc-header-cell";
+    if (heading.length === 0) {
+      header_cell.classList.add("is-empty");
+      header_cell.textContent = " ";
+    } else {
+      header_cell.textContent = heading;
+    }
+    column_header.appendChild(header_cell);
+  }
+  stats_grid.appendChild(column_header);
+
+  const update_points_summary = (): void => {
+    const used = ev_total(config.ev);
+    const remaining = EV_TOTAL_MAX - used;
+    points_summary.textContent = `EVs: ${used}/${EV_TOTAL_MAX} (restante: ${Math.max(0, remaining)})`;
+  };
+
+  const stat_rows: Array<[EVStatKey, string]> = [
+    ["hp", "HP"],
+    ["atk", "ATK"],
+    ["def", "DEF"],
+    ["spe", "SPE"]
+  ];
+  const stat_key_by_ev: Record<EVStatKey, keyof Stats> = {
+    hp: "maxHp",
+    atk: "attack",
+    def: "defense",
+    spe: "speed"
+  };
+  const calc_total_stat = (key: EVStatKey): number => {
+    const base = base_stats[stat_key_by_ev[key]];
+    const level = config.stats.level;
+    const ev_quarter = Math.floor(config.ev[key] / 4);
+    const scaled = Math.floor(((2 * base + ev_quarter) * level) / 100);
+    if (key === "hp") {
+      return scaled + level + 10;
+    }
+    return scaled + 5;
+  };
+
+  for (const [key, label_text] of stat_rows) {
+    const row = document.createElement("div");
+    row.className = "stat-alloc-row";
+
+    const stat_name = document.createElement("span");
+    stat_name.className = "stat-alloc-name";
+    stat_name.textContent = label_text;
+
+    const base_value = document.createElement("span");
+    base_value.className = "stat-static-value";
+    base_value.textContent = `${base_stats[stat_key_by_ev[key]]}`;
+
+    const alloc_input = document.createElement("input");
+    alloc_input.type = "number";
+    alloc_input.className = "stat-alloc-input";
+    alloc_input.min = "0";
+    alloc_input.max = `${EV_PER_STAT_MAX}`;
+    alloc_input.step = "1";
+    alloc_input.value = `${config.ev[key]}`;
+    alloc_input.disabled = is_ready && !match_started;
+
+    const alloc_slider = document.createElement("input");
+    alloc_slider.type = "range";
+    alloc_slider.className = "stat-alloc-slider";
+    alloc_slider.min = "0";
+    alloc_slider.max = `${EV_PER_STAT_MAX}`;
+    alloc_slider.value = `${config.ev[key]}`;
+    alloc_slider.disabled = is_ready && !match_started;
+
+    const result_value = document.createElement("span");
+    result_value.className = "stat-result-value";
+    result_value.textContent = `${calc_total_stat(key)}`;
+
+    const max_ev_for_key = (): number => {
+      const used_without_current = ev_total(config.ev) - config.ev[key];
+      return Math.min(EV_PER_STAT_MAX, Math.max(0, EV_TOTAL_MAX - used_without_current));
+    };
+
+    const apply_allocation_value = (next_raw: number, source: "input" | "slider"): void => {
+      const current = config.ev[key];
+      if (!Number.isFinite(next_raw)) {
+        alloc_input.value = `${current}`;
+        alloc_slider.value = `${current}`;
+        return;
+      }
+
+      if (source === "slider") {
+        const clamped = Math.max(0, Math.min(max_ev_for_key(), Math.floor(next_raw)));
+        const candidate: EVSpread = { ...config.ev, [key]: clamped };
+        config.ev = candidate;
+        config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
+        alloc_input.value = `${clamped}`;
+        alloc_slider.value = `${clamped}`;
+        result_value.textContent = `${calc_total_stat(key)}`;
+        clear_warning();
+        update_points_summary();
+        save_profile();
+        return;
+      }
+
+      if (!Number.isInteger(next_raw)) {
+        show_warning(`EV ${key} must be integer.`);
+        alloc_input.value = `${current}`;
+        alloc_slider.value = `${current}`;
+        return;
+      }
+      const candidate: EVSpread = { ...config.ev, [key]: next_raw };
+      const ev_error = validate_ev_spread(candidate);
+      if (ev_error) {
+        show_warning(ev_error);
+        alloc_input.value = `${current}`;
+        alloc_slider.value = `${current}`;
+        return;
+      }
+      config.ev = candidate;
+      config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
+      alloc_input.value = `${next_raw}`;
+      alloc_slider.value = `${next_raw}`;
+      result_value.textContent = `${calc_total_stat(key)}`;
+      clear_warning();
+      update_points_summary();
+      save_profile();
+    };
+
+    alloc_input.addEventListener("change", () => {
+      if (is_ready && !match_started) return;
+      const value = Number(alloc_input.value);
+      if (!Number.isFinite(value)) {
+        alloc_input.value = `${config.ev[key]}`;
+        return;
+      }
+      apply_allocation_value(value, "input");
+    });
+
+    alloc_slider.addEventListener("input", () => {
+      if (is_ready && !match_started) return;
+      apply_allocation_value(Number(alloc_slider.value), "slider");
+    });
+
+    row.appendChild(stat_name);
+    row.appendChild(base_value);
+    row.appendChild(alloc_input);
+    row.appendChild(alloc_slider);
+    row.appendChild(result_value);
+    stats_grid.appendChild(row);
+  }
+
+  update_points_summary();
 }
 
 function set_edit_target(index: number): void {
