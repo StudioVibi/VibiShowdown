@@ -5224,7 +5224,7 @@ function coerce_config(spec, value) {
   }
   const level = normalize_stat_value("level", value.stats?.level, base.stats.level);
   const legacy_ev = normalize_legacy_ev_from_stat_alloc(value.statAlloc);
-  const ev = normalize_ev_spread(value.ev ?? legacy_ev ?? base.ev, base.ev);
+  const ev = { ...normalize_ev_spread(value.ev ?? legacy_ev ?? base.ev, base.ev), hp: 0 };
   const stats = stats_from_base_level_ev(base_stats, level, ev);
   return {
     moves,
@@ -5531,13 +5531,11 @@ function render_config() {
     points_summary.textContent = `EVs: ${used}/${EV_TOTAL_MAX} (restante: ${Math.max(0, remaining)})`;
   };
   const stat_rows = [
-    ["hp", "HP"],
     ["atk", "ATK"],
     ["def", "DEF"],
     ["spe", "SPE"]
   ];
   const stat_key_by_ev = {
-    hp: "maxHp",
     atk: "attack",
     def: "defense",
     spe: "speed"
@@ -5547,9 +5545,6 @@ function render_config() {
     const level = config.stats.level;
     const ev_quarter = Math.floor(config.ev[key] / 4);
     const scaled = Math.floor((2 * base + ev_quarter) * level / 100);
-    if (key === "hp") {
-      return scaled + level + 10;
-    }
     return scaled + 5;
   };
   for (const [key, label_text] of stat_rows) {

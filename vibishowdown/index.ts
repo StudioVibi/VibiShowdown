@@ -1415,7 +1415,7 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
   }
   const level = normalize_stat_value("level", value.stats?.level, base.stats.level);
   const legacy_ev = normalize_legacy_ev_from_stat_alloc((value as { statAlloc?: unknown }).statAlloc);
-  const ev = normalize_ev_spread(value.ev ?? legacy_ev ?? base.ev, base.ev);
+  const ev = { ...normalize_ev_spread(value.ev ?? legacy_ev ?? base.ev, base.ev), hp: 0 };
   const stats = stats_from_base_level_ev(base_stats, level, ev);
 
   return {
@@ -1757,26 +1757,21 @@ function render_config(): void {
     points_summary.textContent = `EVs: ${used}/${EV_TOTAL_MAX} (restante: ${Math.max(0, remaining)})`;
   };
 
-  const stat_rows: Array<[EVStatKey, string]> = [
-    ["hp", "HP"],
+  const stat_rows: Array<[Exclude<EVStatKey, "hp">, string]> = [
     ["atk", "ATK"],
     ["def", "DEF"],
     ["spe", "SPE"]
   ];
-  const stat_key_by_ev: Record<EVStatKey, keyof Stats> = {
-    hp: "maxHp",
+  const stat_key_by_ev: Record<Exclude<EVStatKey, "hp">, keyof Stats> = {
     atk: "attack",
     def: "defense",
     spe: "speed"
   };
-  const calc_total_stat = (key: EVStatKey): number => {
+  const calc_total_stat = (key: Exclude<EVStatKey, "hp">): number => {
     const base = base_stats[stat_key_by_ev[key]];
     const level = config.stats.level;
     const ev_quarter = Math.floor(config.ev[key] / 4);
     const scaled = Math.floor(((2 * base + ev_quarter) * level) / 100);
-    if (key === "hp") {
-      return scaled + level + 10;
-    }
     return scaled + 5;
   };
 
