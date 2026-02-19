@@ -52,8 +52,10 @@ Ordem exata atual:
 1. clone_state do estado recebido.
 2. reset de flags de guard e avaliacao de mindgame de tipo no inicio do turno:
    - hierarquia: BUF > DEF > ATK > BUF
-   - empate de tipo nao gera efeito
-   - vitoria de tipo gera apenas evento/log `mindgame_bonus_ready` (sem efeito de gameplay por enquanto)
+   - empate de tipo nao altera score (0 para ambos)
+   - vitoria de tipo altera score individual:
+     vencedor +1 / perdedor -1
+   - logs gerados: `mindgame_bonus_ready` + `rps_score_update`
 3. build_actions a partir dos intents.
 4. Ordena fases por "order":
    - switch (0)
@@ -63,6 +65,15 @@ Ordem exata atual:
    - filtra actions da fase
    - se houver duas actions, resolve iniciativa
    - executa action por action
+   - regras extras de switch:
+     - se o lado estiver com Arena Trap ativo, switch e bloqueado no turno valido.
+     - Spikes (1 carga) dispara no proximo switch do lado alvo:
+       causa 10% do sharedHpMax e e consumido.
+   - se ambos os lados fizerem switch no mesmo turno:
+     - aplica passivas de entrada por tipo (somente nesse caso):
+       Armoth (DEF) entrando contra ATK => Arena Trap no inimigo por 1 turno
+       Kairus (ATK) entrando contra BUF => Quick Punch (10 dano)
+       Farien (BUF) entrando contra DEF => cura +10 HP
    - apos cada action, checa fim imediato por HP zerado
 6. Fase final unica:
    - end_turn (ordem fixa por lista interna, sem iniciativa por atributos):
@@ -85,13 +96,32 @@ Regras de vida/fim de partida:
 - se continuar empatado ate o limite extra, encerra em empate.
 
 Importante sobre passivas:
-- Sistema de passivas esta temporariamente desativado no motor.
+- Sistema antigo de passivas por item (`src/data/passives.ts`) continua desativado no motor.
 - Todos os mons estao com passiva fixa `none` no cadastro atual.
-- A infraestrutura de passivas em `src/data/passives.ts` permanece no projeto para reativacao futura.
+- A feature atual usa passivas de especie ligadas no `engine.ts` (troca simultanea), sem usar o modulo legado.
 - No lobby (pre-match), cada mon configura apenas 3 moves; campos de passiva/HP/EV nao aparecem.
 
 
-3) Onde alterar cada tipo de regra
+3) Pacote inicial da feat jokenpo
+---------------------------------
+Mons novos:
+- Armoth (DEF) - base temporaria de stats: Panda
+  moves: Spikes / Recover / none
+- Kairus (ATK) - base temporaria de stats: Harpy
+  moves: Mega Punch / Bounce Kick / none
+- Farien (BUF) - base temporaria de stats: Miren
+  moves: Meditate / Ki Blast / none
+
+Moves novos no catalogo:
+- Spikes: arma hazard no lado alvo (1 carga).
+- Recover: cura 20% do sharedHpMax do proprio lado.
+- Mega Punch: dano flat 20.
+- Bounce Kick: dano flat 10 + tenta forcar switch aleatorio no alvo.
+- Meditate: ATK x2 no usuario.
+- Ki Blast: dano flat 20.
+
+
+4) Onde alterar cada tipo de regra
 ----------------------------------
 Cadastro de dados:
 - Pokemons/defaults: src/data/pokemon.ts
@@ -101,3 +131,6 @@ Cadastro de dados:
 
 Ordem de execucao:
 - Sempre em src/engine.ts (resolve_turn e funcoes auxiliares).
+
+Estado compartilhado:
+- Tipos/estado global de score e hazards: src/shared.ts

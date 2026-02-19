@@ -34,5 +34,6 @@ Networking:
 - `room` e `name` ficam cacheados em `localStorage` e servem como default no prompt.
 - a cada carregamento da pagina o app pergunta novamente `room` e `name` (com os defaults salvos).
 - documento de ordem atual (rede + turnos): `docs/ordem_atual_sistema.txt`.
+- status da feat jokenpo atual (score + Armoth/Kairus/Farien + passivas de troca): `docs/ordem_atual_sistema.txt`.
 - padrao numerico deterministico (anti-float no engine): `docs/padrao_determinismo_numerico.txt`.
 - self-host removido deste repositorio (sem backend de jogo local).
