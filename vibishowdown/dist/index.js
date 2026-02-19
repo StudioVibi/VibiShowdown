@@ -4016,6 +4016,7 @@ function validate_intent(state, slot, intent) {
 // vibishowdown/index.ts
 var EV_KEYS = ["hp", "atk", "def", "spe"];
 var LOBBY_MOVE_SLOTS = 3;
+var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien"]);
 var PLAYER_SLOTS = ["player1", "player2"];
 var LAST_ROOM_KEY = "vibi_showdown_last_room";
 var LAST_PLAYER_NAME_KEY = "vibi_showdown_last_player_name";
@@ -4200,6 +4201,16 @@ var ICON_ALIASES = {
 function icon_path(id) {
   const resolved = ICON_ALIASES[id] ?? id;
   return `./icons/unit_${resolved}.png`;
+}
+function is_lobby_enabled_monster(id) {
+  return STARTER_MONSTER_IDS.has(id);
+}
+function monster_type_description(type) {
+  if (type === "def")
+    return "DEF";
+  if (type === "atk")
+    return "ATK";
+  return "SPE";
 }
 function update_rps_status(state) {
   if (!status_rps)
@@ -5103,7 +5114,12 @@ function save_profile() {
 function load_team_selection() {
   const parsed = load_json(team_key, null);
   if (parsed && Array.isArray(parsed.selected)) {
-    selected.splice(0, selected.length, ...parsed.selected.filter((id) => MONSTER_BY_ID.has(id)));
+    const filtered = parsed.selected.filter((id) => MONSTER_BY_ID.has(id) && is_lobby_enabled_monster(id)).slice(0, 3);
+    selected.splice(0, selected.length, ...filtered);
+    const changed = filtered.length !== parsed.selected.length;
+    if (changed) {
+      save_team_selection();
+    }
   }
 }
 function save_team_selection() {
@@ -5650,6 +5666,10 @@ function toggle_selection(id) {
   if (is_ready && !match_started) {
     return;
   }
+  if (!is_lobby_enabled_monster(id)) {
+    show_warning("Monster desativado nesta fase.");
+    return;
+  }
   const index = selected.indexOf(id);
   if (index >= 0) {
     selected.splice(index, 1);
@@ -5684,8 +5704,9 @@ function render_roster() {
   list.innerHTML = "";
   for (const entry of MONSTER_ROSTER) {
     const card = document.createElement("div");
+    const is_enabled = is_lobby_enabled_monster(entry.id);
     const is_selected = selected.includes(entry.id);
-    const is_disabled = !is_selected && selected.length >= 3 || is_ready && !match_started;
+    const is_disabled = !is_enabled || !is_selected && selected.length >= 3 || is_ready && !match_started;
     const tooltip = tooltip_from_config(entry.id);
     card.className = `roster-card${is_selected ? " active" : ""}${is_disabled ? " disabled" : ""}`;
     set_monster_tooltip(card, tooltip);
@@ -5695,7 +5716,7 @@ function render_roster() {
       </div>
       <div>
         <h4>${entry.name}</h4>
-        <p>${entry.role}</p>
+        <p>${monster_type_description(entry.type)}${is_enabled ? "" : " • desativado"}</p>
       </div>
     `;
     card.addEventListener("click", () => {
@@ -5933,6 +5954,10 @@ function build_team_selection() {
   }
   const monsters = [];
   for (const id of selected) {
+    if (!is_lobby_enabled_monster(id)) {
+      show_warning(`${monster_label(id)} is disabled.`);
+      return null;
+    }
     const spec = MONSTER_BY_ID.get(id);
     if (!spec) {
       show_warning(`Unknown monster: ${id}`);
