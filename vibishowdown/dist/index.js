@@ -6759,7 +6759,6 @@ on_sync(() => {
   }
   if (!join_sent) {
     if (try_post({ $: "join", name: player_name, player_id })) {
-      append_log(`join request: ${player_name}`);
       join_sent = true;
     }
   }
