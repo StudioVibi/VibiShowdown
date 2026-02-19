@@ -45,6 +45,9 @@ const TAUNT_BLOCKED_MOVE_IDS = new Set([
   "none",
   "agility",
   "wish",
+  "spikes",
+  "recover",
+  "meditate",
   "belly_drum",
   "screech",
   "taunt",
@@ -141,11 +144,19 @@ function empty_pending(): Record<PlayerSlot, boolean> {
   return { player1: false, player2: false };
 }
 
+function empty_rps_score(): Record<PlayerSlot, number> {
+  return { player1: 0, player2: 0 };
+}
+
 function empty_pending_wish(): Record<PlayerSlot, number | null> {
   return { player1: null, player2: null };
 }
 
 function empty_taunt_until_turn(): Record<PlayerSlot, number> {
+  return { player1: 0, player2: 0 };
+}
+
+function empty_arena_trap_until_turn(): Record<PlayerSlot, number> {
   return { player1: 0, player2: 0 };
 }
 
@@ -155,6 +166,10 @@ function empty_leech_seed_active(): Record<PlayerSlot, boolean> {
 
 function empty_leech_seed_sources(): Record<PlayerSlot, PlayerSlot | null> {
   return { player1: null, player2: null };
+}
+
+function empty_spikes_armed_by_target(): Record<PlayerSlot, boolean> {
+  return { player1: false, player2: false };
 }
 
 function is_slot_taunted(state: GameState, slot: PlayerSlot): boolean {
@@ -195,6 +210,18 @@ export function clone_state(state: GameState): GameState {
     zeroHpTiebreakResolved: !!state.zeroHpTiebreakResolved,
     zeroHpTiebreakTurn:
       typeof state.zeroHpTiebreakTurn === "number" ? normalize_int(state.zeroHpTiebreakTurn, state.turn + 1, 1) : null,
+    rpsScore: {
+      player1: normalize_int(state.rpsScore?.player1, 0, -99999),
+      player2: normalize_int(state.rpsScore?.player2, 0, -99999)
+    },
+    arenaTrapUntilTurn: {
+      player1: normalize_int(state.arenaTrapUntilTurn?.player1, 0, 0),
+      player2: normalize_int(state.arenaTrapUntilTurn?.player2, 0, 0)
+    },
+    spikesArmedByTarget: {
+      player1: !!state.spikesArmedByTarget?.player1,
+      player2: !!state.spikesArmedByTarget?.player2
+    },
     players: {
       player1: clone_player(state.players.player1),
       player2: clone_player(state.players.player2)
@@ -266,6 +293,9 @@ function compare_monster_type(left: MonsterType, right: MonsterType): number {
 }
 
 function apply_mindgame_bonus_event(state: GameState, log: EventLog[]): void {
+  if (!state.rpsScore) {
+    state.rpsScore = empty_rps_score();
+  }
   const p1_active = active_monster(state.players.player1);
   const p2_active = active_monster(state.players.player2);
   const type_cmp = compare_monster_type(p1_active.type, p2_active.type);
@@ -276,6 +306,10 @@ function apply_mindgame_bonus_event(state: GameState, log: EventLog[]): void {
   const loser: PlayerSlot = winner === "player1" ? "player2" : "player1";
   const winner_active = winner === "player1" ? p1_active : p2_active;
   const loser_active = loser === "player1" ? p1_active : p2_active;
+  const player1_before = state.rpsScore.player1 ?? 0;
+  const player2_before = state.rpsScore.player2 ?? 0;
+  state.rpsScore[winner] = (state.rpsScore[winner] ?? 0) + 1;
+  state.rpsScore[loser] = (state.rpsScore[loser] ?? 0) - 1;
   log.push({
     type: "mindgame_bonus_ready",
     turn: state.turn,
@@ -289,6 +323,191 @@ function apply_mindgame_bonus_event(state: GameState, log: EventLog[]): void {
       loserMonster: loser_active.id
     }
   });
+  log.push({
+    type: "rps_score_update",
+    turn: state.turn,
+    summary: `rps score updated (${winner} +1, ${loser} -1)`,
+    data: {
+      winner,
+      loser,
+      player1Before: player1_before,
+      player1After: state.rpsScore.player1,
+      player2Before: player2_before,
+      player2After: state.rpsScore.player2
+    }
+  });
+}
+
+function deterministic_hash(input: string): number {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+function deterministic_switch_candidate_index(
+  state: GameState,
+  source_slot: PlayerSlot,
+  target_slot: PlayerSlot,
+  candidates: number[]
+): number {
+  if (candidates.length <= 1) {
+    return 0;
+  }
+  const source = active_monster(state.players[source_slot]);
+  const target = active_monster(state.players[target_slot]);
+  const seed_input = `${state.turn}|${source_slot}|${target_slot}|${source.id}|${target.id}|${state.players[target_slot].activeIndex}`;
+  const seed = deterministic_hash(seed_input);
+  return seed % candidates.length;
+}
+
+function apply_spikes_on_switch(
+  state: GameState,
+  log: EventLog[],
+  slot: PlayerSlot,
+  hp_changed?: WeakSet<MonsterState>,
+  took_damage_this_turn?: Record<PlayerSlot, boolean>
+): void {
+  if (!(state.spikesArmedByTarget?.[slot] ?? false)) {
+    return;
+  }
+  state.spikesArmedByTarget[slot] = false;
+  const hp_changed_ref = hp_changed ?? new WeakSet<MonsterState>();
+  const took_damage_ref = took_damage_this_turn ?? { player1: false, player2: false };
+  const target_player = state.players[slot];
+  const target = active_monster(target_player);
+  const damage_attempt = Math.max(0, mul_div_round(target_player.sharedHpMax, 1, 10));
+  const result = apply_damage_with_endure(
+    state,
+    log,
+    "switch",
+    slot,
+    target,
+    damage_attempt,
+    hp_changed_ref,
+    took_damage_ref
+  );
+  log.push({
+    type: "spikes_trigger",
+    turn: state.turn,
+    phase: "switch",
+    summary:
+      result.applied > 0
+        ? `${target.name} took ${result.applied} from Spikes on switch`
+        : `${target.name} triggered Spikes on switch (no damage)`,
+    data: {
+      slot: other_slot(slot),
+      targetSlot: slot,
+      target: target.id,
+      damage: result.applied,
+      before: result.before,
+      after: result.after
+    }
+  });
+}
+
+function apply_simultaneous_switch_passives(
+  state: GameState,
+  log: EventLog[],
+  switched_this_turn: Record<PlayerSlot, boolean>,
+  hp_changed: WeakSet<MonsterState>,
+  took_damage_this_turn: Record<PlayerSlot, boolean>
+): void {
+  if (!switched_this_turn.player1 || !switched_this_turn.player2) {
+    return;
+  }
+  for (const slot of SLOT_ORDER) {
+    const player = state.players[slot];
+    if (player.sharedHp <= 0) {
+      continue;
+    }
+    const target_slot = other_slot(slot);
+    const target_player = state.players[target_slot];
+    const actor = active_monster(player);
+    const target = active_monster(target_player);
+
+    if (actor.id === "armoth" && target.type === "atk") {
+      const previous_until = state.arenaTrapUntilTurn[target_slot] ?? 0;
+      const until_turn = Math.max(previous_until, state.turn + 1);
+      state.arenaTrapUntilTurn[target_slot] = until_turn;
+      log.push({
+        type: "passive_trigger",
+        turn: state.turn,
+        phase: "switch",
+        summary: `${actor.name} passive triggered (Arena Trap vs ATK)`,
+        data: { slot, targetSlot: target_slot, source: actor.id, target: target.id, passive: "arena_trap" }
+      });
+      log.push({
+        type: "arena_trap_applied",
+        turn: state.turn,
+        phase: "switch",
+        summary: `${target_slot} is arena trapped until turn ${until_turn}`,
+        data: { sourceSlot: slot, targetSlot: target_slot, beforeUntil: previous_until, untilTurn: until_turn }
+      });
+      continue;
+    }
+
+    if (actor.id === "kairus" && target.type === "buf" && target_player.sharedHp > 0) {
+      const damage_result = apply_damage_with_endure(
+        state,
+        log,
+        "switch",
+        target_slot,
+        target,
+        10,
+        hp_changed,
+        took_damage_this_turn
+      );
+      log.push({
+        type: "passive_trigger",
+        turn: state.turn,
+        phase: "switch",
+        summary: `${actor.name} passive Quick Punch dealt ${damage_result.applied} to ${target.name}`,
+        data: { slot, targetSlot: target_slot, source: actor.id, target: target.id, passive: "quick_punch", damage: damage_result.applied }
+      });
+      log.push({
+        type: "damage",
+        turn: state.turn,
+        phase: "switch",
+        summary: `${slot} dealt ${damage_result.applied} to ${target.name}`,
+        data: {
+          slot,
+          targetSlot: target_slot,
+          source: actor.id,
+          target: target.id,
+          damage: damage_result.applied,
+          before: damage_result.before,
+          after: damage_result.after
+        }
+      });
+      continue;
+    }
+
+    if (actor.id === "farien" && target.type === "def") {
+      const before_hp = player.sharedHp;
+      const after_hp = Math.min(player.sharedHpMax, before_hp + 10);
+      const healed = Math.max(0, after_hp - before_hp);
+      if (healed > 0) {
+        sync_player_shared_hp(state, slot, after_hp);
+        hp_changed.add(actor);
+      }
+      log.push({
+        type: "passive_trigger",
+        turn: state.turn,
+        phase: "switch",
+        summary: `${actor.name} passive restored ${healed} HP on switch`,
+        data: { slot, source: actor.id, target: actor.id, passive: "switch_heal_10", heal: healed, before: before_hp, after: after_hp }
+      });
+      log.push({
+        type: "passive_heal",
+        turn: state.turn,
+        phase: "switch",
+        summary: `${actor.name} healed ${healed} from passive`,
+        data: { slot, source: actor.id, target: actor.id, amount: healed, before: before_hp, after: after_hp }
+      });
+    }
+  }
 }
 
 function clear_zero_hp_tiebreak(state: GameState): void {
@@ -1108,6 +1327,65 @@ function apply_move(
     return;
   }
 
+  if (spec.id === "spikes") {
+    const target_slot = other_slot(player_slot);
+    state.spikesArmedByTarget[target_slot] = true;
+    log.push({
+      type: "spikes_set",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} armed Spikes on ${target_slot}`,
+      data: { slot: player_slot, targetSlot: target_slot, target: defender.id }
+    });
+    return;
+  }
+
+  if (spec.id === "recover") {
+    const before_hp = player.sharedHp;
+    const heal_amount = Math.max(0, mul_div_round(player.sharedHpMax, 1, 5));
+    const after_hp = Math.min(player.sharedHpMax, before_hp + heal_amount);
+    if (after_hp !== before_hp) {
+      sync_player_shared_hp(state, player_slot, after_hp);
+      hp_changed.add(attacker);
+    }
+    log.push({
+      type: "passive_heal",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${attacker.name} healed ${Math.max(0, after_hp - before_hp)} with Recover`,
+      data: {
+        slot: player_slot,
+        source: attacker.id,
+        target: attacker.id,
+        amount: Math.max(0, after_hp - before_hp),
+        before: before_hp,
+        after: after_hp
+      }
+    });
+    return;
+  }
+
+  if (spec.id === "meditate") {
+    const before_attack = attacker.attack;
+    const after_attack = Math.max(0, mul_div_round(before_attack, 2, 1));
+    attacker.attack = after_attack;
+    log.push({
+      type: "stat_mod",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} used Meditate on ${attacker.name} (ATK ${before_attack} -> ${after_attack})`,
+      data: {
+        slot: player_slot,
+        target: attacker.id,
+        stat: "attack",
+        multiplier: 2,
+        before: before_attack,
+        after: after_attack
+      }
+    });
+    return;
+  }
+
   if (spec.id === "belly_drum") {
     const before_hp = player.sharedHp;
     if (before_hp * 2 <= attacker.maxHp) {
@@ -1182,6 +1460,41 @@ function apply_move(
       phase: spec.phaseId,
       summary: `${player_slot} has no target`,
       data: { slot: player_slot }
+    });
+    return;
+  }
+
+  if (spec.id === "bounce_kick") {
+    apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn);
+    if (state.players[other_slot(player_slot)].sharedHp <= 0) {
+      return;
+    }
+    const target_slot = other_slot(player_slot);
+    const target_player = state.players[target_slot];
+    const choices = target_player.team
+      .map((_, index) => index)
+      .filter((index) => index !== target_player.activeIndex && is_alive(target_player.team[index]));
+    if (choices.length === 0) {
+      log.push({
+        type: "forced_random_switch",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `Bounce Kick dealt damage but ${target_slot} had no available random switch`,
+        data: { slot: player_slot, targetSlot: target_slot, move: spec.id, switched: false }
+      });
+      return;
+    }
+    const random_idx = deterministic_switch_candidate_index(state, player_slot, target_slot, choices);
+    const target_index = choices[random_idx];
+    const switched = apply_switch(state, log, target_slot, target_index, hp_changed, took_damage_this_turn);
+    log.push({
+      type: "forced_random_switch",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: switched
+        ? `Bounce Kick forced random switch on ${target_slot}`
+        : `Bounce Kick random switch on ${target_slot} failed`,
+      data: { slot: player_slot, targetSlot: target_slot, move: spec.id, targetIndex: target_index, switched }
     });
     return;
   }
@@ -1331,7 +1644,14 @@ function apply_move(
   apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn);
 }
 
-function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot, targetIndex: number): void {
+function apply_switch(
+  state: GameState,
+  log: EventLog[],
+  player_slot: PlayerSlot,
+  targetIndex: number,
+  hp_changed?: WeakSet<MonsterState>,
+  took_damage_this_turn?: Record<PlayerSlot, boolean>
+): boolean {
   const player = state.players[player_slot];
   const activeIndex = player.activeIndex;
   if (targetIndex < 0 || targetIndex >= player.team.length) {
@@ -1341,7 +1661,7 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
       summary: `${player_slot} invalid switch`,
       data: { slot: player_slot, targetIndex }
     });
-    return;
+    return false;
   }
   if (targetIndex === activeIndex) {
     log.push({
@@ -1350,7 +1670,7 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
       summary: `${player_slot} already active`,
       data: { slot: player_slot, targetIndex }
     });
-    return;
+    return false;
   }
   if (!is_alive(player.team[targetIndex])) {
     log.push({
@@ -1359,7 +1679,7 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
       summary: `${player_slot} cannot switch to fainted`,
       data: { slot: player_slot, targetIndex }
     });
-    return;
+    return false;
   }
   const outgoing = player.team[activeIndex];
   outgoing.attack = outgoing.baseAttack;
@@ -1373,12 +1693,14 @@ function apply_switch(state: GameState, log: EventLog[], player_slot: PlayerSlot
   outgoing.choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   sync_player_shared_hp(state, player_slot, player.sharedHp);
+  apply_spikes_on_switch(state, log, player_slot, hp_changed, took_damage_this_turn);
   log.push({
     type: "switch",
     turn: state.turn,
     summary: `${player_slot} switched to ${player.team[targetIndex].name}`,
     data: { slot: player_slot, from: activeIndex, to: targetIndex }
   });
+  return true;
 }
 
 function build_actions(intents: Record<PlayerSlot, PlayerIntent | null>, state: GameState): Action[] {
@@ -1501,6 +1823,9 @@ export function create_initial_state(
     zeroHpTiebreakPending: false,
     zeroHpTiebreakResolved: false,
     zeroHpTiebreakTurn: null,
+    rpsScore: empty_rps_score(),
+    arenaTrapUntilTurn: empty_arena_trap_until_turn(),
+    spikesArmedByTarget: empty_spikes_armed_by_target(),
     players: {
       player1: build_player("player1"),
       player2: build_player("player2")
@@ -1524,6 +1849,7 @@ export function resolve_turn(
   const hp_changed_this_turn = new WeakSet<MonsterState>();
   const focus_punch_pending: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   const took_damage_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
+  const switched_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
   next.baseTurnLimit = Math.max(1, normalize_int(next.baseTurnLimit, BASE_TURN_LIMIT, 1));
   next.extraTurnLimit = Math.max(0, normalize_int(next.extraTurnLimit, EXTRA_TURN_LIMIT, 0));
@@ -1546,6 +1872,15 @@ export function resolve_turn(
   }
   if (!next.leechSeedSourceByTarget) {
     next.leechSeedSourceByTarget = empty_leech_seed_sources();
+  }
+  if (!next.rpsScore) {
+    next.rpsScore = empty_rps_score();
+  }
+  if (!next.arenaTrapUntilTurn) {
+    next.arenaTrapUntilTurn = empty_arena_trap_until_turn();
+  }
+  if (!next.spikesArmedByTarget) {
+    next.spikesArmedByTarget = empty_spikes_armed_by_target();
   }
   next.pendingSwitch = empty_pending();
 
@@ -1578,7 +1913,16 @@ export function resolve_turn(
 
     for (const action of phase_actions) {
       if (action.type === "switch") {
-        if (is_slot_taunted(next, action.player)) {
+        const trapped_until = next.arenaTrapUntilTurn?.[action.player] ?? 0;
+        if (trapped_until >= next.turn) {
+          log.push({
+            type: "switch_blocked",
+            turn: next.turn,
+            phase: phase.id,
+            summary: `${action.player} cannot switch (arena trapped until turn ${trapped_until})`,
+            data: { slot: action.player, targetIndex: action.targetIndex, untilTurn: trapped_until }
+          });
+        } else if (is_slot_taunted(next, action.player)) {
           log.push({
             type: "taunt_blocked",
             turn: next.turn,
@@ -1587,7 +1931,17 @@ export function resolve_turn(
             data: { slot: action.player, action: "switch", untilTurn: next.tauntUntilTurn[action.player] }
           });
         } else {
-          apply_switch(next, log, action.player, action.targetIndex);
+          const switched = apply_switch(
+            next,
+            log,
+            action.player,
+            action.targetIndex,
+            hp_changed_this_turn,
+            took_damage_this_turn
+          );
+          if (switched) {
+            switched_this_turn[action.player] = true;
+          }
         }
       } else {
         apply_move(
@@ -1605,6 +1959,10 @@ export function resolve_turn(
       if (progress !== "continue") {
         break;
       }
+    }
+    if (phase.id === "switch" && progress === "continue") {
+      apply_simultaneous_switch_passives(next, log, switched_this_turn, hp_changed_this_turn, took_damage_this_turn);
+      progress = check_zero_hp_match_result(next, log);
     }
   }
 
@@ -1658,6 +2016,7 @@ export function apply_forced_switch(
   outgoing.choiceBandLockedMoveIndex = null;
   player.activeIndex = targetIndex;
   sync_player_shared_hp(next, slot, player.sharedHp);
+  apply_spikes_on_switch(next, log, slot);
   next.pendingSwitch[slot] = false;
   log.push({
     type: "forced_switch",
@@ -1679,6 +2038,10 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
   const active = active_monster(player);
   const taunted = is_slot_taunted(state, slot);
   if (intent.action === "switch") {
+    const trapped_until = state.arenaTrapUntilTurn?.[slot] ?? 0;
+    if (trapped_until >= state.turn) {
+      return "arena trapped";
+    }
     if (taunted) {
       return "taunted: must use attack";
     }

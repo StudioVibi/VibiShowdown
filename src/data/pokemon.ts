@@ -99,6 +99,39 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
     defaultPassive: "none"
+  },
+  {
+    id: "armoth",
+    name: "Armoth",
+    role: "Cloyster Template",
+    type: "def",
+    stats: { level: 100, maxHp: 117, attack: 375, defense: 730, speed: 271 },
+    possibleMoves: ["spikes", "recover", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["spikes", "recover", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "kairus",
+    name: "Kairus",
+    role: "Absol Template",
+    type: "atk",
+    stats: { level: 100, maxHp: 180, attack: 521, defense: 230, speed: 292 },
+    possibleMoves: ["mega_punch", "bounce_kick", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["mega_punch", "bounce_kick", "none"],
+    defaultPassive: "none"
+  },
+  {
+    id: "farien",
+    name: "Farien",
+    role: "Celebi Template",
+    type: "buf",
+    stats: { level: 100, maxHp: 325, attack: 396, defense: 396, speed: 396 },
+    possibleMoves: ["meditate", "ki_blast", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["meditate", "ki_blast", "none"],
+    defaultPassive: "none"
   }
 ];
 

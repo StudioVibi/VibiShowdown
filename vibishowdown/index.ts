@@ -129,6 +129,7 @@ const status_conn = document.getElementById("status-conn");
 const status_ping = document.getElementById("status-ping")!;
 const status_turn = document.getElementById("status-turn")!;
 const status_deadline = document.getElementById("status-deadline")!;
+const status_rps = document.getElementById("status-rps");
 const status_ready = document.getElementById("status-ready");
 const status_opponent = document.getElementById("status-opponent");
 const chat_messages = document.getElementById("chat-messages")!;
@@ -260,8 +261,33 @@ let forced_switch_target_index: number | null = null;
 let forced_switch_target_turn = 0;
 let room_game_count = 0;
 
+const ICON_ALIASES: Record<string, string> = {
+  armoth: "panda",
+  kairus: "harpy",
+  farien: "miren"
+};
+
 function icon_path(id: string): string {
-  return `./icons/unit_${id}.png`;
+  const resolved = ICON_ALIASES[id] ?? id;
+  return `./icons/unit_${resolved}.png`;
+}
+
+function update_rps_status(state: GameState | null): void {
+  if (!status_rps) return;
+  if (!state) {
+    status_rps.textContent = "RPS -- | --";
+    return;
+  }
+  const p1 = state.rpsScore?.player1 ?? 0;
+  const p2 = state.rpsScore?.player2 ?? 0;
+  if (!slot) {
+    status_rps.textContent = `RPS P1 ${p1} | P2 ${p2}`;
+    return;
+  }
+  const enemy_slot = slot === "player1" ? "player2" : "player1";
+  const my_score = state.rpsScore?.[slot] ?? 0;
+  const enemy_score = state.rpsScore?.[enemy_slot] ?? 0;
+  status_rps.textContent = `RPS ${my_score} x ${enemy_score}`;
 }
 
 function emit_local_post(data: RoomPost): void {
@@ -2073,6 +2099,7 @@ function reset_to_lobby_view(): void {
   prematch.style.display = "";
   document.body.classList.add("prematch-open");
   status_turn.textContent = "0";
+  update_rps_status(null);
   update_deadline();
   update_action_controls();
 }
@@ -2359,7 +2386,14 @@ function build_visual_steps(prev_state: GameState, log: EventLog[], viewer_slot:
       steps.push({ kind: "heal", side });
       continue;
     }
-    if (entry.type !== "damage" && entry.type !== "recoil" && entry.type !== "leech_drain") continue;
+    if (
+      entry.type !== "damage" &&
+      entry.type !== "recoil" &&
+      entry.type !== "leech_drain" &&
+      entry.type !== "spikes_trigger"
+    ) {
+      continue;
+    }
     const payload = entry.data as
       | { slot?: PlayerSlot; damage?: number; targetSlot?: PlayerSlot; before?: number; after?: number }
       | undefined;
@@ -2371,6 +2405,8 @@ function build_visual_steps(prev_state: GameState, log: EventLog[], viewer_slot:
       defender_slot = payload.slot;
     } else if (entry.type === "leech_drain") {
       defender_slot = payload.targetSlot ?? (payload.slot === "player1" ? "player2" : "player1");
+    } else if (entry.type === "spikes_trigger") {
+      defender_slot = payload.targetSlot ?? payload.slot;
     } else {
       defender_slot = payload.slot === "player1" ? "player2" : "player1";
     }
@@ -2461,6 +2497,7 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
     steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide)
   );
   latest_state = data.state;
+  update_rps_status(data.state);
   if (!(slot && data.state.pendingSwitch?.[slot])) {
     clear_forced_switch_target();
   }
@@ -2553,6 +2590,7 @@ function handle_post(message: any): void {
       player_meta.textContent = `Slot ${data.slot === "player1" ? "P1" : "P2"}`;
       append_log(`assigned ${data.slot}`);
       append_chat(`${data.name} assigned to ${data.slot === "player1" ? "P1" : "P2"}`);
+      update_rps_status(latest_state);
       render_participants();
       return;
     case "ready_state": {
@@ -2639,6 +2677,7 @@ function handle_post(message: any): void {
       add_spectator(data.name);
       if (status_slot) status_slot.textContent = "spectator";
       player_meta.textContent = "Spectator";
+      update_rps_status(latest_state);
       update_opponent_ui(false, null);
       update_ready_ui();
       render_participants();
@@ -2801,6 +2840,7 @@ render_config();
 update_roster_count();
 update_slots();
 update_action_controls();
+update_rps_status(null);
 render_participants();
 
 on_sync(() => {

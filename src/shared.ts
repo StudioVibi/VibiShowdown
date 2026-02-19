@@ -87,6 +87,9 @@ export type GameState = {
   zeroHpTiebreakPending: boolean;
   zeroHpTiebreakResolved: boolean;
   zeroHpTiebreakTurn: number | null;
+  rpsScore: Record<PlayerSlot, number>;
+  arenaTrapUntilTurn: Record<PlayerSlot, number>;
+  spikesArmedByTarget: Record<PlayerSlot, boolean>;
   players: Record<PlayerSlot, PlayerState>;
   pendingSwitch: Record<PlayerSlot, boolean>;
   pendingWish: Record<PlayerSlot, number | null>;
