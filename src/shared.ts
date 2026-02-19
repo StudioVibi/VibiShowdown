@@ -5,7 +5,7 @@ export type PlayerSlot = "player1" | "player2";
 export const SHARED_HP_START = 200;
 export const TURN_DURATION_MS = 5_000;
 export const BASE_TURN_LIMIT = 12;
-export const EXTRA_TURN_LIMIT = 5;
+export const EXTRA_TURN_LIMIT = 3;
 export const ZERO_HP_TIEBREAKER_HP = 1;
 
 export type MoveId = "none" | "protect" | string;

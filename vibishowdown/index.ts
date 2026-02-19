@@ -281,25 +281,25 @@ function is_lobby_enabled_monster(id: string): boolean {
 function monster_type_description(type: MonsterType): string {
   if (type === "def") return "DEF";
   if (type === "atk") return "ATK";
-  return "SPE";
+  return "BUF";
 }
 
 function update_rps_status(state: GameState | null): void {
   if (!status_rps) return;
   if (!state) {
-    status_rps.textContent = "RPS -- | --";
+    status_rps.textContent = "PTS -- | --";
     return;
   }
   const p1 = state.rpsScore?.player1 ?? 0;
   const p2 = state.rpsScore?.player2 ?? 0;
   if (!slot) {
-    status_rps.textContent = `RPS P1 ${p1} | P2 ${p2}`;
+    status_rps.textContent = `PTS P1 ${p1} | P2 ${p2}`;
     return;
   }
   const enemy_slot = slot === "player1" ? "player2" : "player1";
   const my_score = state.rpsScore?.[slot] ?? 0;
   const enemy_score = state.rpsScore?.[enemy_slot] ?? 0;
-  status_rps.textContent = `RPS ${my_score} x ${enemy_score}`;
+  status_rps.textContent = `PTS ${my_score} x ${enemy_score}`;
 }
 
 function emit_local_post(data: RoomPost): void {

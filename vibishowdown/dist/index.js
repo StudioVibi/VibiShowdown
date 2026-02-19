@@ -2261,7 +2261,7 @@ assert_monster_integrity(MONSTER_ROSTER);
 var SHARED_HP_START = 200;
 var TURN_DURATION_MS = 5000;
 var BASE_TURN_LIMIT = 12;
-var EXTRA_TURN_LIMIT = 5;
+var EXTRA_TURN_LIMIT = 3;
 var ZERO_HP_TIEBREAKER_HP = 1;
 
 // src/engine.ts
@@ -2494,20 +2494,28 @@ function compare_monster_type(left, right) {
   }
   return -1;
 }
-function apply_mindgame_bonus_event(state, log) {
+function action_kind_for_slot(actions, slot) {
+  const action = actions.find((entry) => entry.player === slot);
+  if (!action) {
+    return "none";
+  }
+  return action.type === "switch" ? "switch" : "attack";
+}
+function switch_target_type_for_slot(state, actions, slot) {
+  const action = actions.find((entry) => entry.player === slot);
+  if (!action || action.type !== "switch") {
+    return active_monster(state.players[slot]).type;
+  }
+  const team = state.players[slot].team;
+  if (action.targetIndex < 0 || action.targetIndex >= team.length) {
+    return active_monster(state.players[slot]).type;
+  }
+  return team[action.targetIndex].type;
+}
+function award_mindgame_point(state, log, winner, loser, reason, context) {
   if (!state.rpsScore) {
     state.rpsScore = empty_rps_score();
   }
-  const p1_active = active_monster(state.players.player1);
-  const p2_active = active_monster(state.players.player2);
-  const type_cmp = compare_monster_type(p1_active.type, p2_active.type);
-  if (type_cmp === 0) {
-    return;
-  }
-  const winner = type_cmp > 0 ? "player1" : "player2";
-  const loser = winner === "player1" ? "player2" : "player1";
-  const winner_active = winner === "player1" ? p1_active : p2_active;
-  const loser_active = loser === "player1" ? p1_active : p2_active;
   const player1_before = state.rpsScore.player1 ?? 0;
   const player2_before = state.rpsScore.player2 ?? 0;
   state.rpsScore[winner] = (state.rpsScore[winner] ?? 0) + 1;
@@ -2515,14 +2523,12 @@ function apply_mindgame_bonus_event(state, log) {
   log.push({
     type: "mindgame_bonus_ready",
     turn: state.turn,
-    summary: `${winner} won mindgame (${winner_active.type} > ${loser_active.type})`,
+    summary: `${winner} won mindgame (${reason})`,
     data: {
       winner,
       loser,
-      winnerType: winner_active.type,
-      loserType: loser_active.type,
-      winnerMonster: winner_active.id,
-      loserMonster: loser_active.id
+      reason,
+      ...context
     }
   });
   log.push({
@@ -2537,6 +2543,49 @@ function apply_mindgame_bonus_event(state, log) {
       player2Before: player2_before,
       player2After: state.rpsScore.player2
     }
+  });
+}
+function apply_mindgame_bonus_event(state, log, actions) {
+  const p1_kind = action_kind_for_slot(actions, "player1");
+  const p2_kind = action_kind_for_slot(actions, "player2");
+  if (p1_kind === "none" || p2_kind === "none") {
+    return;
+  }
+  if (p1_kind === "switch" && p2_kind === "switch") {
+    const p1_type2 = switch_target_type_for_slot(state, actions, "player1");
+    const p2_type2 = switch_target_type_for_slot(state, actions, "player2");
+    const type_cmp2 = compare_monster_type(p1_type2, p2_type2);
+    if (type_cmp2 === 0) {
+      return;
+    }
+    const winner2 = type_cmp2 > 0 ? "player1" : "player2";
+    const loser2 = winner2 === "player1" ? "player2" : "player1";
+    award_mindgame_point(state, log, winner2, loser2, "switch_vs_switch", {
+      player1Type: p1_type2,
+      player2Type: p2_type2
+    });
+    return;
+  }
+  if (p1_kind !== p2_kind) {
+    const winner2 = p1_kind === "attack" ? "player1" : "player2";
+    const loser2 = winner2 === "player1" ? "player2" : "player1";
+    award_mindgame_point(state, log, winner2, loser2, "attack_vs_switch", {
+      player1Action: p1_kind,
+      player2Action: p2_kind
+    });
+    return;
+  }
+  const p1_type = active_monster(state.players.player1).type;
+  const p2_type = active_monster(state.players.player2).type;
+  const type_cmp = compare_monster_type(p1_type, p2_type);
+  if (type_cmp === 0) {
+    return;
+  }
+  const winner = type_cmp > 0 ? "player1" : "player2";
+  const loser = winner === "player1" ? "player2" : "player1";
+  award_mindgame_point(state, log, winner, loser, "attack_vs_attack", {
+    player1Type: p1_type,
+    player2Type: p2_type
   });
 }
 function deterministic_hash(input) {
@@ -3853,10 +3902,10 @@ function resolve_turn(state, intents) {
     next.spikesArmedByTarget = empty_spikes_armed_by_target();
   }
   next.pendingSwitch = empty_pending();
-  reset_protect_flags(next);
-  apply_mindgame_bonus_event(next, log);
-  let progress = check_zero_hp_match_result(next, log);
   const actions = build_actions(intents, next);
+  reset_protect_flags(next);
+  apply_mindgame_bonus_event(next, log, actions);
+  let progress = check_zero_hp_match_result(next, log);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
   for (const phase of phases) {
     if (progress !== "continue") {
@@ -4210,25 +4259,25 @@ function monster_type_description(type) {
     return "DEF";
   if (type === "atk")
     return "ATK";
-  return "SPE";
+  return "BUF";
 }
 function update_rps_status(state) {
   if (!status_rps)
     return;
   if (!state) {
-    status_rps.textContent = "RPS -- | --";
+    status_rps.textContent = "PTS -- | --";
     return;
   }
   const p1 = state.rpsScore?.player1 ?? 0;
   const p2 = state.rpsScore?.player2 ?? 0;
   if (!slot) {
-    status_rps.textContent = `RPS P1 ${p1} | P2 ${p2}`;
+    status_rps.textContent = `PTS P1 ${p1} | P2 ${p2}`;
     return;
   }
   const enemy_slot = slot === "player1" ? "player2" : "player1";
   const my_score = state.rpsScore?.[slot] ?? 0;
   const enemy_score = state.rpsScore?.[enemy_slot] ?? 0;
-  status_rps.textContent = `RPS ${my_score} x ${enemy_score}`;
+  status_rps.textContent = `PTS ${my_score} x ${enemy_score}`;
 }
 function emit_local_post(data) {
   handle_post({ data });

@@ -292,20 +292,39 @@ function compare_monster_type(left: MonsterType, right: MonsterType): number {
   return -1;
 }
 
-function apply_mindgame_bonus_event(state: GameState, log: EventLog[]): void {
+type TurnActionKind = "switch" | "attack" | "none";
+
+function action_kind_for_slot(actions: Action[], slot: PlayerSlot): TurnActionKind {
+  const action = actions.find((entry) => entry.player === slot);
+  if (!action) {
+    return "none";
+  }
+  return action.type === "switch" ? "switch" : "attack";
+}
+
+function switch_target_type_for_slot(state: GameState, actions: Action[], slot: PlayerSlot): MonsterType {
+  const action = actions.find((entry) => entry.player === slot);
+  if (!action || action.type !== "switch") {
+    return active_monster(state.players[slot]).type;
+  }
+  const team = state.players[slot].team;
+  if (action.targetIndex < 0 || action.targetIndex >= team.length) {
+    return active_monster(state.players[slot]).type;
+  }
+  return team[action.targetIndex].type;
+}
+
+function award_mindgame_point(
+  state: GameState,
+  log: EventLog[],
+  winner: PlayerSlot,
+  loser: PlayerSlot,
+  reason: "switch_vs_switch" | "attack_vs_switch" | "attack_vs_attack",
+  context: Record<string, unknown>
+): void {
   if (!state.rpsScore) {
     state.rpsScore = empty_rps_score();
   }
-  const p1_active = active_monster(state.players.player1);
-  const p2_active = active_monster(state.players.player2);
-  const type_cmp = compare_monster_type(p1_active.type, p2_active.type);
-  if (type_cmp === 0) {
-    return;
-  }
-  const winner: PlayerSlot = type_cmp > 0 ? "player1" : "player2";
-  const loser: PlayerSlot = winner === "player1" ? "player2" : "player1";
-  const winner_active = winner === "player1" ? p1_active : p2_active;
-  const loser_active = loser === "player1" ? p1_active : p2_active;
   const player1_before = state.rpsScore.player1 ?? 0;
   const player2_before = state.rpsScore.player2 ?? 0;
   state.rpsScore[winner] = (state.rpsScore[winner] ?? 0) + 1;
@@ -313,14 +332,12 @@ function apply_mindgame_bonus_event(state: GameState, log: EventLog[]): void {
   log.push({
     type: "mindgame_bonus_ready",
     turn: state.turn,
-    summary: `${winner} won mindgame (${winner_active.type} > ${loser_active.type})`,
+    summary: `${winner} won mindgame (${reason})`,
     data: {
       winner,
       loser,
-      winnerType: winner_active.type,
-      loserType: loser_active.type,
-      winnerMonster: winner_active.id,
-      loserMonster: loser_active.id
+      reason,
+      ...context
     }
   });
   log.push({
@@ -335,6 +352,54 @@ function apply_mindgame_bonus_event(state: GameState, log: EventLog[]): void {
       player2Before: player2_before,
       player2After: state.rpsScore.player2
     }
+  });
+}
+
+function apply_mindgame_bonus_event(state: GameState, log: EventLog[], actions: Action[]): void {
+  const p1_kind = action_kind_for_slot(actions, "player1");
+  const p2_kind = action_kind_for_slot(actions, "player2");
+
+  if (p1_kind === "none" || p2_kind === "none") {
+    return;
+  }
+
+  if (p1_kind === "switch" && p2_kind === "switch") {
+    const p1_type = switch_target_type_for_slot(state, actions, "player1");
+    const p2_type = switch_target_type_for_slot(state, actions, "player2");
+    const type_cmp = compare_monster_type(p1_type, p2_type);
+    if (type_cmp === 0) {
+      return;
+    }
+    const winner: PlayerSlot = type_cmp > 0 ? "player1" : "player2";
+    const loser: PlayerSlot = winner === "player1" ? "player2" : "player1";
+    award_mindgame_point(state, log, winner, loser, "switch_vs_switch", {
+      player1Type: p1_type,
+      player2Type: p2_type
+    });
+    return;
+  }
+
+  if (p1_kind !== p2_kind) {
+    const winner: PlayerSlot = p1_kind === "attack" ? "player1" : "player2";
+    const loser: PlayerSlot = winner === "player1" ? "player2" : "player1";
+    award_mindgame_point(state, log, winner, loser, "attack_vs_switch", {
+      player1Action: p1_kind,
+      player2Action: p2_kind
+    });
+    return;
+  }
+
+  const p1_type = active_monster(state.players.player1).type;
+  const p2_type = active_monster(state.players.player2).type;
+  const type_cmp = compare_monster_type(p1_type, p2_type);
+  if (type_cmp === 0) {
+    return;
+  }
+  const winner: PlayerSlot = type_cmp > 0 ? "player1" : "player2";
+  const loser: PlayerSlot = winner === "player1" ? "player2" : "player1";
+  award_mindgame_point(state, log, winner, loser, "attack_vs_attack", {
+    player1Type: p1_type,
+    player2Type: p2_type
   });
 }
 
@@ -1884,10 +1949,10 @@ export function resolve_turn(
   }
   next.pendingSwitch = empty_pending();
 
-  reset_protect_flags(next);
-  apply_mindgame_bonus_event(next, log);
-  let progress = check_zero_hp_match_result(next, log);
   const actions = build_actions(intents, next);
+  reset_protect_flags(next);
+  apply_mindgame_bonus_event(next, log, actions);
+  let progress = check_zero_hp_match_result(next, log);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
 
   for (const phase of phases) {
