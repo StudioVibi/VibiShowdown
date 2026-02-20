@@ -2261,8 +2261,6 @@ assert_monster_integrity(MONSTER_ROSTER);
 var SHARED_HP_START = 200;
 var TURN_DURATION_MS = 5000;
 var BASE_TURN_LIMIT = 12;
-var EXTRA_TURN_LIMIT = 3;
-var ZERO_HP_TIEBREAKER_HP = 1;
 
 // src/engine.ts
 var INITIATIVE_DEFAULT = ["speed", "attack", "hp", "defense"];
@@ -2414,10 +2412,6 @@ function clone_state(state) {
     status: state.status,
     winner: state.winner,
     baseTurnLimit: Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1)),
-    extraTurnLimit: Math.max(0, normalize_int(state.extraTurnLimit, EXTRA_TURN_LIMIT, 0)),
-    zeroHpTiebreakPending: !!state.zeroHpTiebreakPending,
-    zeroHpTiebreakResolved: !!state.zeroHpTiebreakResolved,
-    zeroHpTiebreakTurn: typeof state.zeroHpTiebreakTurn === "number" ? normalize_int(state.zeroHpTiebreakTurn, state.turn + 1, 1) : null,
     rpsScore: {
       player1: normalize_int(state.rpsScore?.player1, 0, -99999),
       player2: normalize_int(state.rpsScore?.player2, 0, -99999)
@@ -2715,14 +2709,9 @@ function apply_simultaneous_switch_passives(state, log, switched_this_turn, hp_c
     }
   }
 }
-function clear_zero_hp_tiebreak(state) {
-  state.zeroHpTiebreakPending = false;
-  state.zeroHpTiebreakTurn = null;
-}
 function end_match_with_winner(state, log, winner, summary, data) {
   state.status = "ended";
   state.winner = winner;
-  clear_zero_hp_tiebreak(state);
   log.push({
     type: "match_end",
     turn: state.turn,
@@ -2733,7 +2722,6 @@ function end_match_with_winner(state, log, winner, summary, data) {
 function end_match_draw(state, log, summary, data) {
   state.status = "ended";
   delete state.winner;
-  clear_zero_hp_tiebreak(state);
   log.push({
     type: "match_end",
     turn: state.turn,
@@ -2761,40 +2749,11 @@ function check_zero_hp_match_result(state, log) {
     });
     return "ended";
   }
-  const is_active_tiebreak_turn = state.zeroHpTiebreakPending && state.zeroHpTiebreakTurn === state.turn;
-  if (is_active_tiebreak_turn || state.zeroHpTiebreakResolved) {
-    end_match_draw(state, log, "draw (both sides reached 0 HP in tiebreak)", { player1Hp: p1_hp, player2Hp: p2_hp });
-    return "ended";
-  }
-  state.zeroHpTiebreakPending = true;
-  state.zeroHpTiebreakResolved = true;
-  state.zeroHpTiebreakTurn = state.turn + 1;
-  sync_player_shared_hp(state, "player1", ZERO_HP_TIEBREAKER_HP);
-  sync_player_shared_hp(state, "player2", ZERO_HP_TIEBREAKER_HP);
-  log.push({
-    type: "zero_hp_tiebreak_start",
-    turn: state.turn,
-    summary: "double KO detected: one extra tiebreak turn granted",
-    data: { tiebreakTurn: state.zeroHpTiebreakTurn, resetHp: ZERO_HP_TIEBREAKER_HP }
-  });
-  return "stop_turn";
-}
-function finalize_zero_hp_tiebreak_turn(state, log) {
-  const is_tiebreak_turn = state.zeroHpTiebreakPending && state.zeroHpTiebreakTurn === state.turn;
-  if (!is_tiebreak_turn || state.status === "ended") {
-    return;
-  }
-  const p1_hp = state.players.player1.sharedHp;
-  const p2_hp = state.players.player2.sharedHp;
-  if (p1_hp === p2_hp) {
-    end_match_draw(state, log, "draw (double KO tiebreak ended with equal HP)", { player1Hp: p1_hp, player2Hp: p2_hp });
-    return;
-  }
-  const winner = p1_hp > p2_hp ? "player1" : "player2";
-  end_match_with_winner(state, log, winner, `${winner} wins (double KO tiebreak)`, {
+  end_match_draw(state, log, "draw (both sides reached 0 HP)", {
     player1Hp: p1_hp,
     player2Hp: p2_hp
   });
+  return "ended";
 }
 function compare_initiative(a, b, stats) {
   for (const key of stats) {
@@ -2955,13 +2914,11 @@ function apply_leech_seed_end_turn(state, log, hp_changed) {
   }
 }
 function maybe_end_match_by_turn_limit(state, log) {
-  if (state.status === "ended" || state.zeroHpTiebreakPending) {
+  if (state.status === "ended") {
     return;
   }
   const base_turn_limit = Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1));
-  const extra_turn_limit = Math.max(0, normalize_int(state.extraTurnLimit, EXTRA_TURN_LIMIT, 0));
   state.baseTurnLimit = base_turn_limit;
-  state.extraTurnLimit = extra_turn_limit;
   if (state.turn < base_turn_limit) {
     return;
   }
@@ -2969,34 +2926,13 @@ function maybe_end_match_by_turn_limit(state, log) {
   const p2_hp = state.players.player2.sharedHp;
   if (p1_hp !== p2_hp) {
     const winner = p1_hp > p2_hp ? "player1" : "player2";
-    const overtime_turn2 = Math.max(0, state.turn - base_turn_limit);
-    end_match_with_winner(state, log, winner, overtime_turn2 > 0 ? `${winner} wins (HP diff at overtime turn ${overtime_turn2})` : `${winner} wins (higher shared HP after ${base_turn_limit} turns)`, { player1Hp: p1_hp, player2Hp: p2_hp, overtimeTurn: overtime_turn2 });
+    end_match_with_winner(state, log, winner, `${winner} wins (higher shared HP after ${base_turn_limit} turns)`, { player1Hp: p1_hp, player2Hp: p2_hp });
     return;
   }
-  const overtime_turn = state.turn - base_turn_limit;
-  if (overtime_turn <= 0) {
-    if (extra_turn_limit <= 0) {
-      end_match_draw(state, log, `draw after ${base_turn_limit} turns (equal shared HP)`, {
-        player1Hp: p1_hp,
-        player2Hp: p2_hp
-      });
-      return;
-    }
-    log.push({
-      type: "overtime_start",
-      turn: state.turn,
-      summary: `tie after ${base_turn_limit} turns (${p1_hp} x ${p2_hp}); overtime started (max ${extra_turn_limit})`,
-      data: { player1Hp: p1_hp, player2Hp: p2_hp, maxExtraTurns: extra_turn_limit }
-    });
-    return;
-  }
-  if (overtime_turn >= extra_turn_limit) {
-    end_match_draw(state, log, `draw after ${base_turn_limit + extra_turn_limit} turns (equal shared HP)`, {
-      player1Hp: p1_hp,
-      player2Hp: p2_hp,
-      overtimeTurnsPlayed: overtime_turn
-    });
-  }
+  end_match_draw(state, log, `draw after ${base_turn_limit} turns (equal shared HP)`, {
+    player1Hp: p1_hp,
+    player2Hp: p2_hp
+  });
 }
 function apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending, took_damage_this_turn) {
   const spec = move_spec("focus_punch");
@@ -3844,10 +3780,6 @@ function create_initial_state(teams, names) {
     turn: 0,
     status: "setup",
     baseTurnLimit: BASE_TURN_LIMIT,
-    extraTurnLimit: EXTRA_TURN_LIMIT,
-    zeroHpTiebreakPending: false,
-    zeroHpTiebreakResolved: false,
-    zeroHpTiebreakTurn: null,
     rpsScore: empty_rps_score(),
     arenaTrapUntilTurn: empty_arena_trap_until_turn(),
     spikesArmedByTarget: empty_spikes_armed_by_target(),
@@ -3873,7 +3805,6 @@ function resolve_turn(state, intents) {
   const switched_this_turn = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
   next.baseTurnLimit = Math.max(1, normalize_int(next.baseTurnLimit, BASE_TURN_LIMIT, 1));
-  next.extraTurnLimit = Math.max(0, normalize_int(next.extraTurnLimit, EXTRA_TURN_LIMIT, 0));
   if (next.status !== "running") {
     return { state: next, log };
   }
@@ -3969,9 +3900,6 @@ function resolve_turn(state, intents) {
   }
   decrement_cooldowns(next);
   reset_protect_flags(next);
-  if (next.status === "running") {
-    finalize_zero_hp_tiebreak_turn(next, log);
-  }
   if (next.status === "running") {
     maybe_end_match_by_turn_limit(next, log);
   }
@@ -6122,12 +6050,6 @@ function handle_turn_start(data) {
   if (current_turn === 1) {
     room_game_count += 1;
     append_match_start_marker(room_game_count);
-  }
-  if (current_turn === BASE_TURN_LIMIT + 1) {
-    append_log(`overtime started (max ${EXTRA_TURN_LIMIT} turns)`);
-  }
-  if (latest_state?.zeroHpTiebreakPending && latest_state.zeroHpTiebreakTurn === current_turn) {
-    append_log("double KO tiebreak: final extra turn");
   }
   append_turn_marker(current_turn);
   if (!has_pending_switch()) {

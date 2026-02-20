@@ -5,8 +5,6 @@ export type PlayerSlot = "player1" | "player2";
 export const SHARED_HP_START = 200;
 export const TURN_DURATION_MS = 5_000;
 export const BASE_TURN_LIMIT = 12;
-export const EXTRA_TURN_LIMIT = 3;
-export const ZERO_HP_TIEBREAKER_HP = 1;
 
 export type MoveId = "none" | "protect" | string;
 export type PassiveId = "none" | "leftovers" | "choice_band" | "regen_5pct" | string;
@@ -83,10 +81,6 @@ export type GameState = {
   status: "setup" | "running" | "ended";
   winner?: PlayerSlot;
   baseTurnLimit: number;
-  extraTurnLimit: number;
-  zeroHpTiebreakPending: boolean;
-  zeroHpTiebreakResolved: boolean;
-  zeroHpTiebreakTurn: number | null;
   rpsScore: Record<PlayerSlot, number>;
   arenaTrapUntilTurn: Record<PlayerSlot, number>;
   spikesArmedByTarget: Record<PlayerSlot, boolean>;

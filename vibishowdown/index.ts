@@ -8,7 +8,6 @@ import type { MonsterCatalogEntry } from "../src/data/index.ts";
 import { apply_forced_switch, create_initial_state, resolve_turn, validate_intent } from "../src/engine.ts";
 import {
   BASE_TURN_LIMIT,
-  EXTRA_TURN_LIMIT,
   TURN_DURATION_MS
 } from "../src/shared.ts";
 import type {
@@ -2356,12 +2355,6 @@ function handle_turn_start(data: { turn: number; deadline_at: number }): void {
   if (current_turn === 1) {
     room_game_count += 1;
     append_match_start_marker(room_game_count);
-  }
-  if (current_turn === BASE_TURN_LIMIT + 1) {
-    append_log(`overtime started (max ${EXTRA_TURN_LIMIT} turns)`);
-  }
-  if (latest_state?.zeroHpTiebreakPending && latest_state.zeroHpTiebreakTurn === current_turn) {
-    append_log("double KO tiebreak: final extra turn");
   }
   append_turn_marker(current_turn);
   if (!has_pending_switch()) {
