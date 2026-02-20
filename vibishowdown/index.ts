@@ -1940,12 +1940,10 @@ function toggle_selection(id: string): void {
 function render_roster(): void {
   const list = document.getElementById("roster-list")!;
   list.innerHTML = "";
-  for (const entry of roster) {
+  for (const entry of roster.filter((mon) => is_lobby_enabled_monster(mon.id))) {
     const card = document.createElement("div");
-    const is_enabled = is_lobby_enabled_monster(entry.id);
     const is_selected = selected.includes(entry.id);
-    const is_disabled =
-      !is_enabled || (!is_selected && selected.length >= 3) || (is_ready && !match_started);
+    const is_disabled = (!is_selected && selected.length >= 3) || (is_ready && !match_started);
     const tooltip = tooltip_from_config(entry.id);
     card.className = `roster-card${is_selected ? " active" : ""}${is_disabled ? " disabled" : ""}`;
     set_monster_tooltip(card, tooltip);
@@ -1955,7 +1953,7 @@ function render_roster(): void {
       </div>
       <div>
         <h4>${entry.name}</h4>
-        <p>${monster_type_description(entry.type)}${is_enabled ? "" : " • desativado"}</p>
+        <p>${monster_type_description(entry.type)}</p>
       </div>
     `;
     card.addEventListener("click", () => {

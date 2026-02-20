@@ -116,7 +116,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     name: "Kairus",
     role: "Absol Template",
     type: "atk",
-    stats: { level: 100, maxHp: 180, attack: 521, defense: 230, speed: 292 },
+    stats: { level: 100, maxHp: 180, attack: 521, defense: 230, speed: 430 },
     possibleMoves: ["mega_punch", "bounce_kick", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["mega_punch", "bounce_kick", "none"],

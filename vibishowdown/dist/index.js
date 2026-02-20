@@ -2107,7 +2107,7 @@ var MONSTER_ROSTER = [
     name: "Kairus",
     role: "Absol Template",
     type: "atk",
-    stats: { level: 100, maxHp: 180, attack: 521, defense: 230, speed: 292 },
+    stats: { level: 100, maxHp: 180, attack: 521, defense: 230, speed: 430 },
     possibleMoves: ["mega_punch", "bounce_kick", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["mega_punch", "bounce_kick", "none"],
@@ -5674,11 +5674,10 @@ function toggle_selection(id) {
 function render_roster() {
   const list = document.getElementById("roster-list");
   list.innerHTML = "";
-  for (const entry of MONSTER_ROSTER) {
+  for (const entry of MONSTER_ROSTER.filter((mon) => is_lobby_enabled_monster(mon.id))) {
     const card = document.createElement("div");
-    const is_enabled = is_lobby_enabled_monster(entry.id);
     const is_selected = selected.includes(entry.id);
-    const is_disabled = !is_enabled || !is_selected && selected.length >= 3 || is_ready && !match_started;
+    const is_disabled = !is_selected && selected.length >= 3 || is_ready && !match_started;
     const tooltip = tooltip_from_config(entry.id);
     card.className = `roster-card${is_selected ? " active" : ""}${is_disabled ? " disabled" : ""}`;
     set_monster_tooltip(card, tooltip);
@@ -5688,7 +5687,7 @@ function render_roster() {
       </div>
       <div>
         <h4>${entry.name}</h4>
-        <p>${monster_type_description(entry.type)}${is_enabled ? "" : " • desativado"}</p>
+        <p>${monster_type_description(entry.type)}</p>
       </div>
     `;
     card.addEventListener("click", () => {
