@@ -2608,7 +2608,7 @@ function apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_t
   const took_damage_ref = took_damage_this_turn ?? { player1: false, player2: false };
   const target_player = state.players[slot];
   const target = active_monster(target_player);
-  const damage_attempt = Math.max(0, mul_div_round(target_player.sharedHpMax, 1, 10));
+  const damage_attempt = Math.max(0, mul_div_round(target_player.sharedHpMax, 1, 20));
   const result = apply_damage_with_endure(state, log, "switch", slot, target, damage_attempt, hp_changed_ref, took_damage_ref);
   log.push({
     type: "spikes_trigger",
