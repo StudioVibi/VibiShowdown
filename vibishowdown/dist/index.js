@@ -1873,7 +1873,7 @@ var MOVE_CATALOG = [
     phaseId: "attack_01",
     attackMultiplier100: 100,
     damageType: "flat",
-    flatDamage: 10
+    flatDamage: 5
   },
   { id: "meditate", label: "Meditate", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 20 },
@@ -2259,7 +2259,7 @@ assert_monster_integrity(MONSTER_ROSTER);
 
 // src/shared.ts
 var SHARED_HP_START = 200;
-var TURN_DURATION_MS = 20000;
+var TURN_DURATION_MS = 50000;
 var BASE_TURN_LIMIT = 12;
 
 // src/engine.ts
@@ -2286,6 +2286,39 @@ var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "leech_life"
 ]);
 var INITIATIVE_WITHOUT_SPEED = ["attack", "hp", "defense"];
+var STAT_STAGE_MIN = -6;
+var STAT_STAGE_MAX = 6;
+function clamp_stat_stage(value) {
+  return Math.max(STAT_STAGE_MIN, Math.min(STAT_STAGE_MAX, value));
+}
+function normalize_stat_stage(value, fallback) {
+  const raw = typeof value === "number" ? value : fallback;
+  return clamp_stat_stage(normalize_int(raw, fallback, STAT_STAGE_MIN));
+}
+function stage_ratio(stage) {
+  const normalized = clamp_stat_stage(stage);
+  if (normalized >= 0) {
+    return { numerator: 2 + normalized, denominator: 2 };
+  }
+  return { numerator: 2, denominator: 2 - normalized };
+}
+function infer_stage_from_attack(current_attack, base_attack) {
+  if (!Number.isFinite(current_attack) || !Number.isFinite(base_attack) || base_attack <= 0) {
+    return 0;
+  }
+  const inferred = Math.round(current_attack * 2 / base_attack - 2);
+  return clamp_stat_stage(inferred);
+}
+function attack_from_stage(base_attack, stage) {
+  const ratio = stage_ratio(stage);
+  return Math.max(0, mul_div_round(base_attack, ratio.numerator, ratio.denominator));
+}
+function set_attack_stage(monster, next_stage) {
+  const normalized = clamp_stat_stage(next_stage);
+  monster.attackStage = normalized;
+  monster.attack = attack_from_stage(monster.baseAttack, normalized);
+  return normalized;
+}
 function compare_action_initiative(state, phase, a, b) {
   const a_active = active_monster(state.players[a.player]);
   const b_active = active_monster(state.players[b.player]);
@@ -2330,6 +2363,7 @@ function clone_monster(monster) {
   const base_attack = Number.isFinite(monster.baseAttack) ? monster.baseAttack : monster.attack;
   const base_defense = Number.isFinite(monster.baseDefense) ? monster.baseDefense : monster.defense;
   const base_speed = Number.isFinite(monster.baseSpeed) ? monster.baseSpeed : monster.speed;
+  const attack_stage = normalize_stat_stage(monster.attackStage, infer_stage_from_attack(monster.attack, base_attack));
   return {
     id: monster.id,
     name: monster.name,
@@ -2340,7 +2374,8 @@ function clone_monster(monster) {
     baseAttack: base_attack,
     baseDefense: base_defense,
     baseSpeed: base_speed,
-    attack: monster.attack,
+    attack: attack_from_stage(base_attack, attack_stage),
+    attackStage: attack_stage,
     defense: monster.defense,
     speed: monster.speed,
     agilityBoostActive: !!monster.agilityBoostActive,
@@ -2581,23 +2616,6 @@ function apply_mindgame_bonus_event(state, log, actions) {
     player1Type: p1_type,
     player2Type: p2_type
   });
-}
-function deterministic_hash(input) {
-  let hash = 0;
-  for (let i = 0;i < input.length; i++) {
-    hash = hash * 31 + input.charCodeAt(i) >>> 0;
-  }
-  return hash >>> 0;
-}
-function deterministic_switch_candidate_index(state, source_slot, target_slot, candidates) {
-  if (candidates.length <= 1) {
-    return 0;
-  }
-  const source = active_monster(state.players[source_slot]);
-  const target = active_monster(state.players[target_slot]);
-  const seed_input = `${state.turn}|${source_slot}|${target_slot}|${source.id}|${target.id}|${state.players[target_slot].activeIndex}`;
-  const seed = deterministic_hash(seed_input);
-  return seed % candidates.length;
 }
 function apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn) {
   if (!(state.spikesArmedByTarget?.[slot] ?? false)) {
@@ -3191,7 +3209,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
     });
   }
 }
-function apply_move(state, log, player_slot, move_id, move_index, hp_changed, focus_punch_pending, took_damage_this_turn) {
+function apply_move(state, log, player_slot, move_id, move_index, self_switch_target_index, hp_changed, focus_punch_pending, took_damage_this_turn) {
   const player = state.players[player_slot];
   const opponent = state.players[other_slot(player_slot)];
   const attacker = active_monster(player);
@@ -3365,21 +3383,41 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     return;
   }
   if (spec.id === "meditate") {
+    const before_stage = attacker.attackStage;
     const before_attack = attacker.attack;
-    const after_attack = Math.max(0, mul_div_round(before_attack, 2, 1));
-    attacker.attack = after_attack;
+    const after_stage = set_attack_stage(attacker, before_stage + 2);
+    const after_attack = attacker.attack;
+    const ratio = stage_ratio(after_stage);
     log.push({
       type: "stat_mod",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `${player_slot} used Meditate on ${attacker.name} (ATK ${before_attack} -> ${after_attack})`,
+      summary: `${player_slot} used Meditate on ${attacker.name} (ATK ${before_attack} -> ${after_attack}, stage ${before_stage} -> ${after_stage})`,
       data: {
         slot: player_slot,
         target: attacker.id,
         stat: "attack",
-        multiplier: 2,
+        stageBefore: before_stage,
+        stageAfter: after_stage,
+        multiplierNumerator: ratio.numerator,
+        multiplierDenominator: ratio.denominator,
         before: before_attack,
         after: after_attack
+      }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Meditate: ATK stage ${before_stage} -> ${after_stage} (x${ratio.numerator}/${ratio.denominator})`,
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        target: attacker.id,
+        stageBefore: before_stage,
+        stageAfter: after_stage,
+        attackBefore: before_attack,
+        attackAfter: after_attack
       }
     });
     return;
@@ -3396,12 +3434,13 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
       });
       return;
     }
+    const before_stage = attacker.attackStage;
     const before_attack = attacker.attack;
     const hp_cost = mul_div_floor(before_hp, 1, 2);
     const after_hp = Math.max(0, before_hp - hp_cost);
-    const after_attack = Math.max(0, mul_div_round(before_attack, 4, 1));
     sync_player_shared_hp(state, player_slot, after_hp);
-    attacker.attack = after_attack;
+    const after_stage = set_attack_stage(attacker, STAT_STAGE_MAX);
+    const after_attack = attacker.attack;
     attacker.bellyDrumActive = true;
     const hp_spent = Math.max(0, before_hp - after_hp);
     if (hp_spent > 0) {
@@ -3423,7 +3462,8 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
         slot: player_slot,
         target: attacker.id,
         stat: "attack",
-        multiplier: 4,
+        stageBefore: before_stage,
+        stageAfter: after_stage,
         before: before_attack,
         after: after_attack
       }
@@ -3432,7 +3472,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Belly Drum: user paga floor(HP atual/2) (${before_hp} -> ${after_hp}); ATK x4 (${before_attack} -> ${after_attack})`,
+      summary: `Belly Drum: user paga floor(HP atual/2) (${before_hp} -> ${after_hp}); ATK stage ${before_stage} -> ${after_stage} (${before_attack} -> ${after_attack})`,
       data: {
         move: spec.id,
         slot: player_slot,
@@ -3441,6 +3481,8 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
         hpAfter: after_hp,
         hpCost: hp_cost,
         hpCostBasedOn: "currentHp",
+        stageBefore: before_stage,
+        stageAfter: after_stage,
         attackBefore: before_attack,
         attackAfter: after_attack
       }
@@ -3462,28 +3504,24 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     if (state.players[other_slot(player_slot)].sharedHp <= 0) {
       return;
     }
-    const target_slot = other_slot(player_slot);
-    const target_player = state.players[target_slot];
-    const choices = target_player.team.map((_, index) => index).filter((index) => index !== target_player.activeIndex && is_alive(target_player.team[index]));
-    if (choices.length === 0) {
+    if (!Number.isInteger(self_switch_target_index)) {
       log.push({
-        type: "forced_random_switch",
+        type: "move_detail",
         turn: state.turn,
         phase: spec.phaseId,
-        summary: `Bounce Kick dealt damage but ${target_slot} had no available random switch`,
-        data: { slot: player_slot, targetSlot: target_slot, move: spec.id, switched: false }
+        summary: "Bounce Kick had no self-switch target and only dealt damage",
+        data: { move: spec.id, slot: player_slot }
       });
       return;
     }
-    const random_idx = deterministic_switch_candidate_index(state, player_slot, target_slot, choices);
-    const target_index = choices[random_idx];
-    const switched = apply_switch(state, log, target_slot, target_index, hp_changed, took_damage_this_turn);
+    const target_index = Number(self_switch_target_index);
+    const switched = apply_switch(state, log, player_slot, target_index, hp_changed, took_damage_this_turn);
     log.push({
-      type: "forced_random_switch",
+      type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: switched ? `Bounce Kick forced random switch on ${target_slot}` : `Bounce Kick random switch on ${target_slot} failed`,
-      data: { slot: player_slot, targetSlot: target_slot, move: spec.id, targetIndex: target_index, switched }
+      summary: switched ? `Bounce Kick switched ${player_slot} to slot ${target_index}` : `Bounce Kick failed to switch ${player_slot} to slot ${target_index}`,
+      data: { slot: player_slot, move: spec.id, targetIndex: target_index, switched }
     });
     return;
   }
@@ -3656,6 +3694,7 @@ function apply_switch(state, log, player_slot, targetIndex, hp_changed, took_dam
   }
   const outgoing = player.team[activeIndex];
   outgoing.attack = outgoing.baseAttack;
+  outgoing.attackStage = 0;
   outgoing.defense = outgoing.baseDefense;
   outgoing.speed = outgoing.baseSpeed;
   outgoing.agilityBoostActive = false;
@@ -3693,7 +3732,8 @@ function build_actions(intents, state) {
         type: "move",
         phase: spec.phaseId,
         moveId,
-        moveIndex: intent.moveIndex
+        moveIndex: intent.moveIndex,
+        selfSwitchTargetIndex: intent.selfSwitchTargetIndex
       });
     }
   }
@@ -3750,6 +3790,7 @@ function create_initial_state(teams, names) {
         baseDefense: final_stats.def,
         baseSpeed: final_stats.spe,
         attack: final_stats.atk,
+        attackStage: 0,
         defense: final_stats.def,
         speed: final_stats.spe,
         agilityBoostActive: false,
@@ -3883,7 +3924,7 @@ function resolve_turn(state, intents) {
           }
         }
       } else {
-        apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
+        apply_move(next, log, action.player, action.moveId, action.moveIndex, action.selfSwitchTargetIndex, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
       }
       progress = check_zero_hp_match_result(next, log);
       if (progress !== "continue") {
@@ -3924,6 +3965,7 @@ function apply_forced_switch(state, slot, targetIndex) {
   const from = player.activeIndex;
   const outgoing = player.team[from];
   outgoing.attack = outgoing.baseAttack;
+  outgoing.attackStage = 0;
   outgoing.defense = outgoing.baseDefense;
   outgoing.speed = outgoing.baseSpeed;
   outgoing.agilityBoostActive = false;
@@ -3986,6 +4028,21 @@ function validate_intent(state, slot, intent) {
   }
   if (moveId === "endure" && guard_cooldown > 0) {
     return "endure on cooldown";
+  }
+  if (moveId === "bounce_kick") {
+    if (!Number.isInteger(intent.selfSwitchTargetIndex)) {
+      return "bounce kick requires switch target";
+    }
+    const target_index = Number(intent.selfSwitchTargetIndex);
+    if (target_index < 0 || target_index >= player.team.length) {
+      return "invalid bounce kick switch target";
+    }
+    if (target_index === player.activeIndex) {
+      return "bounce kick target already active";
+    }
+    if (!is_alive(player.team[target_index])) {
+      return "bounce kick target fainted";
+    }
   }
   return null;
 }
@@ -4169,6 +4226,8 @@ var room_feed_started = false;
 var chat_ready = false;
 var forced_switch_target_index = null;
 var forced_switch_target_turn = 0;
+var switch_modal_mode = "intent";
+var bounce_kick_move_index = null;
 var room_game_count = 0;
 var ICON_ALIASES = {
   armoth: "panda",
@@ -4377,6 +4436,19 @@ function relay_default_forced_switch_target(state, slot_id) {
   }
   return null;
 }
+function relay_default_bounce_switch_target(state, slot_id) {
+  const player = state.players[slot_id];
+  for (let index = 0;index < player.team.length; index++) {
+    if (index === player.activeIndex) {
+      continue;
+    }
+    if (player.team[index].hp <= 0) {
+      continue;
+    }
+    return index;
+  }
+  return null;
+}
 function relay_default_intent(state, slot_id) {
   const player = state.players[slot_id];
   const active = player.team[player.activeIndex];
@@ -4388,12 +4460,24 @@ function relay_default_intent(state, slot_id) {
     }
   }
   for (let index = 0;index < active.chosenMoves.length; index++) {
-    const candidate = { action: "use_move", moveIndex: index };
+    const move_id = active.chosenMoves[index] ?? "none";
+    const bounce_target = move_id === "bounce_kick" ? relay_default_bounce_switch_target(state, slot_id) : null;
+    const candidate = {
+      action: "use_move",
+      moveIndex: index,
+      ...typeof bounce_target === "number" ? { selfSwitchTargetIndex: bounce_target } : {}
+    };
     if (!validate_intent(state, slot_id, candidate)) {
       return candidate;
     }
   }
-  return { action: "use_move", moveIndex: 0 };
+  const first_move_id = active.chosenMoves[0] ?? "none";
+  const fallback_bounce_target = first_move_id === "bounce_kick" ? relay_default_bounce_switch_target(state, slot_id) : null;
+  return {
+    action: "use_move",
+    moveIndex: 0,
+    ...typeof fallback_bounce_target === "number" ? { selfSwitchTargetIndex: fallback_bounce_target } : {}
+  };
 }
 function relay_try_resolve_turn(trigger) {
   if (!relay_state || relay_ended) {
@@ -5754,12 +5838,15 @@ function update_action_controls() {
   const config = get_config(active_id);
   let guard_on_cooldown = false;
   let active_moves = config.moves;
+  let bounce_has_switch_target = true;
   if (latest_state && slot) {
     const player_state = latest_state.players[slot];
     const fallback_active = player_state.team[player_state.activeIndex];
+    const preview_active_index = pending_switch && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number" ? forced_switch_target_index : player_state.activeIndex;
     const preview_active = pending_switch && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number" ? player_state.team[forced_switch_target_index] ?? fallback_active : fallback_active;
     guard_on_cooldown = Math.max(preview_active.protectCooldownTurns, preview_active.endureCooldownTurns) > 0;
     active_moves = preview_active.chosenMoves;
+    bounce_has_switch_target = player_state.team.some((mon, index) => index !== preview_active_index && mon.hp > 0);
   }
   move_buttons.forEach((btn, index) => {
     const move = active_moves[index] ?? "none";
@@ -5769,6 +5856,9 @@ function update_action_controls() {
       btn.disabled = true;
     } else if (move === "endure" && guard_on_cooldown) {
       btn.textContent = `${index + 1}. Endure (cooldown)`;
+      btn.disabled = true;
+    } else if (move === "bounce_kick" && !bounce_has_switch_target) {
+      btn.textContent = `${index + 1}. ${label} (no switch target)`;
       btn.disabled = true;
     } else {
       btn.textContent = `${index + 1}. ${label}`;
@@ -5800,6 +5890,27 @@ function clear_forced_switch_target() {
 }
 function has_forced_switch_target_for_current_turn() {
   return has_pending_switch() && typeof forced_switch_target_index === "number" && forced_switch_target_turn === current_turn;
+}
+function current_active_monster_for_intent() {
+  if (!latest_state || !slot) {
+    return null;
+  }
+  const player_state = latest_state.players[slot];
+  const fallback_active = player_state.team[player_state.activeIndex] ?? null;
+  if (!fallback_active) {
+    return null;
+  }
+  if (has_pending_switch() && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number") {
+    return player_state.team[forced_switch_target_index] ?? fallback_active;
+  }
+  return fallback_active;
+}
+function active_move_id_for_index(move_index) {
+  const active = current_active_monster_for_intent();
+  if (!active) {
+    return null;
+  }
+  return active.chosenMoves[move_index] ?? null;
 }
 function post_turn_intent(intent) {
   if (!can_send_intent()) {
@@ -5839,6 +5950,14 @@ function can_send_intent() {
   return true;
 }
 function send_move_intent(moveIndex) {
+  const move_id = active_move_id_for_index(moveIndex);
+  if (move_id === "bounce_kick") {
+    open_switch_modal("bounce_kick", moveIndex);
+    if (switch_modal.classList.contains("open")) {
+      append_log("Bounce Kick: choose your replacement monster");
+    }
+    return;
+  }
   if (!post_turn_intent({ action: "use_move", moveIndex })) {
     return;
   }
@@ -5847,6 +5966,21 @@ function send_move_intent(moveIndex) {
   selected_intent_turn = current_turn;
   update_action_controls();
   append_log(was_selected ? "intent updated" : "intent sent");
+}
+function send_bounce_kick_intent(moveIndex, selfSwitchTargetIndex) {
+  const intent = {
+    action: "use_move",
+    moveIndex,
+    selfSwitchTargetIndex
+  };
+  if (!post_turn_intent(intent)) {
+    return;
+  }
+  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
+  selected_intent = intent;
+  selected_intent_turn = current_turn;
+  update_action_controls();
+  append_log(was_selected ? `intent updated (Bounce Kick -> switch ${selfSwitchTargetIndex})` : `intent sent (Bounce Kick -> switch ${selfSwitchTargetIndex})`);
 }
 function send_switch_intent(targetIndex) {
   if (has_pending_switch()) {
@@ -5884,17 +6018,29 @@ function send_surrender() {
   try_post({ $: "surrender", player_id });
 }
 function close_switch_modal() {
+  switch_modal_mode = "intent";
+  bounce_kick_move_index = null;
   switch_modal.classList.remove("open");
 }
-function open_switch_modal(mode = "intent") {
+function open_switch_modal(mode = "intent", move_index) {
   if (!latest_state || !slot)
     return;
-  if (mode === "intent" && !can_send_intent())
+  if ((mode === "intent" || mode === "bounce_kick") && !can_send_intent())
     return;
+  if (mode === "bounce_kick") {
+    if (!Number.isInteger(move_index)) {
+      append_log("Bounce Kick unavailable: missing move index");
+      return;
+    }
+    bounce_kick_move_index = move_index;
+  } else {
+    bounce_kick_move_index = null;
+  }
+  switch_modal_mode = mode;
   switch_options.innerHTML = "";
   const player = latest_state.players[slot];
   const active_index = player.activeIndex;
-  const options = player.team.map((mon, index) => ({ mon, index })).filter((entry) => entry.index !== active_index);
+  const options = player.team.map((mon, index) => ({ mon, index })).filter((entry) => entry.index !== active_index && entry.mon.hp > 0);
   if (options.length === 0) {
     const msg = document.createElement("div");
     msg.textContent = "No available swaps";
@@ -5907,6 +6053,15 @@ function open_switch_modal(mode = "intent") {
       button.disabled = false;
       button.textContent = `${entry.mon.name}`;
       button.addEventListener("click", () => {
+        if (switch_modal_mode === "bounce_kick") {
+          if (!Number.isInteger(bounce_kick_move_index)) {
+            append_log("Bounce Kick unavailable: missing move index");
+            return;
+          }
+          send_bounce_kick_intent(bounce_kick_move_index, entry.index);
+          close_switch_modal();
+          return;
+        }
         if (mode === "intent") {
           send_switch_intent(entry.index);
           return;

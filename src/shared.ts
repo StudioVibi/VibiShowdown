@@ -3,7 +3,7 @@ export type RoomId = string;
 export type PlayerSlot = "player1" | "player2";
 
 export const SHARED_HP_START = 200;
-export const TURN_DURATION_MS = 20_000;
+export const TURN_DURATION_MS = 50_000;
 export const BASE_TURN_LIMIT = 12;
 
 export type MoveId = "none" | "protect" | string;
@@ -50,6 +50,7 @@ export type MonsterState = {
   baseDefense: number;
   baseSpeed: number;
   attack: number;
+  attackStage: number;
   defense: number;
   speed: number;
   agilityBoostActive: boolean;
@@ -94,7 +95,7 @@ export type GameState = {
 
 export type PlayerIntent =
   | { action: "switch"; targetIndex: number }
-  | { action: "use_move"; moveIndex: number };
+  | { action: "use_move"; moveIndex: number; selfSwitchTargetIndex?: number };
 
 export type EventLog = {
   type: string;

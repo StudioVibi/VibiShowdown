@@ -59,6 +59,8 @@ type MonsterTooltipPayload = {
   base: { maxHp: number; attack: number; defense: number; speed: number };
 };
 
+type SwitchModalMode = "intent" | "forced" | "bounce_kick";
+
 const LOBBY_MOVE_SLOTS = 3;
 const STARTER_MONSTER_IDS = new Set<string>(["armoth", "kairus", "farien"]);
 
@@ -260,6 +262,8 @@ let chat_ready = false;
 
 let forced_switch_target_index: number | null = null;
 let forced_switch_target_turn = 0;
+let switch_modal_mode: SwitchModalMode = "intent";
+let bounce_kick_move_index: number | null = null;
 let room_game_count = 0;
 
 const ICON_ALIASES: Record<string, string> = {
@@ -495,6 +499,20 @@ function relay_default_forced_switch_target(state: GameState, slot_id: PlayerSlo
   return null;
 }
 
+function relay_default_bounce_switch_target(state: GameState, slot_id: PlayerSlot): number | null {
+  const player = state.players[slot_id];
+  for (let index = 0; index < player.team.length; index++) {
+    if (index === player.activeIndex) {
+      continue;
+    }
+    if (player.team[index].hp <= 0) {
+      continue;
+    }
+    return index;
+  }
+  return null;
+}
+
 function relay_default_intent(state: GameState, slot_id: PlayerSlot): PlayerIntent {
   const player = state.players[slot_id];
   const active = player.team[player.activeIndex];
@@ -506,12 +524,28 @@ function relay_default_intent(state: GameState, slot_id: PlayerSlot): PlayerInte
     }
   }
   for (let index = 0; index < active.chosenMoves.length; index++) {
-    const candidate: PlayerIntent = { action: "use_move", moveIndex: index };
+    const move_id = active.chosenMoves[index] ?? "none";
+    const bounce_target =
+      move_id === "bounce_kick" ? relay_default_bounce_switch_target(state, slot_id) : null;
+    const candidate: PlayerIntent = {
+      action: "use_move",
+      moveIndex: index,
+      ...(typeof bounce_target === "number" ? { selfSwitchTargetIndex: bounce_target } : {})
+    };
     if (!validate_intent(state, slot_id, candidate)) {
       return candidate;
     }
   }
-  return { action: "use_move", moveIndex: 0 };
+  const first_move_id = active.chosenMoves[0] ?? "none";
+  const fallback_bounce_target =
+    first_move_id === "bounce_kick" ? relay_default_bounce_switch_target(state, slot_id) : null;
+  return {
+    action: "use_move",
+    moveIndex: 0,
+    ...(typeof fallback_bounce_target === "number"
+      ? { selfSwitchTargetIndex: fallback_bounce_target }
+      : {})
+  };
 }
 
 function relay_try_resolve_turn(trigger: "intent" | "timeout"): void {
@@ -2030,15 +2064,21 @@ function update_action_controls(): void {
   const config = get_config(active_id);
   let guard_on_cooldown = false;
   let active_moves = config.moves;
+  let bounce_has_switch_target = true;
   if (latest_state && slot) {
     const player_state = latest_state.players[slot];
     const fallback_active = player_state.team[player_state.activeIndex];
+    const preview_active_index =
+      pending_switch && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number"
+        ? forced_switch_target_index
+        : player_state.activeIndex;
     const preview_active =
       pending_switch && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number"
         ? player_state.team[forced_switch_target_index] ?? fallback_active
         : fallback_active;
     guard_on_cooldown = Math.max(preview_active.protectCooldownTurns, preview_active.endureCooldownTurns) > 0;
     active_moves = preview_active.chosenMoves;
+    bounce_has_switch_target = player_state.team.some((mon, index) => index !== preview_active_index && mon.hp > 0);
   }
   move_buttons.forEach((btn, index) => {
     const move = active_moves[index] ?? "none";
@@ -2048,6 +2088,9 @@ function update_action_controls(): void {
       btn.disabled = true;
     } else if (move === "endure" && guard_on_cooldown) {
       btn.textContent = `${index + 1}. Endure (cooldown)`;
+      btn.disabled = true;
+    } else if (move === "bounce_kick" && !bounce_has_switch_target) {
+      btn.textContent = `${index + 1}. ${label} (no switch target)`;
       btn.disabled = true;
     } else {
       btn.textContent = `${index + 1}. ${label}`;
@@ -2093,6 +2136,29 @@ function has_forced_switch_target_for_current_turn(): boolean {
   );
 }
 
+function current_active_monster_for_intent(): MonsterState | null {
+  if (!latest_state || !slot) {
+    return null;
+  }
+  const player_state = latest_state.players[slot];
+  const fallback_active = player_state.team[player_state.activeIndex] ?? null;
+  if (!fallback_active) {
+    return null;
+  }
+  if (has_pending_switch() && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number") {
+    return player_state.team[forced_switch_target_index] ?? fallback_active;
+  }
+  return fallback_active;
+}
+
+function active_move_id_for_index(move_index: number): string | null {
+  const active = current_active_monster_for_intent();
+  if (!active) {
+    return null;
+  }
+  return active.chosenMoves[move_index] ?? null;
+}
+
 function post_turn_intent(intent: PlayerIntent): boolean {
   if (!can_send_intent()) {
     return false;
@@ -2133,6 +2199,14 @@ function can_send_intent(): boolean {
 }
 
 function send_move_intent(moveIndex: number): void {
+  const move_id = active_move_id_for_index(moveIndex);
+  if (move_id === "bounce_kick") {
+    open_switch_modal("bounce_kick", moveIndex);
+    if (switch_modal.classList.contains("open")) {
+      append_log("Bounce Kick: choose your replacement monster");
+    }
+    return;
+  }
   if (!post_turn_intent({ action: "use_move", moveIndex })) {
     return;
   }
@@ -2141,6 +2215,26 @@ function send_move_intent(moveIndex: number): void {
   selected_intent_turn = current_turn;
   update_action_controls();
   append_log(was_selected ? "intent updated" : "intent sent");
+}
+
+function send_bounce_kick_intent(moveIndex: number, selfSwitchTargetIndex: number): void {
+  const intent: PlayerIntent = {
+    action: "use_move",
+    moveIndex,
+    selfSwitchTargetIndex
+  };
+  if (!post_turn_intent(intent)) {
+    return;
+  }
+  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
+  selected_intent = intent;
+  selected_intent_turn = current_turn;
+  update_action_controls();
+  append_log(
+    was_selected
+      ? `intent updated (Bounce Kick -> switch ${selfSwitchTargetIndex})`
+      : `intent sent (Bounce Kick -> switch ${selfSwitchTargetIndex})`
+  );
 }
 
 function send_switch_intent(targetIndex: number): void {
@@ -2180,18 +2274,30 @@ function send_surrender(): void {
 }
 
 function close_switch_modal(): void {
+  switch_modal_mode = "intent";
+  bounce_kick_move_index = null;
   switch_modal.classList.remove("open");
 }
 
-function open_switch_modal(mode: "intent" | "forced" = "intent"): void {
+function open_switch_modal(mode: SwitchModalMode = "intent", move_index?: number): void {
   if (!latest_state || !slot) return;
-  if (mode === "intent" && !can_send_intent()) return;
+  if ((mode === "intent" || mode === "bounce_kick") && !can_send_intent()) return;
+  if (mode === "bounce_kick") {
+    if (!Number.isInteger(move_index)) {
+      append_log("Bounce Kick unavailable: missing move index");
+      return;
+    }
+    bounce_kick_move_index = move_index!;
+  } else {
+    bounce_kick_move_index = null;
+  }
+  switch_modal_mode = mode;
   switch_options.innerHTML = "";
   const player = latest_state.players[slot];
   const active_index = player.activeIndex;
   const options = player.team
     .map((mon, index) => ({ mon, index }))
-    .filter((entry) => entry.index !== active_index);
+    .filter((entry) => entry.index !== active_index && entry.mon.hp > 0);
   if (options.length === 0) {
     const msg = document.createElement("div");
     msg.textContent = "No available swaps";
@@ -2204,6 +2310,15 @@ function open_switch_modal(mode: "intent" | "forced" = "intent"): void {
       button.disabled = false;
       button.textContent = `${entry.mon.name}`;
       button.addEventListener("click", () => {
+        if (switch_modal_mode === "bounce_kick") {
+          if (!Number.isInteger(bounce_kick_move_index)) {
+            append_log("Bounce Kick unavailable: missing move index");
+            return;
+          }
+          send_bounce_kick_intent(bounce_kick_move_index!, entry.index);
+          close_switch_modal();
+          return;
+        }
         if (mode === "intent") {
           send_switch_intent(entry.index);
           return;
