@@ -124,10 +124,12 @@
         border-radius: 10px;
         border: 1px solid rgba(255, 255, 255, 0.08);
         background: rgba(10, 12, 18, 0.6);
+        position: relative;
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 4px;
+        overflow: hidden;
         cursor: pointer;
       }
 
@@ -145,6 +147,28 @@
       .bench-slot:disabled {
         cursor: default;
         opacity: 0.5;
+      }
+
+      .bench-slot.blocked-switch::before,
+      .bench-slot.blocked-switch::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 58px;
+        height: 2px;
+        border-radius: 999px;
+        background: rgba(255, 72, 72, 0.45);
+        pointer-events: none;
+        transform-origin: center;
+      }
+
+      .bench-slot.blocked-switch::before {
+        transform: translate(-50%, -50%) rotate(45deg);
+      }
+
+      .bench-slot.blocked-switch::after {
+        transform: translate(-50%, -50%) rotate(-45deg);
       }
 
       .panel-info {

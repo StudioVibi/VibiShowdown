@@ -2008,7 +2008,7 @@ var MONSTER_ROSTER = [
     name: "Baby Dragon",
     role: "Snorlax",
     type: type_for_index(0),
-    stats: { level: 100, maxHp: 575, attack: 438, defense: 250, speed: 105 },
+    stats: { level: 12, maxHp: 575, attack: 438, defense: 250, speed: 105 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -2019,7 +2019,7 @@ var MONSTER_ROSTER = [
     name: "Croni",
     role: "Ninjask",
     type: type_for_index(1),
-    stats: { level: 100, maxHp: 163, attack: 355, defense: 167, speed: 646 },
+    stats: { level: 12, maxHp: 163, attack: 355, defense: 167, speed: 646 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -2030,7 +2030,7 @@ var MONSTER_ROSTER = [
     name: "Harpy",
     role: "Absol",
     type: type_for_index(2),
-    stats: { level: 100, maxHp: 180, attack: 521, defense: 230, speed: 292 },
+    stats: { level: 12, maxHp: 180, attack: 521, defense: 230, speed: 292 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -2041,7 +2041,7 @@ var MONSTER_ROSTER = [
     name: "Hoof",
     role: "Chansey",
     type: type_for_index(3),
-    stats: { level: 100, maxHp: 950, attack: 0, defense: 0, speed: 188 },
+    stats: { level: 12, maxHp: 950, attack: 0, defense: 0, speed: 188 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -2052,7 +2052,7 @@ var MONSTER_ROSTER = [
     name: "Knight",
     role: "Metagross",
     type: type_for_index(4),
-    stats: { level: 100, maxHp: 242, attack: 542, defense: 521, speed: 271 },
+    stats: { level: 12, maxHp: 242, attack: 542, defense: 521, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -2063,7 +2063,7 @@ var MONSTER_ROSTER = [
     name: "Miren",
     role: "Celebi",
     type: type_for_index(5),
-    stats: { level: 100, maxHp: 325, attack: 396, defense: 396, speed: 396 },
+    stats: { level: 12, maxHp: 325, attack: 396, defense: 396, speed: 396 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -2074,7 +2074,7 @@ var MONSTER_ROSTER = [
     name: "Panda",
     role: "Cloyster",
     type: type_for_index(6),
-    stats: { level: 100, maxHp: 117, attack: 375, defense: 730, speed: 271 },
+    stats: { level: 12, maxHp: 117, attack: 375, defense: 730, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -2085,7 +2085,7 @@ var MONSTER_ROSTER = [
     name: "Valkyria",
     role: "Aerodactyl",
     type: type_for_index(7),
-    stats: { level: 100, maxHp: 242, attack: 417, defense: 250, speed: 521 },
+    stats: { level: 12, maxHp: 242, attack: 417, defense: 250, speed: 521 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -2096,7 +2096,7 @@ var MONSTER_ROSTER = [
     name: "Armoth",
     role: "Cloyster Template",
     type: "def",
-    stats: { level: 100, maxHp: 117, attack: 375, defense: 730, speed: 271 },
+    stats: { level: 12, maxHp: 117, attack: 375, defense: 730, speed: 271 },
     possibleMoves: ["spikes", "recover", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["spikes", "recover", "none"],
@@ -2107,7 +2107,7 @@ var MONSTER_ROSTER = [
     name: "Kairus",
     role: "Absol Template",
     type: "atk",
-    stats: { level: 100, maxHp: 180, attack: 521, defense: 230, speed: 430 },
+    stats: { level: 12, maxHp: 180, attack: 521, defense: 230, speed: 430 },
     possibleMoves: ["mega_punch", "bounce_kick", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["mega_punch", "bounce_kick", "none"],
@@ -2118,7 +2118,7 @@ var MONSTER_ROSTER = [
     name: "Farien",
     role: "Celebi Template",
     type: "buf",
-    stats: { level: 100, maxHp: 325, attack: 396, defense: 396, speed: 396 },
+    stats: { level: 12, maxHp: 325, attack: 396, defense: 396, speed: 396 },
     possibleMoves: ["meditate", "ki_blast", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["meditate", "ki_blast", "none"],
@@ -5782,9 +5782,10 @@ function render_roster() {
     list.appendChild(card);
   }
 }
-function set_bench_slot(slot2, mon, index, enabled) {
+function set_bench_slot(slot2, mon, index, enabled, blocked_switch = false) {
   if (!mon || index === null || index < 0) {
     slot2.btn.classList.add("empty");
+    slot2.btn.classList.remove("blocked-switch");
     slot2.btn.disabled = true;
     slot2.btn.removeAttribute("data-index");
     set_monster_tooltip(slot2.btn, null);
@@ -5795,6 +5796,7 @@ function set_bench_slot(slot2, mon, index, enabled) {
   }
   const tooltip = tooltip_from_state(mon);
   slot2.btn.classList.remove("empty");
+  slot2.btn.classList.toggle("blocked-switch", blocked_switch);
   slot2.btn.dataset.index = `${index}`;
   set_monster_tooltip(slot2.btn, tooltip);
   slot2.btn.disabled = !enabled;
@@ -5802,21 +5804,32 @@ function set_bench_slot(slot2, mon, index, enabled) {
   slot2.img.alt = monster_label(mon.id);
   slot2.img.style.display = "";
 }
+function arena_trap_remaining_turns(state, target_slot) {
+  const until_turn = state.arenaTrapUntilTurn?.[target_slot] ?? 0;
+  return Math.max(0, until_turn - state.turn + 1);
+}
+function is_slot_arena_trapped_for_ui(state, target_slot) {
+  if (state.pendingSwitch?.[target_slot]) {
+    return false;
+  }
+  return arena_trap_remaining_turns(state, target_slot) > 0;
+}
 function update_bench(state, viewer_slot) {
   const me = state.players[viewer_slot];
   const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
   const my_bench = me.team.map((_, idx) => idx).filter((idx) => idx !== me.activeIndex);
   const opp_bench = opp.team.map((_, idx) => idx).filter((idx) => idx !== opp.activeIndex);
-  const can_switch = !!slot && slot === viewer_slot && match_started && !is_spectator && (!!has_pending_switch() || current_turn > 0);
+  const my_switch_blocked = is_slot_arena_trapped_for_ui(state, viewer_slot);
+  const can_switch = !!slot && slot === viewer_slot && match_started && !is_spectator && (!!has_pending_switch() || current_turn > 0) && !my_switch_blocked;
   player_bench_slots.forEach((slot_el, i) => {
     const idx = my_bench[i] ?? null;
     const mon = idx !== null ? me.team[idx] : null;
-    set_bench_slot(slot_el, mon, idx, can_switch);
+    set_bench_slot(slot_el, mon, idx, can_switch, my_switch_blocked);
   });
   enemy_bench_slots.forEach((slot_el, i) => {
     const idx = opp_bench[i] ?? null;
     const mon = idx !== null ? opp.team[idx] : null;
-    set_bench_slot(slot_el, mon, idx, false);
+    set_bench_slot(slot_el, mon, idx, false, false);
   });
 }
 function update_action_controls() {
@@ -5868,8 +5881,15 @@ function update_action_controls() {
     btn.classList.toggle("selected-intent", is_selected_move && !btn.disabled);
   });
   if (switch_btn) {
-    const switch_disabled = !match_started || !slot || is_spectator || current_turn <= 0;
+    const arena_trapped = !!(latest_state && slot && is_slot_arena_trapped_for_ui(latest_state, slot));
+    const switch_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || arena_trapped;
     switch_btn.disabled = switch_disabled;
+    if (arena_trapped) {
+      const turns_left = arena_trap_remaining_turns(latest_state, slot);
+      switch_btn.title = `Arena Trap active (${turns_left} turno${turns_left === 1 ? "" : "s"})`;
+    } else {
+      switch_btn.removeAttribute("title");
+    }
   }
   const show_surrender = match_started && !!slot && !is_spectator;
   surrender_btn.classList.toggle("hidden", !show_surrender);
@@ -6256,6 +6276,10 @@ function render_effects(state, viewer_slot, player_slot, enemy_slot) {
   const enemy_seeded_by = state.leechSeedSourceByTarget?.[enemy_slot] ?? null;
   const player_seeded = state.leechSeedActiveByTarget?.[player_slot] ?? !!player_seeded_by;
   const enemy_seeded = state.leechSeedActiveByTarget?.[enemy_slot] ?? !!enemy_seeded_by;
+  const player_arena_trap_turns = arena_trap_remaining_turns(state, player_slot);
+  const enemy_arena_trap_turns = arena_trap_remaining_turns(state, enemy_slot);
+  const player_arena_trapped = is_slot_arena_trapped_for_ui(state, player_slot);
+  const enemy_arena_trapped = is_slot_arena_trapped_for_ui(state, enemy_slot);
   player_sprite_wrap.classList.toggle("seeded", player_seeded);
   enemy_sprite_wrap.classList.toggle("seeded", enemy_seeded);
   if (player_effects) {
@@ -6265,6 +6289,9 @@ function render_effects(state, viewer_slot, player_slot, enemy_slot) {
     }
     if (enemy_seeded_by === viewer_slot) {
       player_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+    if (player_arena_trapped) {
+      player_effects.appendChild(effect_chip(`Arena Trap (${player_arena_trap_turns}t sem troca)`, "debuff"));
     }
     if (enemy_active.screechDebuffActive) {
       player_effects.appendChild(effect_chip("Screech (enemyDEF 0.5)", "debuff"));
@@ -6286,6 +6313,9 @@ function render_effects(state, viewer_slot, player_slot, enemy_slot) {
     }
     if (player_seeded_by === enemy_slot) {
       enemy_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+    if (enemy_arena_trapped) {
+      enemy_effects.appendChild(effect_chip(`Arena Trap (${enemy_arena_trap_turns}t sem troca)`, "debuff"));
     }
     if (player_active.screechDebuffActive) {
       enemy_effects.appendChild(effect_chip("Screech (enemyDEF 0.5)", "debuff"));

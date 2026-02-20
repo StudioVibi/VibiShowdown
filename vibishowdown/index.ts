@@ -2000,9 +2000,16 @@ function render_roster(): void {
 
 type BenchSlotEl = { btn: HTMLButtonElement; img: HTMLImageElement };
 
-function set_bench_slot(slot: BenchSlotEl, mon: MonsterState | null, index: number | null, enabled: boolean): void {
+function set_bench_slot(
+  slot: BenchSlotEl,
+  mon: MonsterState | null,
+  index: number | null,
+  enabled: boolean,
+  blocked_switch: boolean = false
+): void {
   if (!mon || index === null || index < 0) {
     slot.btn.classList.add("empty");
+    slot.btn.classList.remove("blocked-switch");
     slot.btn.disabled = true;
     slot.btn.removeAttribute("data-index");
     set_monster_tooltip(slot.btn, null);
@@ -2013,6 +2020,7 @@ function set_bench_slot(slot: BenchSlotEl, mon: MonsterState | null, index: numb
   }
   const tooltip = tooltip_from_state(mon);
   slot.btn.classList.remove("empty");
+  slot.btn.classList.toggle("blocked-switch", blocked_switch);
   slot.btn.dataset.index = `${index}`;
   set_monster_tooltip(slot.btn, tooltip);
   slot.btn.disabled = !enabled;
@@ -2021,27 +2029,41 @@ function set_bench_slot(slot: BenchSlotEl, mon: MonsterState | null, index: numb
   slot.img.style.display = "";
 }
 
+function arena_trap_remaining_turns(state: GameState, target_slot: PlayerSlot): number {
+  const until_turn = state.arenaTrapUntilTurn?.[target_slot] ?? 0;
+  return Math.max(0, until_turn - state.turn + 1);
+}
+
+function is_slot_arena_trapped_for_ui(state: GameState, target_slot: PlayerSlot): boolean {
+  if (state.pendingSwitch?.[target_slot]) {
+    return false;
+  }
+  return arena_trap_remaining_turns(state, target_slot) > 0;
+}
+
 function update_bench(state: GameState, viewer_slot: PlayerSlot): void {
   const me = state.players[viewer_slot];
   const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
   const my_bench = me.team.map((_, idx) => idx).filter((idx) => idx !== me.activeIndex);
   const opp_bench = opp.team.map((_, idx) => idx).filter((idx) => idx !== opp.activeIndex);
+  const my_switch_blocked = is_slot_arena_trapped_for_ui(state, viewer_slot);
   const can_switch =
     !!slot &&
     slot === viewer_slot &&
     match_started &&
     !is_spectator &&
-    (!!has_pending_switch() || current_turn > 0);
+    (!!has_pending_switch() || current_turn > 0) &&
+    !my_switch_blocked;
 
   player_bench_slots.forEach((slot_el, i) => {
     const idx = my_bench[i] ?? null;
     const mon = idx !== null ? me.team[idx] : null;
-    set_bench_slot(slot_el, mon, idx, can_switch);
+    set_bench_slot(slot_el, mon, idx, can_switch, my_switch_blocked);
   });
   enemy_bench_slots.forEach((slot_el, i) => {
     const idx = opp_bench[i] ?? null;
     const mon = idx !== null ? opp.team[idx] : null;
-    set_bench_slot(slot_el, mon, idx, false);
+    set_bench_slot(slot_el, mon, idx, false, false);
   });
 }
 
@@ -2101,12 +2123,20 @@ function update_action_controls(): void {
     btn.classList.toggle("selected-intent", is_selected_move && !btn.disabled);
   });
   if (switch_btn) {
+    const arena_trapped = !!(latest_state && slot && is_slot_arena_trapped_for_ui(latest_state, slot));
     const switch_disabled =
       !match_started ||
       !slot ||
       is_spectator ||
-      current_turn <= 0;
+      current_turn <= 0 ||
+      arena_trapped;
     switch_btn.disabled = switch_disabled;
+    if (arena_trapped) {
+      const turns_left = arena_trap_remaining_turns(latest_state!, slot!);
+      switch_btn.title = `Arena Trap active (${turns_left} turno${turns_left === 1 ? "" : "s"})`;
+    } else {
+      switch_btn.removeAttribute("title");
+    }
   }
   const show_surrender = match_started && !!slot && !is_spectator;
   surrender_btn.classList.toggle("hidden", !show_surrender);
@@ -2528,6 +2558,10 @@ function render_effects(
   const enemy_seeded_by = state.leechSeedSourceByTarget?.[enemy_slot] ?? null;
   const player_seeded = state.leechSeedActiveByTarget?.[player_slot] ?? !!player_seeded_by;
   const enemy_seeded = state.leechSeedActiveByTarget?.[enemy_slot] ?? !!enemy_seeded_by;
+  const player_arena_trap_turns = arena_trap_remaining_turns(state, player_slot);
+  const enemy_arena_trap_turns = arena_trap_remaining_turns(state, enemy_slot);
+  const player_arena_trapped = is_slot_arena_trapped_for_ui(state, player_slot);
+  const enemy_arena_trapped = is_slot_arena_trapped_for_ui(state, enemy_slot);
 
   player_sprite_wrap.classList.toggle("seeded", player_seeded);
   enemy_sprite_wrap.classList.toggle("seeded", enemy_seeded);
@@ -2539,6 +2573,11 @@ function render_effects(
     }
     if (enemy_seeded_by === viewer_slot) {
       player_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+    if (player_arena_trapped) {
+      player_effects.appendChild(
+        effect_chip(`Arena Trap (${player_arena_trap_turns}t sem troca)`, "debuff")
+      );
     }
     if (enemy_active.screechDebuffActive) {
       player_effects.appendChild(effect_chip("Screech (enemyDEF 0.5)", "debuff"));
@@ -2561,6 +2600,11 @@ function render_effects(
     }
     if (player_seeded_by === enemy_slot) {
       enemy_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+    if (enemy_arena_trapped) {
+      enemy_effects.appendChild(
+        effect_chip(`Arena Trap (${enemy_arena_trap_turns}t sem troca)`, "debuff")
+      );
     }
     if (player_active.screechDebuffActive) {
       enemy_effects.appendChild(effect_chip("Screech (enemyDEF 0.5)", "debuff"));
