@@ -2259,7 +2259,7 @@ assert_monster_integrity(MONSTER_ROSTER);
 
 // src/shared.ts
 var SHARED_HP_START = 200;
-var TURN_DURATION_MS = 5000;
+var TURN_DURATION_MS = 20000;
 var BASE_TURN_LIMIT = 12;
 
 // src/engine.ts

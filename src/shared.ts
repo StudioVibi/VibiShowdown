@@ -3,7 +3,7 @@ export type RoomId = string;
 export type PlayerSlot = "player1" | "player2";
 
 export const SHARED_HP_START = 200;
-export const TURN_DURATION_MS = 5_000;
+export const TURN_DURATION_MS = 20_000;
 export const BASE_TURN_LIMIT = 12;
 
 export type MoveId = "none" | "protect" | string;
