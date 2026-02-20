@@ -225,6 +225,11 @@ function is_slot_taunted(state: GameState, slot: PlayerSlot): boolean {
   return (state.tauntUntilTurn?.[slot] ?? 0) >= state.turn;
 }
 
+function is_slot_arena_trapped(state: GameState, slot: PlayerSlot): boolean {
+  const trapped_until = state.arenaTrapUntilTurn?.[slot] ?? 0;
+  return trapped_until > 0 && trapped_until >= state.turn;
+}
+
 function is_attack_move(spec: { id: string; phaseId: string }): boolean {
   if (spec.phaseId !== "attack_01") {
     return false;
@@ -1951,7 +1956,7 @@ export function resolve_turn(
     for (const action of phase_actions) {
       if (action.type === "switch") {
         const trapped_until = next.arenaTrapUntilTurn?.[action.player] ?? 0;
-        if (trapped_until >= next.turn) {
+        if (is_slot_arena_trapped(next, action.player)) {
           log.push({
             type: "switch_blocked",
             turn: next.turn,
@@ -2074,8 +2079,7 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
   const active = active_monster(player);
   const taunted = is_slot_taunted(state, slot);
   if (intent.action === "switch") {
-    const trapped_until = state.arenaTrapUntilTurn?.[slot] ?? 0;
-    if (trapped_until >= state.turn) {
+    if (is_slot_arena_trapped(state, slot)) {
       return "arena trapped";
     }
     if (taunted) {
@@ -2109,6 +2113,9 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
     return "endure on cooldown";
   }
   if (moveId === "bounce_kick") {
+    if (is_slot_arena_trapped(state, slot)) {
+      return "arena trapped";
+    }
     if (!Number.isInteger(intent.selfSwitchTargetIndex)) {
       return "bounce kick requires switch target";
     }

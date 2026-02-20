@@ -2031,14 +2031,18 @@ function set_bench_slot(
 
 function arena_trap_remaining_turns(state: GameState, target_slot: PlayerSlot): number {
   const until_turn = state.arenaTrapUntilTurn?.[target_slot] ?? 0;
-  return Math.max(0, until_turn - state.turn + 1);
+  if (until_turn <= 0 || until_turn < state.turn) {
+    return 0;
+  }
+  return until_turn - state.turn + 1;
 }
 
 function is_slot_arena_trapped_for_ui(state: GameState, target_slot: PlayerSlot): boolean {
   if (state.pendingSwitch?.[target_slot]) {
     return false;
   }
-  return arena_trap_remaining_turns(state, target_slot) > 0;
+  const until_turn = state.arenaTrapUntilTurn?.[target_slot] ?? 0;
+  return until_turn > 0 && until_turn >= state.turn;
 }
 
 function update_bench(state: GameState, viewer_slot: PlayerSlot): void {
@@ -2087,6 +2091,7 @@ function update_action_controls(): void {
   let guard_on_cooldown = false;
   let active_moves = config.moves;
   let bounce_has_switch_target = true;
+  const arena_trapped = !!(latest_state && slot && is_slot_arena_trapped_for_ui(latest_state, slot));
   if (latest_state && slot) {
     const player_state = latest_state.players[slot];
     const fallback_active = player_state.team[player_state.activeIndex];
@@ -2111,6 +2116,9 @@ function update_action_controls(): void {
     } else if (move === "endure" && guard_on_cooldown) {
       btn.textContent = `${index + 1}. Endure (cooldown)`;
       btn.disabled = true;
+    } else if (move === "bounce_kick" && arena_trapped) {
+      btn.textContent = `${index + 1}. ${label} (arena trapped)`;
+      btn.disabled = true;
     } else if (move === "bounce_kick" && !bounce_has_switch_target) {
       btn.textContent = `${index + 1}. ${label} (no switch target)`;
       btn.disabled = true;
@@ -2123,7 +2131,6 @@ function update_action_controls(): void {
     btn.classList.toggle("selected-intent", is_selected_move && !btn.disabled);
   });
   if (switch_btn) {
-    const arena_trapped = !!(latest_state && slot && is_slot_arena_trapped_for_ui(latest_state, slot));
     const switch_disabled =
       !match_started ||
       !slot ||
@@ -2231,6 +2238,10 @@ function can_send_intent(): boolean {
 function send_move_intent(moveIndex: number): void {
   const move_id = active_move_id_for_index(moveIndex);
   if (move_id === "bounce_kick") {
+    if (latest_state && slot && is_slot_arena_trapped_for_ui(latest_state, slot)) {
+      append_log("arena trapped: bounce kick switch blocked");
+      return;
+    }
     open_switch_modal("bounce_kick", moveIndex);
     if (switch_modal.classList.contains("open")) {
       append_log("Bounce Kick: choose your replacement monster");
