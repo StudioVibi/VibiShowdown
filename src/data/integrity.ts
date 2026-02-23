@@ -1,5 +1,5 @@
-import { MOVE_BY_ID } from "./moves.ts";
-import { PASSIVE_BY_ID, normalize_passive_id } from "./passives.ts";
+import { MOVE_BY_ID, MOVE_CATALOG } from "./moves.ts";
+import { PASSIVE_BY_ID } from "./passives.ts";
 import type { MonsterCatalogEntry } from "./types.ts";
 import { MONSTER_ROSTER } from "./pokemon.ts";
 import { LEVEL_MAX, LEVEL_MIN } from "../stats_calc.ts";
@@ -22,6 +22,32 @@ function ensure_valid_type(monster: MonsterCatalogEntry): void {
 }
 
 export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[]): void {
+  for (const move of MOVE_CATALOG) {
+    if (!move.collateral) {
+      continue;
+    }
+    for (const collateral of move.collateral) {
+      if (collateral.kind === "effect") {
+        ensure_int(
+          collateral.maxDurationTurns,
+          `${move.id}: effect ${collateral.id} duration must be integer`
+        );
+        ensure(
+          collateral.maxDurationTurns > 0,
+          `${move.id}: effect ${collateral.id} duration must be > 0`
+        );
+        continue;
+      }
+      if (collateral.kind === "curse") {
+        ensure(
+          collateral.clearsOnSwitch === true,
+          `${move.id}: curse ${collateral.id} must clear on switch`
+        );
+        continue;
+      }
+    }
+  }
+
   const monster_ids = new Set<string>();
 
   for (const monster of monsters) {
@@ -49,21 +75,12 @@ export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[
       }
     }
 
-    ensure(monster.possiblePassives.length > 0, `${monster.id}: possiblePassives cannot be empty`);
-
-    const possible_passives = new Set(monster.possiblePassives.map(normalize_passive_id));
-    for (const passive_id of monster.possiblePassives) {
-      ensure(PASSIVE_BY_ID.has(passive_id), `${monster.id}: unknown passive in possiblePassives: ${passive_id}`);
-    }
-
-    const normalized_default = normalize_passive_id(monster.defaultPassive);
+    ensure(monster.possiblePassives.length === 1, `${monster.id}: possiblePassives must contain exactly 1 entry`);
+    const only_passive = monster.possiblePassives[0];
+    ensure(PASSIVE_BY_ID.has(only_passive), `${monster.id}: unknown passive in possiblePassives: ${only_passive}`);
+    ensure(only_passive === "none", `${monster.id}: possiblePassives must be [none]`);
     ensure(PASSIVE_BY_ID.has(monster.defaultPassive), `${monster.id}: unknown default passive: ${monster.defaultPassive}`);
-    ensure(
-      possible_passives.has(normalized_default),
-      `${monster.id}: default passive not allowed: ${monster.defaultPassive}`
-    );
-    ensure(normalized_default === "none", `${monster.id}: default passive must be none`);
-    ensure(possible_passives.size === 1 && possible_passives.has("none"), `${monster.id}: possiblePassives must be [none]`);
+    ensure(monster.defaultPassive === "none", `${monster.id}: default passive must be none`);
 
     ensure_int(monster.stats.level, `${monster.id}: level must be integer`);
     ensure_int(monster.stats.maxHp, `${monster.id}: maxHp must be integer`);

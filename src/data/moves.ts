@@ -28,11 +28,23 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
     damageType: "flat",
     flatDamage: 35
   },
-  { id: "leech_life", label: "Leech Life", phaseId: "attack_01", attackMultiplier100: 0 },
+  {
+    id: "leech_life",
+    label: "Leech Life",
+    phaseId: "attack_01",
+    attackMultiplier100: 0,
+    collateral: [{ kind: "curse", id: "leech_seed", clearsOnSwitch: true }]
+  },
   { id: "focus_punch", label: "Focus Punch", phaseId: "attack_01", attackMultiplier100: 150 },
   { id: "pain_split", label: "Pain Split", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "screech", label: "Screech", phaseId: "attack_01", attackMultiplier100: 0 },
-  { id: "taunt", label: "Taunt", phaseId: "attack_01", attackMultiplier100: 0 },
+  {
+    id: "taunt",
+    label: "Taunt",
+    phaseId: "attack_01",
+    attackMultiplier100: 0,
+    collateral: [{ kind: "effect", id: "taunt", maxDurationTurns: 2 }]
+  },
   { id: "spikes", label: "Spikes", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "recover", label: "Recover", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "mega_punch", label: "Mega Punch", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 20 },

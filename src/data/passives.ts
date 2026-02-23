@@ -1,11 +1,7 @@
 import type { PassiveCatalogEntry } from "./types.ts";
-import type { EventLog, MonsterState, PlayerSlot } from "../shared.ts";
-import { mul_div_floor } from "../int_math.ts";
 
 export const PASSIVE_CATALOG: readonly PassiveCatalogEntry[] = [
-  { id: "none", label: "none" },
-  { id: "leftovers", label: "Leftovers", aliases: ["regen_5pct"] },
-  { id: "choice_band", label: "Choice Band" }
+  { id: "none", label: "none" }
 ];
 
 export const PASSIVE_OPTIONS: string[] = PASSIVE_CATALOG.map((entry) => entry.id);
@@ -36,51 +32,4 @@ export function normalize_passive_id(passive_id: string): string {
 
 export function passive_spec(passive_id: string): PassiveCatalogEntry {
   return PASSIVE_BY_ID_INTERNAL.get(passive_id) ?? PASSIVE_BY_ID_INTERNAL.get("none")!;
-}
-
-export type PassiveTurnEffectContext = {
-  slot: PlayerSlot;
-  monster: MonsterState;
-  turn: number;
-  phase?: string;
-  log: EventLog[];
-  hp_changed: WeakSet<MonsterState>;
-};
-
-type PassiveTurnEffect = (context: PassiveTurnEffectContext) => void;
-
-function apply_leftovers(context: PassiveTurnEffectContext): void {
-  const { monster } = context;
-  const heal = mul_div_floor(monster.maxHp, 6, 100);
-  if (heal <= 0) {
-    return;
-  }
-  const before = monster.hp;
-  monster.hp = Math.min(monster.maxHp, monster.hp + heal);
-  const gained = monster.hp - before;
-  if (gained <= 0) {
-    return;
-  }
-  context.hp_changed.add(monster);
-  context.log.push({
-    type: "passive_heal",
-    turn: context.turn,
-    phase: context.phase,
-    summary: `${context.slot} Leftovers +${gained} HP`,
-    data: { slot: context.slot, amount: gained, passive: "leftovers" }
-  });
-}
-
-const NOOP_PASSIVE: PassiveTurnEffect = () => {};
-
-const PASSIVE_TURN_EFFECTS: Record<string, PassiveTurnEffect> = {
-  none: NOOP_PASSIVE,
-  leftovers: apply_leftovers,
-  choice_band: NOOP_PASSIVE
-};
-
-export function apply_passive_turn_effect(passive_id: string, context: PassiveTurnEffectContext): void {
-  const normalized = passive_spec(passive_id).id;
-  const effect = PASSIVE_TURN_EFFECTS[normalized] ?? NOOP_PASSIVE;
-  effect(context);
 }
