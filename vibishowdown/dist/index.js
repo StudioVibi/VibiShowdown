@@ -2271,7 +2271,7 @@ var PHASES = [
 ];
 var END_PHASE_ID = "end_turn";
 var SLOT_ORDER = ["player1", "player2"];
-var END_TURN_EFFECT_ORDER = ["focus_punch", "wish", "leech_life"];
+var END_TURN_EFFECT_ORDER = ["focus_punch", "wish", "leech_life", "type_regen"];
 var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "none",
   "agility",
@@ -2288,6 +2288,10 @@ var TAUNT_BLOCKED_MOVE_IDS = new Set([
 var INITIATIVE_WITHOUT_SPEED = ["attack", "hp", "defense"];
 var STAT_STAGE_MIN = -6;
 var STAT_STAGE_MAX = 6;
+var TYPE_PASSIVE_ATK_TRUE_DAMAGE = 10;
+var TYPE_PASSIVE_DEF_ARMOR_STACK_MAX = 5;
+var TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT = 10;
+var TYPE_PASSIVE_BUF_REGEN_PER_STACK = 5;
 function clamp_stat_stage(value) {
   return Math.max(STAT_STAGE_MIN, Math.min(STAT_STAGE_MAX, value));
 }
@@ -2399,6 +2403,12 @@ function empty_pending() {
 function empty_rps_score() {
   return { player1: 0, player2: 0 };
 }
+function empty_type_passive_armor_stacks() {
+  return { player1: 0, player2: 0 };
+}
+function empty_type_passive_regen_stacks() {
+  return { player1: 0, player2: 0 };
+}
 function empty_pending_wish() {
   return { player1: null, player2: null };
 }
@@ -2420,9 +2430,22 @@ function empty_spikes_armed_by_target() {
 function is_slot_taunted(state, slot) {
   return (state.tauntUntilTurn?.[slot] ?? 0) >= state.turn;
 }
+function normalize_type_passive_stack(value, fallback, min, max) {
+  const raw = typeof value === "number" ? value : fallback;
+  return Math.max(min, Math.min(max, normalize_int(raw, fallback, min)));
+}
 function is_slot_arena_trapped(state, slot) {
   const trapped_until = state.arenaTrapUntilTurn?.[slot] ?? 0;
   return trapped_until > 0 && trapped_until >= state.turn;
+}
+function type_passive_armor_stack(state, slot) {
+  return normalize_type_passive_stack(state.typePassiveArmorStacks?.[slot], 0, 0, TYPE_PASSIVE_DEF_ARMOR_STACK_MAX);
+}
+function type_passive_regen_stack(state, slot) {
+  return normalize_type_passive_stack(state.typePassiveRegenStacks?.[slot], 0, 0, 9999);
+}
+function is_slot_clear_body_active(state, slot) {
+  return type_passive_armor_stack(state, slot) > 0;
 }
 function is_attack_move(spec) {
   if (spec.phaseId !== "attack_01") {
@@ -2454,6 +2477,14 @@ function clone_state(state) {
     rpsScore: {
       player1: normalize_int(state.rpsScore?.player1, 0, -99999),
       player2: normalize_int(state.rpsScore?.player2, 0, -99999)
+    },
+    typePassiveArmorStacks: {
+      player1: normalize_type_passive_stack(state.typePassiveArmorStacks?.player1, 0, 0, TYPE_PASSIVE_DEF_ARMOR_STACK_MAX),
+      player2: normalize_type_passive_stack(state.typePassiveArmorStacks?.player2, 0, 0, TYPE_PASSIVE_DEF_ARMOR_STACK_MAX)
+    },
+    typePassiveRegenStacks: {
+      player1: normalize_type_passive_stack(state.typePassiveRegenStacks?.player1, 0, 0, 9999),
+      player2: normalize_type_passive_stack(state.typePassiveRegenStacks?.player2, 0, 0, 9999)
     },
     arenaTrapUntilTurn: {
       player1: normalize_int(state.arenaTrapUntilTurn?.player1, 0, 0),
@@ -2651,85 +2682,92 @@ function apply_simultaneous_switch_passives(state, log, switched_this_turn, hp_c
   if (!switched_this_turn.player1 || !switched_this_turn.player2) {
     return;
   }
-  for (const slot of SLOT_ORDER) {
-    const player = state.players[slot];
-    if (player.sharedHp <= 0) {
-      continue;
-    }
-    const target_slot = other_slot(slot);
-    const target_player = state.players[target_slot];
-    const actor = active_monster(player);
-    const target = active_monster(target_player);
-    if (actor.id === "armoth" && target.type === "atk") {
-      const previous_until = state.arenaTrapUntilTurn[target_slot] ?? 0;
-      const until_turn = Math.max(previous_until, state.turn + 1);
-      state.arenaTrapUntilTurn[target_slot] = until_turn;
-      log.push({
-        type: "passive_trigger",
-        turn: state.turn,
-        phase: "switch",
-        summary: `${actor.name} passive triggered (Arena Trap vs ATK)`,
-        data: { slot, targetSlot: target_slot, source: actor.id, target: target.id, passive: "arena_trap" }
-      });
-      log.push({
-        type: "arena_trap_applied",
-        turn: state.turn,
-        phase: "switch",
-        summary: `${target_slot} is arena trapped until turn ${until_turn}`,
-        data: { sourceSlot: slot, targetSlot: target_slot, beforeUntil: previous_until, untilTurn: until_turn }
-      });
-      continue;
-    }
-    if (actor.id === "kairus" && target.type === "buf" && target_player.sharedHp > 0) {
-      const damage_result = apply_damage_with_endure(state, log, "switch", target_slot, target, 10, hp_changed, took_damage_this_turn);
-      log.push({
-        type: "passive_trigger",
-        turn: state.turn,
-        phase: "switch",
-        summary: `${actor.name} passive Quick Punch dealt ${damage_result.applied} to ${target.name}`,
-        data: { slot, targetSlot: target_slot, source: actor.id, target: target.id, passive: "quick_punch", damage: damage_result.applied }
-      });
-      log.push({
-        type: "damage",
-        turn: state.turn,
-        phase: "switch",
-        summary: `${slot} dealt ${damage_result.applied} to ${target.name}`,
-        data: {
-          slot,
-          targetSlot: target_slot,
-          source: actor.id,
-          target: target.id,
-          damage: damage_result.applied,
-          before: damage_result.before,
-          after: damage_result.after
-        }
-      });
-      continue;
-    }
-    if (actor.id === "farien" && target.type === "def") {
-      const before_hp = player.sharedHp;
-      const after_hp = Math.min(player.sharedHpMax, before_hp + 10);
-      const healed = Math.max(0, after_hp - before_hp);
-      if (healed > 0) {
-        sync_player_shared_hp(state, slot, after_hp);
-        hp_changed.add(actor);
-      }
-      log.push({
-        type: "passive_trigger",
-        turn: state.turn,
-        phase: "switch",
-        summary: `${actor.name} passive restored ${healed} HP on switch`,
-        data: { slot, source: actor.id, target: actor.id, passive: "switch_heal_10", heal: healed, before: before_hp, after: after_hp }
-      });
-      log.push({
-        type: "passive_heal",
-        turn: state.turn,
-        phase: "switch",
-        summary: `${actor.name} healed ${healed} from passive`,
-        data: { slot, source: actor.id, target: actor.id, amount: healed, before: before_hp, after: after_hp }
-      });
-    }
+  const p1_type = active_monster(state.players.player1).type;
+  const p2_type = active_monster(state.players.player2).type;
+  const type_cmp = compare_monster_type(p1_type, p2_type);
+  if (type_cmp === 0) {
+    return;
   }
+  const winner = type_cmp > 0 ? "player1" : "player2";
+  const loser = winner === "player1" ? "player2" : "player1";
+  const winner_player = state.players[winner];
+  const loser_player = state.players[loser];
+  if (winner_player.sharedHp <= 0 || loser_player.sharedHp <= 0) {
+    return;
+  }
+  const winner_mon = active_monster(winner_player);
+  const loser_mon = active_monster(loser_player);
+  if (winner_mon.type === "atk") {
+    const damage_result = apply_damage_with_endure(state, log, "switch", loser, loser_mon, TYPE_PASSIVE_ATK_TRUE_DAMAGE, hp_changed, took_damage_this_turn, { ignoreArmor: true, source: "type_passive_atk" });
+    log.push({
+      type: "passive_trigger",
+      turn: state.turn,
+      phase: "switch",
+      summary: `${winner_mon.name} activated ATK passive (true damage ${damage_result.applied})`,
+      data: {
+        slot: winner,
+        targetSlot: loser,
+        source: winner_mon.id,
+        target: loser_mon.id,
+        passive: "type_atk_true_damage",
+        damage: damage_result.applied
+      }
+    });
+    log.push({
+      type: "damage",
+      turn: state.turn,
+      phase: "switch",
+      summary: `${winner} dealt ${damage_result.applied} to ${loser_mon.name}`,
+      data: {
+        slot: winner,
+        targetSlot: loser,
+        source: winner_mon.id,
+        target: loser_mon.id,
+        damage: damage_result.applied,
+        before: damage_result.before,
+        after: damage_result.after,
+        damageType: "true"
+      }
+    });
+    return;
+  }
+  if (winner_mon.type === "def") {
+    const before_stack2 = type_passive_armor_stack(state, winner);
+    const after_stack2 = Math.min(TYPE_PASSIVE_DEF_ARMOR_STACK_MAX, before_stack2 + 1);
+    state.typePassiveArmorStacks[winner] = after_stack2;
+    log.push({
+      type: "passive_trigger",
+      turn: state.turn,
+      phase: "switch",
+      summary: `${winner_mon.name} activated DEF passive (Clear Body + Armor ${after_stack2 * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT}%)`,
+      data: {
+        slot: winner,
+        source: winner_mon.id,
+        passive: "type_def_armor_stack",
+        stackBefore: before_stack2,
+        stackAfter: after_stack2,
+        armorReductionPercent: after_stack2 * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT
+      }
+    });
+    return;
+  }
+  const before_stack = type_passive_regen_stack(state, winner);
+  const after_stack = before_stack + 1;
+  state.typePassiveRegenStacks[winner] = after_stack;
+  log.push({
+    type: "passive_trigger",
+    turn: state.turn,
+    phase: "switch",
+    summary: `${winner_mon.name} activated BUF passive (regen stack ${after_stack})`,
+    data: {
+      slot: winner,
+      source: winner_mon.id,
+      passive: "type_buf_regen_stack",
+      stackBefore: before_stack,
+      stackAfter: after_stack,
+      healPerTurn: TYPE_PASSIVE_BUF_REGEN_PER_STACK * after_stack
+    }
+  });
 }
 function end_match_with_winner(state, log, winner, summary, data) {
   state.status = "ended";
@@ -2843,6 +2881,38 @@ function apply_pending_wish(state, log, slot, hp_changed) {
       data: { slot, target: target.id, before: before_hp, after: after_hp, amount: wish_heal, basedOn: "maxHp" }
     });
   }
+}
+function apply_type_passive_regen_end_turn(state, log, slot, hp_changed) {
+  const regen_stack = type_passive_regen_stack(state, slot);
+  if (regen_stack <= 0) {
+    return;
+  }
+  const heal_amount = regen_stack * TYPE_PASSIVE_BUF_REGEN_PER_STACK;
+  const player = state.players[slot];
+  const target = active_monster(player);
+  const before_hp = player.sharedHp;
+  const after_hp = Math.min(player.sharedHpMax, before_hp + heal_amount);
+  const healed = Math.max(0, after_hp - before_hp);
+  if (healed > 0) {
+    sync_player_shared_hp(state, slot, after_hp);
+    hp_changed.add(target);
+  }
+  log.push({
+    type: "type_passive_regen",
+    turn: state.turn,
+    phase: END_PHASE_ID,
+    summary: `${target.name} healed ${healed} from BUF passive (${regen_stack} stack)`,
+    data: {
+      slot,
+      target: target.id,
+      regenStack: regen_stack,
+      healPerStack: TYPE_PASSIVE_BUF_REGEN_PER_STACK,
+      healAttempted: heal_amount,
+      healApplied: healed,
+      before: before_hp,
+      after: after_hp
+    }
+  });
 }
 function clear_leech_seed_on_target_switch(state, log, target_slot) {
   const was_active = state.leechSeedActiveByTarget?.[target_slot] ?? false;
@@ -2997,7 +3067,13 @@ function apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pe
     }
     return;
   }
-  apply_leech_seed_end_turn(state, log, hp_changed);
+  if (effect_id === "leech_life") {
+    apply_leech_seed_end_turn(state, log, hp_changed);
+    return;
+  }
+  for (const slot of SLOT_ORDER) {
+    apply_type_passive_regen_end_turn(state, log, slot, hp_changed);
+  }
 }
 function apply_end_turn_phase(state, log, hp_changed, focus_punch_pending, took_damage_this_turn) {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
@@ -3012,12 +3088,38 @@ function apply_end_turn_phase(state, log, hp_changed, focus_punch_pending, took_
 function minimum_endure_hp(monster) {
   return Math.max(1, mul_div_ceil(monster.maxHp, 1, 100));
 }
-function apply_damage_with_endure(state, log, phase, slot, monster, attempted_damage, hp_changed, took_damage_this_turn) {
+function apply_damage_with_endure(state, log, phase, slot, monster, attempted_damage, hp_changed, took_damage_this_turn, options) {
   const before = state.players[slot].sharedHp;
   if (before <= 0 || attempted_damage <= 0) {
     return { before, after: before, applied: 0 };
   }
-  let after = Math.max(0, before - attempted_damage);
+  const ignore_armor = !!options?.ignoreArmor;
+  const armor_stack = ignore_armor ? 0 : type_passive_armor_stack(state, slot);
+  const armor_reduction_percent = Math.max(0, Math.min(99, armor_stack * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT));
+  let damage_after_armor = attempted_damage;
+  if (!ignore_armor && armor_reduction_percent > 0) {
+    damage_after_armor = Math.max(0, mul_div_floor(attempted_damage, 100 - armor_reduction_percent, 100));
+    const mitigated = Math.max(0, attempted_damage - damage_after_armor);
+    if (mitigated > 0) {
+      log.push({
+        type: "armor_block",
+        turn: state.turn,
+        phase,
+        summary: `${monster.name} armor mitigated ${mitigated} damage`,
+        data: {
+          slot,
+          target: monster.id,
+          source: options?.source ?? null,
+          armorStack: armor_stack,
+          armorReductionPercent: armor_reduction_percent,
+          damageBeforeArmor: attempted_damage,
+          damageAfterArmor: damage_after_armor,
+          mitigated
+        }
+      });
+    }
+  }
+  let after = Math.max(0, before - damage_after_armor);
   if (monster.endureActiveThisTurn) {
     const survive_hp = Math.min(before, minimum_endure_hp(monster));
     if (after < survive_hp) {
@@ -3032,7 +3134,15 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
         turn: state.turn,
         phase,
         summary: `${monster.name} endured the hit (${before} -> ${after})`,
-        data: { slot, target: monster.id, before, after, attemptedDamage: attempted_damage, appliedDamage: capped_damage }
+        data: {
+          slot,
+          target: monster.id,
+          before,
+          after,
+          attemptedDamage: attempted_damage,
+          postArmorDamage: damage_after_armor,
+          appliedDamage: capped_damage
+        }
       });
       log.push({
         type: "stat_mod",
@@ -3053,6 +3163,7 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
           hpBefore: before,
           hpAfter: after,
           damageAttempted: attempted_damage,
+          damageAfterArmor: damage_after_armor,
           damageApplied: capped_damage,
           speedBefore: speed_before,
           speedAfter: monster.speed
@@ -3125,7 +3236,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       data: { slot: opponent_slot }
     });
   }
-  const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn);
+  const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn, { source: spec.id });
   const final_damage = defender_result.applied;
   log.push({
     type: "damage",
@@ -3148,7 +3259,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
     const recoil_attempt = Math.max(0, mul_div_round(final_damage, recoil_num, recoil_den));
     recoil_damage = recoil_attempt;
     if (recoil_damage > 0) {
-      const recoil_result = apply_damage_with_endure(state, log, phase_id, player_slot, attacker, recoil_damage, hp_changed, took_damage_this_turn);
+      const recoil_result = apply_damage_with_endure(state, log, phase_id, player_slot, attacker, recoil_damage, hp_changed, took_damage_this_turn, { ignoreArmor: true, source: "recoil" });
       recoil_before = recoil_result.before;
       recoil_damage = recoil_result.applied;
       log.push({
@@ -3568,6 +3679,32 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     return;
   }
   if (spec.id === "screech") {
+    const defender_slot = other_slot(player_slot);
+    if (is_slot_clear_body_active(state, defender_slot)) {
+      const armor_stack = type_passive_armor_stack(state, defender_slot);
+      log.push({
+        type: "clear_body_blocked",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `${defender.name} blocked Screech with Clear Body`,
+        data: {
+          slot: defender_slot,
+          target: defender.id,
+          sourceSlot: player_slot,
+          source: attacker.id,
+          move: spec.id,
+          armorStack: armor_stack
+        }
+      });
+      log.push({
+        type: "move_detail",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `Screech blocked by Clear Body (armor stack ${armor_stack})`,
+        data: { move: spec.id, target: defender.id, blockedBy: "clear_body", armorStack: armor_stack }
+      });
+      return;
+    }
     const before_defense = defender.defense;
     const after_defense = Math.max(1, mul_div_floor(before_defense, 1, 2));
     defender.defense = after_defense;
@@ -3826,6 +3963,8 @@ function create_initial_state(teams, names) {
     status: "setup",
     baseTurnLimit: BASE_TURN_LIMIT,
     rpsScore: empty_rps_score(),
+    typePassiveArmorStacks: empty_type_passive_armor_stacks(),
+    typePassiveRegenStacks: empty_type_passive_regen_stacks(),
     arenaTrapUntilTurn: empty_arena_trap_until_turn(),
     spikesArmedByTarget: empty_spikes_armed_by_target(),
     players: {
@@ -3870,6 +4009,12 @@ function resolve_turn(state, intents) {
   }
   if (!next.rpsScore) {
     next.rpsScore = empty_rps_score();
+  }
+  if (!next.typePassiveArmorStacks) {
+    next.typePassiveArmorStacks = empty_type_passive_armor_stacks();
+  }
+  if (!next.typePassiveRegenStacks) {
+    next.typePassiveRegenStacks = empty_type_passive_regen_stacks();
   }
   if (!next.arenaTrapUntilTurn) {
     next.arenaTrapUntilTurn = empty_arena_trap_until_turn();
@@ -6293,6 +6438,10 @@ function render_effects(state, viewer_slot, player_slot, enemy_slot) {
   const enemy_seeded_by = state.leechSeedSourceByTarget?.[enemy_slot] ?? null;
   const player_seeded = state.leechSeedActiveByTarget?.[player_slot] ?? !!player_seeded_by;
   const enemy_seeded = state.leechSeedActiveByTarget?.[enemy_slot] ?? !!enemy_seeded_by;
+  const player_armor_stacks = Math.max(0, state.typePassiveArmorStacks?.[player_slot] ?? 0);
+  const enemy_armor_stacks = Math.max(0, state.typePassiveArmorStacks?.[enemy_slot] ?? 0);
+  const player_regen_stacks = Math.max(0, state.typePassiveRegenStacks?.[player_slot] ?? 0);
+  const enemy_regen_stacks = Math.max(0, state.typePassiveRegenStacks?.[enemy_slot] ?? 0);
   const player_arena_trap_turns = arena_trap_remaining_turns(state, player_slot);
   const enemy_arena_trap_turns = arena_trap_remaining_turns(state, enemy_slot);
   const player_arena_trapped = is_slot_arena_trapped_for_ui(state, player_slot);
@@ -6306,6 +6455,13 @@ function render_effects(state, viewer_slot, player_slot, enemy_slot) {
     }
     if (enemy_seeded_by === viewer_slot) {
       player_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+    if (player_armor_stacks > 0) {
+      player_effects.appendChild(effect_chip(`Armor +${player_armor_stacks * 10}%`, "buff"));
+      player_effects.appendChild(effect_chip("Clear Body", "buff"));
+    }
+    if (player_regen_stacks > 0) {
+      player_effects.appendChild(effect_chip(`Regen +${player_regen_stacks * 5}/turn`, "buff"));
     }
     if (player_arena_trapped) {
       player_effects.appendChild(effect_chip(`Arena Trap (${player_arena_trap_turns}t sem troca)`, "debuff"));
@@ -6330,6 +6486,13 @@ function render_effects(state, viewer_slot, player_slot, enemy_slot) {
     }
     if (player_seeded_by === enemy_slot) {
       enemy_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+    if (enemy_armor_stacks > 0) {
+      enemy_effects.appendChild(effect_chip(`Armor +${enemy_armor_stacks * 10}%`, "buff"));
+      enemy_effects.appendChild(effect_chip("Clear Body", "buff"));
+    }
+    if (enemy_regen_stacks > 0) {
+      enemy_effects.appendChild(effect_chip(`Regen +${enemy_regen_stacks * 5}/turn`, "buff"));
     }
     if (enemy_arena_trapped) {
       enemy_effects.appendChild(effect_chip(`Arena Trap (${enemy_arena_trap_turns}t sem troca)`, "debuff"));

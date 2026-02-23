@@ -2569,6 +2569,10 @@ function render_effects(
   const enemy_seeded_by = state.leechSeedSourceByTarget?.[enemy_slot] ?? null;
   const player_seeded = state.leechSeedActiveByTarget?.[player_slot] ?? !!player_seeded_by;
   const enemy_seeded = state.leechSeedActiveByTarget?.[enemy_slot] ?? !!enemy_seeded_by;
+  const player_armor_stacks = Math.max(0, state.typePassiveArmorStacks?.[player_slot] ?? 0);
+  const enemy_armor_stacks = Math.max(0, state.typePassiveArmorStacks?.[enemy_slot] ?? 0);
+  const player_regen_stacks = Math.max(0, state.typePassiveRegenStacks?.[player_slot] ?? 0);
+  const enemy_regen_stacks = Math.max(0, state.typePassiveRegenStacks?.[enemy_slot] ?? 0);
   const player_arena_trap_turns = arena_trap_remaining_turns(state, player_slot);
   const enemy_arena_trap_turns = arena_trap_remaining_turns(state, enemy_slot);
   const player_arena_trapped = is_slot_arena_trapped_for_ui(state, player_slot);
@@ -2584,6 +2588,13 @@ function render_effects(
     }
     if (enemy_seeded_by === viewer_slot) {
       player_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+    if (player_armor_stacks > 0) {
+      player_effects.appendChild(effect_chip(`Armor +${player_armor_stacks * 10}%`, "buff"));
+      player_effects.appendChild(effect_chip("Clear Body", "buff"));
+    }
+    if (player_regen_stacks > 0) {
+      player_effects.appendChild(effect_chip(`Regen +${player_regen_stacks * 5}/turn`, "buff"));
     }
     if (player_arena_trapped) {
       player_effects.appendChild(
@@ -2611,6 +2622,13 @@ function render_effects(
     }
     if (player_seeded_by === enemy_slot) {
       enemy_effects.appendChild(effect_chip("Leech+", "drain"));
+    }
+    if (enemy_armor_stacks > 0) {
+      enemy_effects.appendChild(effect_chip(`Armor +${enemy_armor_stacks * 10}%`, "buff"));
+      enemy_effects.appendChild(effect_chip("Clear Body", "buff"));
+    }
+    if (enemy_regen_stacks > 0) {
+      enemy_effects.appendChild(effect_chip(`Regen +${enemy_regen_stacks * 5}/turn`, "buff"));
     }
     if (enemy_arena_trapped) {
       enemy_effects.appendChild(

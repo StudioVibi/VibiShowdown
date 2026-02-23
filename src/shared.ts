@@ -83,6 +83,8 @@ export type GameState = {
   winner?: PlayerSlot;
   baseTurnLimit: number;
   rpsScore: Record<PlayerSlot, number>;
+  typePassiveArmorStacks: Record<PlayerSlot, number>;
+  typePassiveRegenStacks: Record<PlayerSlot, number>;
   arenaTrapUntilTurn: Record<PlayerSlot, number>;
   spikesArmedByTarget: Record<PlayerSlot, boolean>;
   players: Record<PlayerSlot, PlayerState>;
