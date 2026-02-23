@@ -7,7 +7,7 @@ export const TURN_DURATION_MS = 50_000;
 export const BASE_TURN_LIMIT = 12;
 
 export type MoveId = "none" | "protect" | string;
-export type PassiveId = "none" | "leftovers" | "choice_band" | "regen_5pct" | string;
+export type PassiveId = "none" | string;
 export type MonsterType = "buf" | "def" | "atk";
 
 export type EVSpread = {
@@ -63,7 +63,6 @@ export type MonsterState = {
   chosenPassive: PassiveId;
   protectActiveThisTurn: boolean;
   endureActiveThisTurn: boolean;
-  choiceBandLockedMoveIndex: number | null;
   protectCooldownTurns: number;
   endureCooldownTurns: number;
 };
@@ -77,12 +76,38 @@ export type PlayerState = {
   activeIndex: number;
 };
 
+export type ActiveEffectState = {
+  id: string;
+  remainingTurns: number;
+};
+
+export type ActiveCurseState = {
+  id: string;
+  sourceSlot: PlayerSlot | null;
+  stacks: number;
+};
+
+export type MatchEndReason = "hp_zero" | "turn_limit" | "surrender" | "evade_escape";
+
+export type EvadeTelemetry = {
+  effectiveSpeed: number;
+  speedGoal: number;
+  speedReady: boolean;
+  gapPercent: number;
+  gapGoalPercent: number;
+  gapReady: boolean;
+  canEvade: boolean;
+};
+
 export type GameState = {
   turn: number;
   status: "setup" | "running" | "ended";
   winner?: PlayerSlot;
+  endReason?: MatchEndReason;
+  evadedSlots?: PlayerSlot[];
   baseTurnLimit: number;
   rpsScore: Record<PlayerSlot, number>;
+  evadeTelemetry: Record<PlayerSlot, EvadeTelemetry>;
   typePassiveArmorStacks: Record<PlayerSlot, number>;
   typePassiveRegenStacks: Record<PlayerSlot, number>;
   arenaTrapUntilTurn: Record<PlayerSlot, number>;
@@ -91,8 +116,9 @@ export type GameState = {
   pendingSwitch: Record<PlayerSlot, boolean>;
   pendingWish: Record<PlayerSlot, number | null>;
   tauntUntilTurn: Record<PlayerSlot, number>;
-  leechSeedActiveByTarget: Record<PlayerSlot, boolean>;
-  leechSeedSourceByTarget: Record<PlayerSlot, PlayerSlot | null>;
+  activeEffectsBySlot: Record<PlayerSlot, ActiveEffectState[]>;
+  activeCursesBySlot: Record<PlayerSlot, ActiveCurseState[]>;
+  lastMoveIndexBySlot: Record<PlayerSlot, number | null>;
 };
 
 export type PlayerIntent =

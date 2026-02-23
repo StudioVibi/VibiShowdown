@@ -3,9 +3,13 @@ import {
   SHARED_HP_START,
 } from "./shared.ts";
 import type {
+  ActiveCurseState,
+  ActiveEffectState,
+  EvadeTelemetry,
   EVSpread,
   EventLog,
   GameState,
+  MatchEndReason,
   MonsterType,
   MonsterState,
   MoveId,
@@ -16,6 +20,7 @@ import type {
 } from "./shared.ts";
 import { MONSTER_BY_ID } from "./data/pokemon.ts";
 import { move_spec } from "./data/moves.ts";
+import type { CurseCollateral, CurseCollateralId, EffectCollateral, EffectCollateralId } from "./data/types.ts";
 import { mul_div_ceil, mul_div_floor, mul_div_round, normalize_int } from "./int_math.ts";
 import { LEVEL_MAX, LEVEL_MIN, calc_final_stats, validate_ev_spread } from "./stats_calc.ts";
 
@@ -73,6 +78,51 @@ const TYPE_PASSIVE_ATK_TRUE_DAMAGE = 10;
 const TYPE_PASSIVE_DEF_ARMOR_STACK_MAX = 5;
 const TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT = 10;
 const TYPE_PASSIVE_BUF_REGEN_PER_STACK = 5;
+const EVADE_SPEED_GOAL = 500;
+const EVADE_GAP_GOAL_PERCENT = 33;
+const EFFECT_IDS: readonly EffectCollateralId[] = [
+  "confuse",
+  "sleep",
+  "stun",
+  "happiness",
+  "taunt",
+  "frustration",
+  "nocaute",
+  "immobilize",
+  "weakness",
+  "deterioration",
+  "paralyse",
+  "silence"
+] as const;
+const EFFECT_ID_SET = new Set<string>(EFFECT_IDS);
+const CURSE_IDS: readonly CurseCollateralId[] = [
+  "madness",
+  "leech_seed",
+  "destiny_bond",
+  "endure"
+] as const;
+const CURSE_ID_SET = new Set<string>(CURSE_IDS);
+
+const EFFECT_LABELS: Record<EffectCollateralId, string> = {
+  confuse: "Confuse",
+  sleep: "Sleep",
+  stun: "Stun",
+  happiness: "Happiness",
+  taunt: "Taunt",
+  frustration: "Frustration",
+  nocaute: "Nocaute",
+  immobilize: "Immobilize",
+  weakness: "Weakness",
+  deterioration: "Deterioration",
+  paralyse: "Paralyse",
+  silence: "Silence"
+};
+const CURSE_LABELS: Record<CurseCollateralId, string> = {
+  madness: "Madness",
+  leech_seed: "Leech Seed",
+  destiny_bond: "Destiny Bond",
+  endure: "Endure"
+};
 
 function clamp_stat_stage(value: number): number {
   return Math.max(STAT_STAGE_MIN, Math.min(STAT_STAGE_MAX, value));
@@ -112,6 +162,8 @@ function set_attack_stage(monster: MonsterState, next_stage: number): number {
 }
 
 function compare_action_initiative(state: GameState, phase: Phase, a: Action, b: Action): number {
+  const a_slot = a.player;
+  const b_slot = b.player;
   const a_active = active_monster(state.players[a.player]);
   const b_active = active_monster(state.players[b.player]);
 
@@ -122,11 +174,11 @@ function compare_action_initiative(state: GameState, phase: Phase, a: Action, b:
       return a_quick ? 1 : -1;
     }
     if (a_quick && b_quick) {
-      return compare_initiative(a_active, b_active, INITIATIVE_WITHOUT_SPEED);
+      return compare_initiative(state, a_slot, b_slot, a_active, b_active, INITIATIVE_WITHOUT_SPEED);
     }
   }
 
-  return compare_initiative(a_active, b_active, phase.initiative);
+  return compare_initiative(state, a_slot, b_slot, a_active, b_active, phase.initiative);
 }
 
 function action_type_order(action: Action): number {
@@ -187,54 +239,313 @@ function clone_monster(monster: MonsterState): MonsterState {
     chosenPassive: monster.chosenPassive,
     protectActiveThisTurn: monster.protectActiveThisTurn,
     endureActiveThisTurn: monster.endureActiveThisTurn,
-    choiceBandLockedMoveIndex: monster.choiceBandLockedMoveIndex,
     protectCooldownTurns: monster.protectCooldownTurns,
     endureCooldownTurns: monster.endureCooldownTurns
   };
 }
 
+function empty_slot_record<T>(player1: T, player2: T): Record<PlayerSlot, T> {
+  return { player1, player2 };
+}
+
 function empty_pending(): Record<PlayerSlot, boolean> {
-  return { player1: false, player2: false };
+  return empty_slot_record(false, false);
 }
 
 function empty_rps_score(): Record<PlayerSlot, number> {
-  return { player1: 0, player2: 0 };
+  return empty_slot_record(0, 0);
 }
 
 function empty_type_passive_armor_stacks(): Record<PlayerSlot, number> {
-  return { player1: 0, player2: 0 };
+  return empty_slot_record(0, 0);
 }
 
 function empty_type_passive_regen_stacks(): Record<PlayerSlot, number> {
-  return { player1: 0, player2: 0 };
+  return empty_slot_record(0, 0);
 }
 
 function empty_pending_wish(): Record<PlayerSlot, number | null> {
-  return { player1: null, player2: null };
+  return empty_slot_record<number | null>(null, null);
 }
 
 function empty_taunt_until_turn(): Record<PlayerSlot, number> {
-  return { player1: 0, player2: 0 };
+  return empty_slot_record(0, 0);
+}
+
+function empty_active_effects(): Record<PlayerSlot, ActiveEffectState[]> {
+  return empty_slot_record([], []);
+}
+
+function empty_last_move_index(): Record<PlayerSlot, number | null> {
+  return empty_slot_record<number | null>(null, null);
+}
+
+function empty_evade_telemetry(): Record<PlayerSlot, EvadeTelemetry> {
+  const empty_entry = (): EvadeTelemetry => ({
+    effectiveSpeed: 0,
+    speedGoal: EVADE_SPEED_GOAL,
+    speedReady: false,
+    gapPercent: 0,
+    gapGoalPercent: EVADE_GAP_GOAL_PERCENT,
+    gapReady: false,
+    canEvade: false
+  });
+  return empty_slot_record(empty_entry(), empty_entry());
+}
+
+function empty_active_curses(): Record<PlayerSlot, ActiveCurseState[]> {
+  return empty_slot_record([], []);
 }
 
 function empty_arena_trap_until_turn(): Record<PlayerSlot, number> {
-  return { player1: 0, player2: 0 };
-}
-
-function empty_leech_seed_active(): Record<PlayerSlot, boolean> {
-  return { player1: false, player2: false };
-}
-
-function empty_leech_seed_sources(): Record<PlayerSlot, PlayerSlot | null> {
-  return { player1: null, player2: null };
+  return empty_slot_record(0, 0);
 }
 
 function empty_spikes_armed_by_target(): Record<PlayerSlot, boolean> {
-  return { player1: false, player2: false };
+  return empty_slot_record(false, false);
+}
+
+function effect_label(effect_id: string): string {
+  if (effect_id in EFFECT_LABELS) {
+    return EFFECT_LABELS[effect_id as EffectCollateralId];
+  }
+  return effect_id;
+}
+
+function curse_label(curse_id: string): string {
+  if (curse_id in CURSE_LABELS) {
+    return CURSE_LABELS[curse_id as CurseCollateralId];
+  }
+  return curse_id;
+}
+
+function normalize_active_effects(input: unknown): ActiveEffectState[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const normalized: ActiveEffectState[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const row = item as { id?: unknown; remainingTurns?: unknown };
+    if (typeof row.id !== "string" || !EFFECT_ID_SET.has(row.id)) {
+      continue;
+    }
+    const remaining_raw = typeof row.remainingTurns === "number" ? row.remainingTurns : 1;
+    const remaining = Math.max(1, normalize_int(remaining_raw, 1, 1));
+    normalized.push({ id: row.id, remainingTurns: remaining });
+  }
+  return normalized;
+}
+
+function normalize_active_curses(input: unknown): ActiveCurseState[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const normalized: ActiveCurseState[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const row = item as { id?: unknown; sourceSlot?: unknown; stacks?: unknown };
+    if (typeof row.id !== "string" || !CURSE_ID_SET.has(row.id)) {
+      continue;
+    }
+    const source_slot: PlayerSlot | null =
+      row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null;
+    const stacks_raw = typeof row.stacks === "number" ? row.stacks : 1;
+    const stacks = Math.max(1, normalize_int(stacks_raw, 1, 1));
+    normalized.push({ id: row.id, sourceSlot: source_slot, stacks });
+  }
+  return normalized;
+}
+
+function effect_list(state: GameState, slot: PlayerSlot): ActiveEffectState[] {
+  return state.activeEffectsBySlot?.[slot] ?? [];
+}
+
+function curse_list(state: GameState, slot: PlayerSlot): ActiveCurseState[] {
+  return state.activeCursesBySlot?.[slot] ?? [];
+}
+
+function effect_state(state: GameState, slot: PlayerSlot, effect_id: EffectCollateralId): ActiveEffectState | null {
+  for (const effect of effect_list(state, slot)) {
+    if (effect.id === effect_id) {
+      return effect;
+    }
+  }
+  return null;
+}
+
+function curse_state(state: GameState, slot: PlayerSlot, curse_id: CurseCollateralId): ActiveCurseState | null {
+  for (const curse of curse_list(state, slot)) {
+    if (curse.id === curse_id) {
+      return curse;
+    }
+  }
+  return null;
+}
+
+function has_effect(state: GameState, slot: PlayerSlot, effect_id: EffectCollateralId): boolean {
+  return !!effect_state(state, slot, effect_id);
+}
+
+function has_curse(state: GameState, slot: PlayerSlot, curse_id: CurseCollateralId): boolean {
+  return !!curse_state(state, slot, curse_id);
+}
+
+function curse_stacks(state: GameState, slot: PlayerSlot, curse_id: CurseCollateralId): number {
+  return curse_state(state, slot, curse_id)?.stacks ?? 0;
+}
+
+function effect_turns_remaining(state: GameState, slot: PlayerSlot, effect_id: EffectCollateralId): number {
+  return effect_state(state, slot, effect_id)?.remainingTurns ?? 0;
+}
+
+function upsert_effect(
+  state: GameState,
+  log: EventLog[],
+  target_slot: PlayerSlot,
+  effect_id: EffectCollateralId,
+  duration_turns: number,
+  source_slot: PlayerSlot,
+  source_move_id: string
+): void {
+  ensure_state_runtime_defaults(state);
+  const duration = Math.max(1, normalize_int(duration_turns, 1, 1));
+  const effects = state.activeEffectsBySlot[target_slot];
+  const existing = effects.find((entry) => entry.id === effect_id) ?? null;
+  const before_remaining = existing?.remainingTurns ?? 0;
+  if (existing) {
+    existing.remainingTurns = Math.max(existing.remainingTurns, duration);
+  } else {
+    effects.push({ id: effect_id, remainingTurns: duration });
+  }
+  const after_remaining = existing?.remainingTurns ?? duration;
+  log.push({
+    type: "effect_apply",
+    turn: state.turn,
+    summary: `${effect_label(effect_id)} applied on ${target_slot} (${after_remaining} turn${after_remaining === 1 ? "" : "s"})`,
+    data: {
+      slot: source_slot,
+      targetSlot: target_slot,
+      move: source_move_id,
+      effect: effect_id,
+      beforeTurns: before_remaining,
+      afterTurns: after_remaining
+    }
+  });
+}
+
+function apply_move_effects_from_collateral(
+  state: GameState,
+  log: EventLog[],
+  source_slot: PlayerSlot,
+  collaterals: readonly EffectCollateral[],
+  source_move_id: string
+): void {
+  if (collaterals.length === 0) {
+    return;
+  }
+  for (const collateral of collaterals) {
+    const target_slot: PlayerSlot = collateral.target === "self" ? source_slot : other_slot(source_slot);
+    upsert_effect(
+      state,
+      log,
+      target_slot,
+      collateral.id,
+      collateral.maxDurationTurns,
+      source_slot,
+      source_move_id
+    );
+  }
+}
+
+function upsert_curse(
+  state: GameState,
+  log: EventLog[],
+  target_slot: PlayerSlot,
+  curse_id: CurseCollateralId,
+  source_slot: PlayerSlot | null,
+  source_move_id: string
+): void {
+  ensure_state_runtime_defaults(state);
+  const curses = state.activeCursesBySlot[target_slot];
+  const existing = curses.find((entry) => entry.id === curse_id) ?? null;
+  const before_stacks = existing?.stacks ?? 0;
+  if (existing) {
+    existing.stacks += 1;
+    if (source_slot) {
+      existing.sourceSlot = source_slot;
+    }
+  } else {
+    curses.push({
+      id: curse_id,
+      sourceSlot: source_slot,
+      stacks: 1
+    });
+  }
+  const after_stacks = existing?.stacks ?? 1;
+  log.push({
+    type: "curse_apply",
+    turn: state.turn,
+    summary: `${curse_label(curse_id)} cursed ${target_slot}${after_stacks > 1 ? ` (x${after_stacks})` : ""}`,
+    data: {
+      slot: source_slot,
+      targetSlot: target_slot,
+      move: source_move_id,
+      curse: curse_id,
+      beforeStacks: before_stacks,
+      afterStacks: after_stacks
+    }
+  });
+}
+
+function apply_move_curses_from_collateral(
+  state: GameState,
+  log: EventLog[],
+  source_slot: PlayerSlot,
+  collaterals: readonly CurseCollateral[],
+  source_move_id: string
+): void {
+  if (collaterals.length === 0) {
+    return;
+  }
+  for (const collateral of collaterals) {
+    const target_slot: PlayerSlot = source_slot === "player1" ? "player2" : "player1";
+    upsert_curse(state, log, target_slot, collateral.id, source_slot, source_move_id);
+  }
+}
+
+function decay_effects_end_turn(state: GameState, log: EventLog[]): void {
+  ensure_state_runtime_defaults(state);
+  for (const slot of SLOT_ORDER) {
+    const current = state.activeEffectsBySlot[slot];
+    if (!Array.isArray(current) || current.length === 0) {
+      state.activeEffectsBySlot[slot] = [];
+      continue;
+    }
+    const next: ActiveEffectState[] = [];
+    for (const effect of current) {
+      const remaining = Math.max(0, normalize_int(effect.remainingTurns, 1, 0) - 1);
+      if (remaining > 0) {
+        next.push({ id: effect.id, remainingTurns: remaining });
+        continue;
+      }
+      log.push({
+        type: "effect_end",
+        turn: state.turn,
+        summary: `${effect_label(effect.id)} ended on ${slot}`,
+        data: { targetSlot: slot, effect: effect.id }
+      });
+    }
+    state.activeEffectsBySlot[slot] = next;
+  }
 }
 
 function is_slot_taunted(state: GameState, slot: PlayerSlot): boolean {
-  return (state.tauntUntilTurn?.[slot] ?? 0) >= state.turn;
+  return (state.tauntUntilTurn?.[slot] ?? 0) >= state.turn || has_effect(state, slot, "taunt");
 }
 
 function normalize_type_passive_stack(value: unknown, fallback: number, min: number, max: number): number {
@@ -271,6 +582,110 @@ function is_attack_move(spec: { id: string; phaseId: string }): boolean {
   return !TAUNT_BLOCKED_MOVE_IDS.has(spec.id);
 }
 
+function is_skill_move(spec: { id: string; phaseId: string }): boolean {
+  return !is_attack_move(spec);
+}
+
+function has_available_switch_target(player: PlayerState): boolean {
+  for (let index = 0; index < player.team.length; index++) {
+    if (index === player.activeIndex) {
+      continue;
+    }
+    if (is_alive(player.team[index])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function switch_block_reason(state: GameState, slot: PlayerSlot): string | null {
+  if (is_slot_arena_trapped(state, slot)) {
+    return "arena trapped";
+  }
+  if (is_slot_taunted(state, slot)) {
+    return "taunt";
+  }
+  if (has_effect(state, slot, "confuse")) {
+    return "confuse";
+  }
+  if (has_effect(state, slot, "immobilize")) {
+    return "immobilize";
+  }
+  return null;
+}
+
+function move_block_reason(
+  state: GameState,
+  slot: PlayerSlot,
+  move_index: number,
+  spec: ReturnType<typeof move_spec>
+): string | null {
+  const player = state.players[slot];
+  const attack_move = is_attack_move(spec);
+  const skill_move = is_skill_move(spec);
+  const has_switch_target = has_available_switch_target(player);
+
+  if (has_switch_target && has_effect(state, slot, "nocaute")) {
+    return "nocaute";
+  }
+  if (has_effect(state, slot, "sleep")) {
+    return "sleep";
+  }
+  if (attack_move && has_effect(state, slot, "stun")) {
+    return "stun";
+  }
+  if (attack_move && has_effect(state, slot, "confuse")) {
+    return "confuse";
+  }
+  if (skill_move && has_effect(state, slot, "silence")) {
+    return "silence";
+  }
+  if (skill_move && is_slot_taunted(state, slot)) {
+    return "taunt";
+  }
+  const last_move = state.lastMoveIndexBySlot?.[slot] ?? null;
+  if (typeof last_move === "number" && has_effect(state, slot, "frustration") && move_index === last_move) {
+    return "frustration";
+  }
+  if (typeof last_move === "number" && has_effect(state, slot, "happiness") && move_index !== last_move) {
+    return "happiness";
+  }
+  return null;
+}
+
+function move_block_summary(slot: PlayerSlot, reason: string, spec_label: string): string {
+  if (reason === "nocaute") {
+    return `${slot} cannot use ${spec_label} (Nocaute forces switch)`;
+  }
+  if (reason === "sleep") {
+    return `${slot} cannot use ${spec_label} (Sleep)`;
+  }
+  if (reason === "stun") {
+    return `${slot} cannot use ${spec_label} (Stun blocks moves)`;
+  }
+  if (reason === "silence") {
+    return `${slot} cannot use ${spec_label} (Silence blocks skills)`;
+  }
+  if (reason === "taunt") {
+    return `${slot} cannot use ${spec_label} (Taunt forces attack moves)`;
+  }
+  if (reason === "happiness") {
+    return `${slot} cannot use ${spec_label} (Happiness allows only last move)`;
+  }
+  if (reason === "frustration") {
+    return `${slot} cannot use ${spec_label} (Frustration blocks last move)`;
+  }
+  return `${slot} cannot use ${spec_label} (${effect_label(reason)})`;
+}
+
+function mark_last_move_used(state: GameState, slot: PlayerSlot, move_id: MoveId, move_index: number): void {
+  ensure_state_runtime_defaults(state);
+  if (move_id === "none") {
+    return;
+  }
+  state.lastMoveIndexBySlot[slot] = move_index;
+}
+
 function clone_player(player: PlayerState): PlayerState {
   const active = player.team[player.activeIndex] ?? player.team[0];
   const fallback_max_hp = active ? normalize_int(active.maxHp, SHARED_HP_START, 1) : SHARED_HP_START;
@@ -292,50 +707,64 @@ export function clone_state(state: GameState): GameState {
     turn: state.turn,
     status: state.status,
     winner: state.winner,
+    endReason: state.endReason,
+    evadedSlots: Array.isArray(state.evadedSlots) ? state.evadedSlots.slice() : undefined,
     baseTurnLimit: Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1)),
-    rpsScore: {
-      player1: normalize_int(state.rpsScore?.player1, 0, -99999),
-      player2: normalize_int(state.rpsScore?.player2, 0, -99999)
-    },
-    typePassiveArmorStacks: {
-      player1: normalize_type_passive_stack(state.typePassiveArmorStacks?.player1, 0, 0, TYPE_PASSIVE_DEF_ARMOR_STACK_MAX),
-      player2: normalize_type_passive_stack(state.typePassiveArmorStacks?.player2, 0, 0, TYPE_PASSIVE_DEF_ARMOR_STACK_MAX)
-    },
-    typePassiveRegenStacks: {
-      player1: normalize_type_passive_stack(state.typePassiveRegenStacks?.player1, 0, 0, 9999),
-      player2: normalize_type_passive_stack(state.typePassiveRegenStacks?.player2, 0, 0, 9999)
-    },
-    arenaTrapUntilTurn: {
-      player1: normalize_int(state.arenaTrapUntilTurn?.player1, 0, 0),
-      player2: normalize_int(state.arenaTrapUntilTurn?.player2, 0, 0)
-    },
-    spikesArmedByTarget: {
-      player1: !!state.spikesArmedByTarget?.player1,
-      player2: !!state.spikesArmedByTarget?.player2
-    },
+    rpsScore: empty_rps_score(),
+    evadeTelemetry: empty_evade_telemetry(),
+    typePassiveArmorStacks: empty_type_passive_armor_stacks(),
+    typePassiveRegenStacks: empty_type_passive_regen_stacks(),
+    arenaTrapUntilTurn: empty_arena_trap_until_turn(),
+    spikesArmedByTarget: empty_spikes_armed_by_target(),
     players: {
       player1: clone_player(state.players.player1),
       player2: clone_player(state.players.player2)
     },
-    pendingSwitch: { ...state.pendingSwitch },
-    pendingWish: {
-      player1: state.pendingWish?.player1 ?? null,
-      player2: state.pendingWish?.player2 ?? null
-    },
-    tauntUntilTurn: {
-      player1: state.tauntUntilTurn?.player1 ?? 0,
-      player2: state.tauntUntilTurn?.player2 ?? 0
-    },
-    leechSeedActiveByTarget: {
-      player1: state.leechSeedActiveByTarget?.player1 ?? false,
-      player2: state.leechSeedActiveByTarget?.player2 ?? false
-    },
-    leechSeedSourceByTarget: {
-      player1: state.leechSeedSourceByTarget?.player1 ?? null,
-      player2: state.leechSeedSourceByTarget?.player2 ?? null
-    }
+    pendingSwitch: empty_pending(),
+    pendingWish: empty_pending_wish(),
+    tauntUntilTurn: empty_taunt_until_turn(),
+    activeEffectsBySlot: empty_active_effects(),
+    activeCursesBySlot: empty_active_curses(),
+    lastMoveIndexBySlot: empty_last_move_index(),
   };
+  cloned.rpsScore.player1 = normalize_int(state.rpsScore?.player1, 0, -99999);
+  cloned.rpsScore.player2 = normalize_int(state.rpsScore?.player2, 0, -99999);
+  cloned.typePassiveArmorStacks.player1 = normalize_type_passive_stack(
+    state.typePassiveArmorStacks?.player1,
+    0,
+    0,
+    TYPE_PASSIVE_DEF_ARMOR_STACK_MAX
+  );
+  cloned.typePassiveArmorStacks.player2 = normalize_type_passive_stack(
+    state.typePassiveArmorStacks?.player2,
+    0,
+    0,
+    TYPE_PASSIVE_DEF_ARMOR_STACK_MAX
+  );
+  cloned.typePassiveRegenStacks.player1 = normalize_type_passive_stack(state.typePassiveRegenStacks?.player1, 0, 0, 9999);
+  cloned.typePassiveRegenStacks.player2 = normalize_type_passive_stack(state.typePassiveRegenStacks?.player2, 0, 0, 9999);
+  cloned.arenaTrapUntilTurn.player1 = normalize_int(state.arenaTrapUntilTurn?.player1, 0, 0);
+  cloned.arenaTrapUntilTurn.player2 = normalize_int(state.arenaTrapUntilTurn?.player2, 0, 0);
+  cloned.spikesArmedByTarget.player1 = !!state.spikesArmedByTarget?.player1;
+  cloned.spikesArmedByTarget.player2 = !!state.spikesArmedByTarget?.player2;
+  cloned.pendingSwitch.player1 = !!state.pendingSwitch?.player1;
+  cloned.pendingSwitch.player2 = !!state.pendingSwitch?.player2;
+  cloned.pendingWish.player1 = state.pendingWish?.player1 ?? null;
+  cloned.pendingWish.player2 = state.pendingWish?.player2 ?? null;
+  cloned.tauntUntilTurn.player1 = state.tauntUntilTurn?.player1 ?? 0;
+  cloned.tauntUntilTurn.player2 = state.tauntUntilTurn?.player2 ?? 0;
+  cloned.activeEffectsBySlot.player1 = normalize_active_effects(state.activeEffectsBySlot?.player1);
+  cloned.activeEffectsBySlot.player2 = normalize_active_effects(state.activeEffectsBySlot?.player2);
+  cloned.activeCursesBySlot.player1 = normalize_active_curses(state.activeCursesBySlot?.player1);
+  cloned.activeCursesBySlot.player2 = normalize_active_curses(state.activeCursesBySlot?.player2);
+  const last_move_p1 = state.lastMoveIndexBySlot?.player1;
+  const last_move_p2 = state.lastMoveIndexBySlot?.player2;
+  cloned.lastMoveIndexBySlot.player1 =
+    typeof last_move_p1 === "number" && Number.isInteger(last_move_p1) ? Math.max(0, last_move_p1) : null;
+  cloned.lastMoveIndexBySlot.player2 =
+    typeof last_move_p2 === "number" && Number.isInteger(last_move_p2) ? Math.max(0, last_move_p2) : null;
   sync_all_players_shared_hp(cloned);
+  refresh_evade_telemetry(cloned);
   return cloned;
 }
 
@@ -370,6 +799,45 @@ function sync_all_players_shared_hp(state: GameState): void {
     const fallback_shared_hp = active ? normalize_int(active.hp, shared_hp_max, 0) : shared_hp_max;
     const shared_hp = Math.max(0, Math.min(shared_hp_max, normalize_int(player.sharedHp, fallback_shared_hp, 0)));
     sync_player_shared_hp(state, slot, shared_hp);
+  }
+}
+
+function ensure_state_runtime_defaults(state: GameState): void {
+  if (!state.pendingSwitch) {
+    state.pendingSwitch = empty_pending();
+  }
+  if (!state.pendingWish) {
+    state.pendingWish = empty_pending_wish();
+  }
+  if (!state.tauntUntilTurn) {
+    state.tauntUntilTurn = empty_taunt_until_turn();
+  }
+  if (!state.activeEffectsBySlot) {
+    state.activeEffectsBySlot = empty_active_effects();
+  }
+  if (!state.activeCursesBySlot) {
+    state.activeCursesBySlot = empty_active_curses();
+  }
+  if (!state.lastMoveIndexBySlot) {
+    state.lastMoveIndexBySlot = empty_last_move_index();
+  }
+  if (!state.rpsScore) {
+    state.rpsScore = empty_rps_score();
+  }
+  if (!state.evadeTelemetry) {
+    state.evadeTelemetry = empty_evade_telemetry();
+  }
+  if (!state.typePassiveArmorStacks) {
+    state.typePassiveArmorStacks = empty_type_passive_armor_stacks();
+  }
+  if (!state.typePassiveRegenStacks) {
+    state.typePassiveRegenStacks = empty_type_passive_regen_stacks();
+  }
+  if (!state.arenaTrapUntilTurn) {
+    state.arenaTrapUntilTurn = empty_arena_trap_until_turn();
+  }
+  if (!state.spikesArmedByTarget) {
+    state.spikesArmedByTarget = empty_spikes_armed_by_target();
   }
 }
 
@@ -652,9 +1120,20 @@ function apply_simultaneous_switch_passives(
   });
 }
 
-function end_match_with_winner(state: GameState, log: EventLog[], winner: PlayerSlot, summary: string, data?: Record<string, unknown>): void {
+function end_match_with_winner(
+  state: GameState,
+  log: EventLog[],
+  winner: PlayerSlot,
+  summary: string,
+  data?: Record<string, unknown>,
+  end_reason?: MatchEndReason
+): void {
   state.status = "ended";
   state.winner = winner;
+  if (end_reason) {
+    state.endReason = end_reason;
+  }
+  delete state.evadedSlots;
   log.push({
     type: "match_end",
     turn: state.turn,
@@ -663,9 +1142,19 @@ function end_match_with_winner(state: GameState, log: EventLog[], winner: Player
   });
 }
 
-function end_match_draw(state: GameState, log: EventLog[], summary: string, data?: Record<string, unknown>): void {
+function end_match_draw(
+  state: GameState,
+  log: EventLog[],
+  summary: string,
+  data?: Record<string, unknown>,
+  end_reason?: MatchEndReason
+): void {
   state.status = "ended";
   delete state.winner;
+  if (end_reason) {
+    state.endReason = end_reason;
+  }
+  delete state.evadedSlots;
   log.push({
     type: "match_end",
     turn: state.turn,
@@ -684,35 +1173,139 @@ function check_zero_hp_match_result(state: GameState, log: EventLog[]): MatchPro
     end_match_with_winner(state, log, "player2", "player2 wins (enemy shared HP reached 0)", {
       player1Hp: p1_hp,
       player2Hp: p2_hp
-    });
+    }, "hp_zero");
     return "ended";
   }
   if (p2_hp <= 0 && p1_hp > 0) {
     end_match_with_winner(state, log, "player1", "player1 wins (enemy shared HP reached 0)", {
       player1Hp: p1_hp,
       player2Hp: p2_hp
-    });
+    }, "hp_zero");
     return "ended";
   }
   end_match_draw(state, log, "draw (both sides reached 0 HP)", {
     player1Hp: p1_hp,
     player2Hp: p2_hp
+  }, "hp_zero");
+  return "ended";
+}
+
+function effective_attack_for_slot(state: GameState, slot: PlayerSlot, monster: MonsterState): number {
+  if (has_effect(state, slot, "weakness")) {
+    return 0;
+  }
+  return monster.attack;
+}
+
+function effective_defense_for_slot(state: GameState, slot: PlayerSlot, monster: MonsterState): number {
+  if (has_effect(state, slot, "deterioration")) {
+    return 0;
+  }
+  return monster.defense;
+}
+
+function effective_speed_for_slot(state: GameState, slot: PlayerSlot, monster: MonsterState): number {
+  if (has_effect(state, slot, "paralyse")) {
+    return 0;
+  }
+  return monster.speed;
+}
+
+function build_evade_telemetry_entry(state: GameState, slot: PlayerSlot): EvadeTelemetry {
+  const monster = active_monster(state.players[slot]);
+  const enemy_slot = other_slot(slot);
+  const enemy = active_monster(state.players[enemy_slot]);
+  const effective_speed = Math.max(0, effective_speed_for_slot(state, slot, monster));
+  const enemy_effective_speed = Math.max(0, effective_speed_for_slot(state, enemy_slot, enemy));
+  const divisor = Math.max(1, enemy_effective_speed);
+  const gap_percent = mul_div_round(effective_speed - enemy_effective_speed, 100, divisor);
+  const speed_ready = effective_speed >= EVADE_SPEED_GOAL;
+  const gap_ready = gap_percent >= EVADE_GAP_GOAL_PERCENT;
+  return {
+    effectiveSpeed: effective_speed,
+    speedGoal: EVADE_SPEED_GOAL,
+    speedReady: speed_ready,
+    gapPercent: gap_percent,
+    gapGoalPercent: EVADE_GAP_GOAL_PERCENT,
+    gapReady: gap_ready,
+    canEvade: speed_ready || gap_ready
+  };
+}
+
+function refresh_evade_telemetry(state: GameState): void {
+  ensure_state_runtime_defaults(state);
+  state.evadeTelemetry.player1 = build_evade_telemetry_entry(state, "player1");
+  state.evadeTelemetry.player2 = build_evade_telemetry_entry(state, "player2");
+}
+
+function check_evade_match_result(state: GameState, log: EventLog[]): MatchProgress {
+  refresh_evade_telemetry(state);
+  if (state.status !== "running") {
+    return state.status === "ended" ? "ended" : "continue";
+  }
+  const evaded_slots = SLOT_ORDER.filter((slot) => state.evadeTelemetry[slot].canEvade);
+  if (evaded_slots.length === 0) {
+    return "continue";
+  }
+
+  state.status = "ended";
+  state.endReason = "evade_escape";
+  state.evadedSlots = evaded_slots.slice();
+  delete state.winner;
+
+  const summary =
+    evaded_slots.length >= 2
+      ? "double technical escape (both players satisfied EVADE condition)"
+      : `${evaded_slots[0]} escaped technically (EVADE condition met)`;
+  log.push({
+    type: "match_end",
+    turn: state.turn,
+    summary,
+    data: {
+      reason: "evade_escape",
+      evadedSlots: evaded_slots.slice(),
+      telemetry: {
+        player1: { ...state.evadeTelemetry.player1 },
+        player2: { ...state.evadeTelemetry.player2 }
+      }
+    }
   });
   return "ended";
 }
 
-function compare_initiative(a: MonsterState, b: MonsterState, stats: Phase["initiative"]): number {
+function initiative_stat_value(
+  state: GameState,
+  slot: PlayerSlot,
+  monster: MonsterState,
+  key: keyof Pick<MonsterState, "speed" | "attack" | "hp" | "defense">
+): number {
+  if (key === "speed") {
+    return effective_speed_for_slot(state, slot, monster);
+  }
+  if (key === "attack") {
+    return effective_attack_for_slot(state, slot, monster);
+  }
+  if (key === "defense") {
+    return effective_defense_for_slot(state, slot, monster);
+  }
+  return monster.hp;
+}
+
+function compare_initiative(
+  state: GameState,
+  a_slot: PlayerSlot,
+  b_slot: PlayerSlot,
+  a: MonsterState,
+  b: MonsterState,
+  stats: Phase["initiative"]
+): number {
   for (const key of stats) {
-    const diff = a[key] - b[key];
+    const diff = initiative_stat_value(state, a_slot, a, key) - initiative_stat_value(state, b_slot, b, key);
     if (diff !== 0) {
       return diff;
     }
   }
   return 0;
-}
-
-function find_phase(phaseId: string): Phase | undefined {
-  return PHASES.find((phase) => phase.id === phaseId);
 }
 
 function is_alive(monster: MonsterState): boolean {
@@ -745,12 +1338,6 @@ function decrement_cooldowns(state: GameState): void {
       }
     }
   });
-}
-
-function apply_passives(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
-  void state;
-  void log;
-  void hp_changed;
 }
 
 function apply_pending_wish(state: GameState, log: EventLog[], slot: PlayerSlot, hp_changed: WeakSet<MonsterState>): void {
@@ -824,100 +1411,101 @@ function apply_type_passive_regen_end_turn(
   });
 }
 
-function clear_leech_seed_on_target_switch(state: GameState, log: EventLog[], target_slot: PlayerSlot): void {
-  const was_active = state.leechSeedActiveByTarget?.[target_slot] ?? false;
-  const source = state.leechSeedSourceByTarget?.[target_slot] ?? null;
-  if (!was_active && !source) {
+function clear_curses_on_target_switch(state: GameState, log: EventLog[], target_slot: PlayerSlot): void {
+  ensure_state_runtime_defaults(state);
+  const active_curses = state.activeCursesBySlot[target_slot];
+  if (!Array.isArray(active_curses) || active_curses.length === 0) {
     return;
   }
-  state.leechSeedActiveByTarget[target_slot] = false;
-  state.leechSeedSourceByTarget[target_slot] = null;
-  log.push({
-    type: "leech_end",
-    turn: state.turn,
-    summary: `Leech Life ended on ${target_slot} after switch`,
-    data: { slot: target_slot, source }
-  });
+  for (const curse of active_curses) {
+    const ended_type = curse.id === "leech_seed" ? "leech_end" : "curse_end";
+    log.push({
+      type: ended_type,
+      turn: state.turn,
+      summary:
+        curse.id === "leech_seed"
+          ? `Leech Seed ended on ${target_slot} after switch`
+          : `${curse_label(curse.id)} ended on ${target_slot} after switch`,
+      data: { slot: target_slot, source: curse.sourceSlot, curse: curse.id, stacks: curse.stacks, reason: "switch" }
+    });
+  }
+  state.activeCursesBySlot[target_slot] = [];
 }
 
-function apply_leech_seed_end_turn(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
-  const active_targets = state.leechSeedActiveByTarget;
-  const sources = state.leechSeedSourceByTarget;
-  if (!active_targets) {
-    return;
-  }
+function apply_curse_end_turn(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
+  ensure_state_runtime_defaults(state);
   for (const target_slot of SLOT_ORDER) {
-    if (!(active_targets[target_slot] ?? false)) {
+    const curses = state.activeCursesBySlot[target_slot];
+    if (!Array.isArray(curses) || curses.length === 0) {
       continue;
-    }
-    let source_slot = sources?.[target_slot] ?? null;
-    if (!source_slot) {
-      // Backward-compatibility for existing states: infer source side from target side.
-      source_slot = other_slot(target_slot);
-      if (sources) {
-        sources[target_slot] = source_slot;
-      }
     }
     const target_player = state.players[target_slot];
     const target = active_monster(target_player);
     if (!is_alive(target)) {
-      state.leechSeedActiveByTarget[target_slot] = false;
-      state.leechSeedSourceByTarget[target_slot] = null;
       continue;
     }
 
-    const target_before = target_player.sharedHp;
-    const drained_from_max = mul_div_floor(target_player.sharedHpMax, 1, 8);
-    const drained = Math.min(target_before, Math.max(0, drained_from_max));
-    const target_after = target_before - drained;
-    if (drained <= 0) {
-      continue;
-    }
-    sync_player_shared_hp(state, target_slot, target_after);
-    hp_changed.add(target);
-    log.push({
-      type: "leech_drain",
-      turn: state.turn,
-      phase: END_PHASE_ID,
-      summary: `${target.name} lost ${drained} HP from Leech Life`,
-      data: {
-        slot: source_slot,
-        targetSlot: target_slot,
-        source: source_slot,
-        target: target.id,
-        damage: drained,
-        before: target_before,
-        after: target_after
+    for (const curse of curses) {
+      if (curse.id !== "leech_seed") {
+        // Other curse rules are intentionally left as future extensions.
+        continue;
       }
-    });
+      const source_slot = curse.sourceSlot ?? other_slot(target_slot);
+      const target_before = target_player.sharedHp;
+      const drained_base = mul_div_floor(target_player.sharedHpMax, 1, 8);
+      const drained_attempt = Math.max(0, drained_base * Math.max(1, curse.stacks));
+      const drained = Math.min(target_before, drained_attempt);
+      const target_after = target_before - drained;
+      if (drained <= 0) {
+        continue;
+      }
+      sync_player_shared_hp(state, target_slot, target_after);
+      hp_changed.add(target);
+      log.push({
+        type: "leech_drain",
+        turn: state.turn,
+        phase: END_PHASE_ID,
+        summary: `${target.name} lost ${drained} HP from Leech Seed`,
+        data: {
+          slot: source_slot,
+          targetSlot: target_slot,
+          source: source_slot,
+          target: target.id,
+          damage: drained,
+          stacks: curse.stacks,
+          before: target_before,
+          after: target_after
+        }
+      });
 
-    const source_player = state.players[source_slot];
-    const receiver = active_monster(source_player);
-    if (is_alive(receiver)) {
-      const heal_before = source_player.sharedHp;
-      const heal_after = Math.min(source_player.sharedHpMax, source_player.sharedHp + drained);
-      const healed = Math.max(0, heal_after - heal_before);
-      if (healed > 0) {
-        sync_player_shared_hp(state, source_slot, heal_after);
-        hp_changed.add(receiver);
-        log.push({
-          type: "leech_heal",
-          turn: state.turn,
-          phase: END_PHASE_ID,
-          summary: `${receiver.name} healed ${healed} HP from Leech Life`,
-          data: {
-            slot: source_slot,
-            source: source_slot,
-            targetSlot: target_slot,
-            target: target.id,
-            heal: healed,
-            before: heal_before,
-            after: heal_after
-          }
-        });
+      const source_player = state.players[source_slot];
+      const receiver = active_monster(source_player);
+      if (is_alive(receiver)) {
+        const heal_before = source_player.sharedHp;
+        const heal_after = Math.min(source_player.sharedHpMax, source_player.sharedHp + drained);
+        const healed = Math.max(0, heal_after - heal_before);
+        if (healed > 0) {
+          sync_player_shared_hp(state, source_slot, heal_after);
+          hp_changed.add(receiver);
+          log.push({
+            type: "leech_heal",
+            turn: state.turn,
+            phase: END_PHASE_ID,
+            summary: `${receiver.name} healed ${healed} HP from Leech Seed`,
+            data: {
+              slot: source_slot,
+              source: source_slot,
+              targetSlot: target_slot,
+              target: target.id,
+              heal: healed,
+              stacks: curse.stacks,
+              before: heal_before,
+              after: heal_after
+            }
+          });
+        }
       }
     }
-
   }
 }
 
@@ -941,7 +1529,8 @@ function maybe_end_match_by_turn_limit(state: GameState, log: EventLog[]): void 
       log,
       winner,
       `${winner} wins (higher shared HP after ${base_turn_limit} turns)`,
-      { player1Hp: p1_hp, player2Hp: p2_hp }
+      { player1Hp: p1_hp, player2Hp: p2_hp },
+      "turn_limit"
     );
     return;
   }
@@ -949,7 +1538,7 @@ function maybe_end_match_by_turn_limit(state: GameState, log: EventLog[]): void 
   end_match_draw(state, log, `draw after ${base_turn_limit} turns (equal shared HP)`, {
     player1Hp: p1_hp,
     player2Hp: p2_hp
-  });
+  }, "turn_limit");
 }
 
 function apply_focus_punch_end_turn(
@@ -1008,7 +1597,7 @@ function apply_end_turn_effect(
     return;
   }
   if (effect_id === "leech_life") {
-    apply_leech_seed_end_turn(state, log, hp_changed);
+    apply_curse_end_turn(state, log, hp_changed);
     return;
   }
   for (const slot of SLOT_ORDER) {
@@ -1182,10 +1771,11 @@ function apply_damage_move(
     return;
   }
 
-  const effective_attack = attacker.attack;
+  const effective_attack = effective_attack_for_slot(state, player_slot, attacker);
   const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
   const damage_type = spec.damageType ?? "scaled";
-  const effective_defense = defender.defense <= 0 ? 1 : defender.defense;
+  const effective_defense_base = effective_defense_for_slot(state, opponent_slot, defender);
+  const effective_defense = effective_defense_base <= 0 ? 1 : effective_defense_base;
   const level_term = mul_div_floor(2, attacker.level, 5) + 2;
   let raw_damage = 0;
   if (damage_type === "flat") {
@@ -1363,22 +1953,40 @@ function apply_move(
   }
 
   const spec = move_spec(move_id);
-  if (is_slot_taunted(state, player_slot) && !is_attack_move(spec)) {
+  const effect_collaterals = (spec.collateral ?? []).filter(
+    (entry): entry is EffectCollateral => entry.kind === "effect"
+  );
+  const curse_collaterals = (spec.collateral ?? []).filter(
+    (entry): entry is CurseCollateral => entry.kind === "curse"
+  );
+  const finalize_move_success = (): void => {
+    mark_last_move_used(state, player_slot, move_id, move_index);
+    apply_move_effects_from_collateral(state, log, player_slot, effect_collaterals, spec.id);
+    apply_move_curses_from_collateral(state, log, player_slot, curse_collaterals, spec.id);
+  };
+
+  const blocked_by = move_block_reason(state, player_slot, move_index, spec);
+  if (blocked_by) {
+    const type = blocked_by === "taunt" ? "taunt_blocked" : "effect_blocked";
+    const turns_remaining =
+      EFFECT_ID_SET.has(blocked_by) ? effect_turns_remaining(state, player_slot, blocked_by as EffectCollateralId) : 0;
     log.push({
-      type: "taunt_blocked",
+      type,
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `${player_slot} is taunted and cannot use ${spec.label}`,
+      summary: move_block_summary(player_slot, blocked_by, spec.label),
       data: {
         slot: player_slot,
         move: spec.id,
-        untilTurn: state.tauntUntilTurn?.[player_slot] ?? state.turn
+        reason: blocked_by,
+        turnsRemaining: turns_remaining
       }
     });
     return;
   }
 
   if (spec.id === "none") {
+    finalize_move_success();
     log.push({
       type: "move_none",
       turn: state.turn,
@@ -1411,6 +2019,7 @@ function apply_move(
       summary: `${player_slot} used Protect`,
       data: { slot: player_slot }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1444,6 +2053,7 @@ function apply_move(
       summary: `Endure: HP floor this turn = ${floor_hp} (1% do maxHp); on trigger gain SPE x1.5`,
       data: { move: spec.id, slot: player_slot, target: attacker.id, floorHp: floor_hp }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1472,6 +2082,7 @@ function apply_move(
       summary: `Agility: user SPE x2 (${before_speed} -> ${attacker.speed})`,
       data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_speed, after: attacker.speed }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1488,6 +2099,7 @@ function apply_move(
       summary: `Wish: no turno ${trigger_turn}, no inicio do end_turn, o ativo de ${player_slot} cura +50% do maxHp (clamp no max)`,
       data: { move: spec.id, slot: player_slot, triggerTurn: trigger_turn }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1501,6 +2113,7 @@ function apply_move(
       summary: `${player_slot} armed Spikes on ${target_slot}`,
       data: { slot: player_slot, targetSlot: target_slot, target: defender.id }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1526,6 +2139,7 @@ function apply_move(
         after: after_hp
       }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1567,6 +2181,7 @@ function apply_move(
         attackAfter: after_attack
       }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1638,6 +2253,7 @@ function apply_move(
         attackAfter: after_attack
       }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1655,6 +2271,19 @@ function apply_move(
   if (spec.id === "bounce_kick") {
     apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn);
     if (state.players[other_slot(player_slot)].sharedHp <= 0) {
+      finalize_move_success();
+      return;
+    }
+    const bounce_switch_blocked = switch_block_reason(state, player_slot);
+    if (bounce_switch_blocked && bounce_switch_blocked !== "taunt") {
+      log.push({
+        type: "move_detail",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `Bounce Kick switch blocked (${effect_label(bounce_switch_blocked)})`,
+        data: { move: spec.id, slot: player_slot, reason: bounce_switch_blocked }
+      });
+      finalize_move_success();
       return;
     }
     if (!Number.isInteger(self_switch_target_index)) {
@@ -1665,6 +2294,7 @@ function apply_move(
         summary: "Bounce Kick had no self-switch target and only dealt damage",
         data: { move: spec.id, slot: player_slot }
       });
+      finalize_move_success();
       return;
     }
     const target_index = Number(self_switch_target_index);
@@ -1678,27 +2308,20 @@ function apply_move(
         : `Bounce Kick failed to switch ${player_slot} to slot ${target_index}`,
       data: { slot: player_slot, move: spec.id, targetIndex: target_index, switched }
     });
+    finalize_move_success();
     return;
   }
 
   if (spec.id === "leech_life") {
     const target_slot = other_slot(player_slot);
-    state.leechSeedActiveByTarget[target_slot] = true;
-    state.leechSeedSourceByTarget[target_slot] = player_slot;
-    log.push({
-      type: "leech_apply",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${player_slot} seeded ${defender.name} with Leech Life`,
-      data: { slot: player_slot, targetSlot: target_slot, source: player_slot, target: defender.id }
-    });
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Leech Life: target drains 12.5% at end_turn; active on caster side heals same; seed ends when target switches",
+      summary: "Leech Seed (curse): drains at end_turn and ends when the target switches",
       data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1718,6 +2341,7 @@ function apply_move(
       summary: "Focus Punch: resolves at start of end_turn; fails if user took real damage before executing",
       data: { move: spec.id, slot: player_slot, target: defender.id }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1746,6 +2370,7 @@ function apply_move(
         summary: `Screech blocked by Clear Body (armor stack ${armor_stack})`,
         data: { move: spec.id, target: defender.id, blockedBy: "clear_body", armorStack: armor_stack }
       });
+      finalize_move_success();
       return;
     }
     const before_defense = defender.defense;
@@ -1773,28 +2398,26 @@ function apply_move(
       summary: `Screech: target DEF x0.5 (${before_defense} -> ${after_defense})`,
       data: { move: spec.id, target: defender.id, before: before_defense, after: after_defense }
     });
+    finalize_move_success();
     return;
   }
 
   if (spec.id === "taunt") {
-    const target_slot = other_slot(player_slot);
-    const before_until = state.tauntUntilTurn?.[target_slot] ?? 0;
-    const until_turn = Math.max(before_until, state.turn + 1);
-    state.tauntUntilTurn[target_slot] = until_turn;
-    log.push({
-      type: "taunt",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${player_slot} used Taunt on ${defender.name}`,
-      data: { slot: player_slot, target: defender.id, targetSlot: target_slot, beforeUntil: before_until, untilTurn: until_turn }
-    });
+    const taunt_duration = effect_collaterals.find((entry) => entry.id === "taunt")?.maxDurationTurns ?? 0;
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Taunt: ${target_slot} non-attack actions blocked on turns ${state.turn} and ${state.turn + 1}`,
-      data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot, untilTurn: until_turn }
+      summary: `Taunt: target forced to attack moves for ${Math.max(1, taunt_duration)} turn(s)`,
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        target: defender.id,
+        targetSlot: other_slot(player_slot),
+        duration: Math.max(1, taunt_duration)
+      }
     });
+    finalize_move_success();
     return;
   }
 
@@ -1846,10 +2469,63 @@ function apply_move(
         targetAfter: after_target_hp
       }
     });
+    finalize_move_success();
     return;
   }
 
   apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn);
+  finalize_move_success();
+}
+
+type SwitchTargetError = "invalid switch target" | "already active" | "target fainted";
+
+function validate_switch_target(player: PlayerState, target_index: number): SwitchTargetError | null {
+  if (target_index < 0 || target_index >= player.team.length) {
+    return "invalid switch target";
+  }
+  if (target_index === player.activeIndex) {
+    return "already active";
+  }
+  if (!is_alive(player.team[target_index])) {
+    return "target fainted";
+  }
+  return null;
+}
+
+function reset_monster_on_switch_out(monster: MonsterState): void {
+  monster.attack = monster.baseAttack;
+  monster.attackStage = 0;
+  monster.defense = monster.baseDefense;
+  monster.speed = monster.baseSpeed;
+  monster.agilityBoostActive = false;
+  monster.endureSpeedBoostActive = false;
+  monster.bellyDrumActive = false;
+  monster.screechDebuffActive = false;
+}
+
+function perform_switch(
+  state: GameState,
+  log: EventLog[],
+  slot: PlayerSlot,
+  target_index: number,
+  event_type: "switch" | "forced_switch",
+  hp_changed?: WeakSet<MonsterState>,
+  took_damage_this_turn?: Record<PlayerSlot, boolean>
+): void {
+  const player = state.players[slot];
+  const from = player.activeIndex;
+  const outgoing = player.team[from];
+  reset_monster_on_switch_out(outgoing);
+  clear_curses_on_target_switch(state, log, slot);
+  player.activeIndex = target_index;
+  sync_player_shared_hp(state, slot, player.sharedHp);
+  apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn);
+  log.push({
+    type: event_type,
+    turn: state.turn,
+    summary: `${slot} switched to ${player.team[target_index].name}`,
+    data: { slot, from, to: target_index }
+  });
 }
 
 function apply_switch(
@@ -1861,54 +2537,23 @@ function apply_switch(
   took_damage_this_turn?: Record<PlayerSlot, boolean>
 ): boolean {
   const player = state.players[player_slot];
-  const activeIndex = player.activeIndex;
-  if (targetIndex < 0 || targetIndex >= player.team.length) {
+  const error = validate_switch_target(player, targetIndex);
+  if (error) {
+    const summary =
+      error === "invalid switch target"
+        ? `${player_slot} invalid switch`
+        : error === "already active"
+          ? `${player_slot} already active`
+          : `${player_slot} cannot switch to fainted`;
     log.push({
       type: "switch_invalid",
       turn: state.turn,
-      summary: `${player_slot} invalid switch`,
-      data: { slot: player_slot, targetIndex }
+      summary,
+      data: { slot: player_slot, targetIndex, error }
     });
     return false;
   }
-  if (targetIndex === activeIndex) {
-    log.push({
-      type: "switch_invalid",
-      turn: state.turn,
-      summary: `${player_slot} already active`,
-      data: { slot: player_slot, targetIndex }
-    });
-    return false;
-  }
-  if (!is_alive(player.team[targetIndex])) {
-    log.push({
-      type: "switch_invalid",
-      turn: state.turn,
-      summary: `${player_slot} cannot switch to fainted`,
-      data: { slot: player_slot, targetIndex }
-    });
-    return false;
-  }
-  const outgoing = player.team[activeIndex];
-  outgoing.attack = outgoing.baseAttack;
-  outgoing.attackStage = 0;
-  outgoing.defense = outgoing.baseDefense;
-  outgoing.speed = outgoing.baseSpeed;
-  outgoing.agilityBoostActive = false;
-  outgoing.endureSpeedBoostActive = false;
-  outgoing.bellyDrumActive = false;
-  outgoing.screechDebuffActive = false;
-  clear_leech_seed_on_target_switch(state, log, player_slot);
-  outgoing.choiceBandLockedMoveIndex = null;
-  player.activeIndex = targetIndex;
-  sync_player_shared_hp(state, player_slot, player.sharedHp);
-  apply_spikes_on_switch(state, log, player_slot, hp_changed, took_damage_this_turn);
-  log.push({
-    type: "switch",
-    turn: state.turn,
-    summary: `${player_slot} switched to ${player.team[targetIndex].name}`,
-    data: { slot: player_slot, from: activeIndex, to: targetIndex }
-  });
+  perform_switch(state, log, player_slot, targetIndex, "switch", hp_changed, took_damage_this_turn);
   return true;
 }
 
@@ -2011,7 +2656,6 @@ export function create_initial_state(
         chosenPassive: monster.passive,
         protectActiveThisTurn: false,
         endureActiveThisTurn: false,
-        choiceBandLockedMoveIndex: null,
         protectCooldownTurns: 0,
         endureCooldownTurns: 0
       };
@@ -2029,8 +2673,11 @@ export function create_initial_state(
   const initial_state: GameState = {
     turn: 0,
     status: "setup",
+    endReason: undefined,
+    evadedSlots: undefined,
     baseTurnLimit: BASE_TURN_LIMIT,
     rpsScore: empty_rps_score(),
+    evadeTelemetry: empty_evade_telemetry(),
     typePassiveArmorStacks: empty_type_passive_armor_stacks(),
     typePassiveRegenStacks: empty_type_passive_regen_stacks(),
     arenaTrapUntilTurn: empty_arena_trap_until_turn(),
@@ -2042,10 +2689,12 @@ export function create_initial_state(
     pendingSwitch: empty_pending(),
     pendingWish: empty_pending_wish(),
     tauntUntilTurn: empty_taunt_until_turn(),
-    leechSeedActiveByTarget: empty_leech_seed_active(),
-    leechSeedSourceByTarget: empty_leech_seed_sources()
+    activeEffectsBySlot: empty_active_effects(),
+    activeCursesBySlot: empty_active_curses(),
+    lastMoveIndexBySlot: empty_last_move_index(),
   };
   sync_all_players_shared_hp(initial_state);
+  refresh_evade_telemetry(initial_state);
   return initial_state;
 }
 
@@ -2066,47 +2715,30 @@ export function resolve_turn(
     return { state: next, log };
   }
 
-  if (!next.pendingSwitch) {
-    next.pendingSwitch = empty_pending();
-  }
-  if (!next.pendingWish) {
-    next.pendingWish = empty_pending_wish();
-  }
-  if (!next.tauntUntilTurn) {
-    next.tauntUntilTurn = empty_taunt_until_turn();
-  }
-  if (!next.leechSeedActiveByTarget) {
-    next.leechSeedActiveByTarget = empty_leech_seed_active();
-  }
-  if (!next.leechSeedSourceByTarget) {
-    next.leechSeedSourceByTarget = empty_leech_seed_sources();
-  }
-  if (!next.rpsScore) {
-    next.rpsScore = empty_rps_score();
-  }
-  if (!next.typePassiveArmorStacks) {
-    next.typePassiveArmorStacks = empty_type_passive_armor_stacks();
-  }
-  if (!next.typePassiveRegenStacks) {
-    next.typePassiveRegenStacks = empty_type_passive_regen_stacks();
-  }
-  if (!next.arenaTrapUntilTurn) {
-    next.arenaTrapUntilTurn = empty_arena_trap_until_turn();
-  }
-  if (!next.spikesArmedByTarget) {
-    next.spikesArmedByTarget = empty_spikes_armed_by_target();
-  }
+  ensure_state_runtime_defaults(next);
   next.pendingSwitch = empty_pending();
 
   const actions = build_actions(intents, next);
   reset_protect_flags(next);
-  apply_mindgame_bonus_event(next, log, actions);
   let progress = check_zero_hp_match_result(next, log);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
+  let mindgame_checked = false;
 
   for (const phase of phases) {
     if (progress !== "continue") {
       break;
+    }
+    if (phase.id === "switch" && !mindgame_checked) {
+      progress = check_evade_match_result(next, log);
+      if (progress !== "continue") {
+        break;
+      }
+      apply_mindgame_bonus_event(next, log, actions);
+      mindgame_checked = true;
+      progress = check_zero_hp_match_result(next, log);
+      if (progress !== "continue") {
+        break;
+      }
     }
     const phase_actions = actions.filter((action) => action.phase === phase.id);
     if (phase_actions.length === 0) {
@@ -2127,24 +2759,8 @@ export function resolve_turn(
 
     for (const action of phase_actions) {
       if (action.type === "switch") {
-        const trapped_until = next.arenaTrapUntilTurn?.[action.player] ?? 0;
-        if (is_slot_arena_trapped(next, action.player)) {
-          log.push({
-            type: "switch_blocked",
-            turn: next.turn,
-            phase: phase.id,
-            summary: `${action.player} cannot switch (arena trapped until turn ${trapped_until})`,
-            data: { slot: action.player, targetIndex: action.targetIndex, untilTurn: trapped_until }
-          });
-        } else if (is_slot_taunted(next, action.player)) {
-          log.push({
-            type: "taunt_blocked",
-            turn: next.turn,
-            phase: phase.id,
-            summary: `${action.player} is taunted and cannot switch`,
-            data: { slot: action.player, action: "switch", untilTurn: next.tauntUntilTurn[action.player] }
-          });
-        } else {
+        const blocked_switch_reason = switch_block_reason(next, action.player);
+        if (!blocked_switch_reason) {
           const switched = apply_switch(
             next,
             log,
@@ -2156,6 +2772,31 @@ export function resolve_turn(
           if (switched) {
             switched_this_turn[action.player] = true;
           }
+        } else {
+          const blocked_type = blocked_switch_reason === "taunt" ? "taunt_blocked" : "switch_blocked";
+          const summary =
+            blocked_switch_reason === "arena trapped"
+              ? `${action.player} cannot switch (arena trapped)`
+              : blocked_switch_reason === "taunt"
+                ? `${action.player} is taunted and cannot switch`
+                : `${action.player} cannot switch (${effect_label(blocked_switch_reason)})`;
+          log.push({
+            type: blocked_type,
+            turn: next.turn,
+            phase: phase.id,
+            summary,
+            data: {
+              slot: action.player,
+              targetIndex: action.targetIndex,
+              reason: blocked_switch_reason,
+              turnsRemaining:
+                blocked_switch_reason === "arena trapped"
+                  ? Math.max(0, (next.arenaTrapUntilTurn?.[action.player] ?? 0) - next.turn + 1)
+                  : EFFECT_ID_SET.has(blocked_switch_reason)
+                    ? effect_turns_remaining(next, action.player, blocked_switch_reason as EffectCollateralId)
+                    : 0
+            }
+          });
         }
       } else {
         apply_move(
@@ -2185,12 +2826,16 @@ export function resolve_turn(
     progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
   }
   decrement_cooldowns(next);
+  if (next.status === "running") {
+    decay_effects_end_turn(next, log);
+  }
   // Clear guard flags after the turn resolves (so next turn starts unprotected/not-enduring).
   reset_protect_flags(next);
 
   if (next.status === "running") {
     maybe_end_match_by_turn_limit(next, log);
   }
+  refresh_evade_telemetry(next);
 
   return { state: next, log };
 }
@@ -2202,41 +2847,18 @@ export function apply_forced_switch(
 ): { state: GameState; log: EventLog[]; error?: string } {
   const next = clone_state(state);
   const log: EventLog[] = [];
+  ensure_state_runtime_defaults(next);
   const player = next.players[slot];
   if (!next.pendingSwitch[slot]) {
     return { state: next, log, error: "no pending switch" };
   }
-  if (targetIndex < 0 || targetIndex >= player.team.length) {
-    return { state: next, log, error: "invalid switch target" };
+  const error = validate_switch_target(player, targetIndex);
+  if (error) {
+    return { state: next, log, error };
   }
-  if (targetIndex === player.activeIndex) {
-    return { state: next, log, error: "already active" };
-  }
-  if (!is_alive(player.team[targetIndex])) {
-    return { state: next, log, error: "target fainted" };
-  }
-  const from = player.activeIndex;
-  const outgoing = player.team[from];
-  outgoing.attack = outgoing.baseAttack;
-  outgoing.attackStage = 0;
-  outgoing.defense = outgoing.baseDefense;
-  outgoing.speed = outgoing.baseSpeed;
-  outgoing.agilityBoostActive = false;
-  outgoing.endureSpeedBoostActive = false;
-  outgoing.bellyDrumActive = false;
-  outgoing.screechDebuffActive = false;
-  clear_leech_seed_on_target_switch(next, log, slot);
-  outgoing.choiceBandLockedMoveIndex = null;
-  player.activeIndex = targetIndex;
-  sync_player_shared_hp(next, slot, player.sharedHp);
-  apply_spikes_on_switch(next, log, slot);
+  perform_switch(next, log, slot, targetIndex, "forced_switch");
   next.pendingSwitch[slot] = false;
-  log.push({
-    type: "forced_switch",
-    turn: next.turn,
-    summary: `${slot} switched to ${player.team[targetIndex].name}`,
-    data: { slot, from, to: targetIndex }
-  });
+  refresh_evade_telemetry(next);
   return { state: next, log };
 }
 
@@ -2245,39 +2867,43 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
   if (!player) {
     return "unknown player";
   }
-  if (state.pendingSwitch[slot]) {
+  if (state.pendingSwitch?.[slot]) {
     return "pending switch";
   }
-  const active = active_monster(player);
-  const taunted = is_slot_taunted(state, slot);
   if (intent.action === "switch") {
-    if (is_slot_arena_trapped(state, slot)) {
-      return "arena trapped";
-    }
-    if (taunted) {
+    const blocked_switch = switch_block_reason(state, slot);
+    if (blocked_switch === "taunt") {
       return "taunted: must use attack";
     }
-    if (intent.targetIndex < 0 || intent.targetIndex >= player.team.length) {
-      return "invalid switch target";
+    if (blocked_switch) {
+      return blocked_switch;
     }
-    if (intent.targetIndex === player.activeIndex) {
-      return "already active";
-    }
-    if (!is_alive(player.team[intent.targetIndex])) {
-      return "target fainted";
+    const switch_error = validate_switch_target(player, intent.targetIndex);
+    if (switch_error) {
+      return switch_error;
     }
     return null;
   }
 
+  const active = active_monster(player);
   if (intent.moveIndex < 0 || intent.moveIndex >= active.chosenMoves.length) {
     return "invalid move index";
   }
 
   const moveId = active.chosenMoves[intent.moveIndex] ?? "none";
-  const guard_cooldown = Math.max(active.protectCooldownTurns, active.endureCooldownTurns);
-  if (taunted && !is_attack_move(move_spec(moveId))) {
+  const spec = move_spec(moveId);
+  const blocked_move = move_block_reason(state, slot, intent.moveIndex, spec);
+  if (blocked_move === "nocaute") {
+    return "nocaute: must switch";
+  }
+  if (blocked_move === "taunt") {
     return "taunted: must use attack";
   }
+  if (blocked_move) {
+    return blocked_move;
+  }
+
+  const guard_cooldown = Math.max(active.protectCooldownTurns, active.endureCooldownTurns);
   if (moveId === "protect" && guard_cooldown > 0) {
     return "protect on cooldown";
   }
@@ -2285,20 +2911,22 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
     return "endure on cooldown";
   }
   if (moveId === "bounce_kick") {
-    if (is_slot_arena_trapped(state, slot)) {
-      return "arena trapped";
+    const switch_blocked = switch_block_reason(state, slot);
+    if (switch_blocked && switch_blocked !== "taunt") {
+      return switch_blocked;
     }
     if (!Number.isInteger(intent.selfSwitchTargetIndex)) {
       return "bounce kick requires switch target";
     }
     const target_index = Number(intent.selfSwitchTargetIndex);
-    if (target_index < 0 || target_index >= player.team.length) {
+    const switch_error = validate_switch_target(player, target_index);
+    if (switch_error === "invalid switch target") {
       return "invalid bounce kick switch target";
     }
-    if (target_index === player.activeIndex) {
+    if (switch_error === "already active") {
       return "bounce kick target already active";
     }
-    if (!is_alive(player.team[target_index])) {
+    if (switch_error === "target fainted") {
       return "bounce kick target fainted";
     }
   }

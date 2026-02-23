@@ -420,8 +420,19 @@
         display: inline-flex;
         gap: 8px;
         align-items: center;
+        flex-wrap: wrap;
+        justify-content: flex-end;
         font-family: "Space Mono", monospace;
         color: var(--accent);
+      }
+
+      #status-evade {
+        color: var(--accent-2);
+      }
+
+      #status-evade.ready {
+        color: var(--ok);
+        font-weight: 700;
       }
 
       .action-pad {
@@ -1598,6 +1609,7 @@
                   <span>Turn <span id="status-turn">0</span></span>
                   <span id="status-deadline">--:--</span>
                   <span id="status-rps">PTS -- | --</span>
+                  <span id="status-evade">EVA --</span>
                 </div>
               </div>
               <div class="action-pad" id="action-pad">

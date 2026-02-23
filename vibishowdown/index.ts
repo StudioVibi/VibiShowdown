@@ -11,6 +11,7 @@ import {
   TURN_DURATION_MS
 } from "../src/shared.ts";
 import type {
+  EvadeTelemetry,
   EVSpread,
   EventLog,
   GameState,
@@ -132,6 +133,7 @@ const status_ping = document.getElementById("status-ping")!;
 const status_turn = document.getElementById("status-turn")!;
 const status_deadline = document.getElementById("status-deadline")!;
 const status_rps = document.getElementById("status-rps");
+const status_evade = document.getElementById("status-evade");
 const status_ready = document.getElementById("status-ready");
 const status_opponent = document.getElementById("status-opponent");
 const chat_messages = document.getElementById("chat-messages")!;
@@ -287,22 +289,94 @@ function monster_type_description(type: MonsterType): string {
   return "BUF";
 }
 
-function update_rps_status(state: GameState | null): void {
-  if (!status_rps) return;
-  if (!state) {
-    status_rps.textContent = "PTS -- | --";
+function default_evade_telemetry(): EvadeTelemetry {
+  return {
+    effectiveSpeed: 0,
+    speedGoal: 500,
+    speedReady: false,
+    gapPercent: 0,
+    gapGoalPercent: 33,
+    gapReady: false,
+    canEvade: false
+  };
+}
+
+function read_evade_telemetry(state: GameState, slot_id: PlayerSlot): EvadeTelemetry {
+  const input = state.evadeTelemetry?.[slot_id];
+  if (!input) {
+    return default_evade_telemetry();
+  }
+  const speed_goal = Number.isFinite(input.speedGoal) && input.speedGoal > 0 ? Math.floor(input.speedGoal) : 500;
+  const gap_goal =
+    Number.isFinite(input.gapGoalPercent) && input.gapGoalPercent > 0 ? Math.floor(input.gapGoalPercent) : 33;
+  const speed = Number.isFinite(input.effectiveSpeed) ? Math.max(0, Math.floor(input.effectiveSpeed)) : 0;
+  const gap = Number.isFinite(input.gapPercent) ? Math.round(input.gapPercent) : 0;
+  const speed_ready = !!input.speedReady || speed >= speed_goal;
+  const gap_ready = !!input.gapReady || gap >= gap_goal;
+  return {
+    effectiveSpeed: speed,
+    speedGoal: speed_goal,
+    speedReady: speed_ready,
+    gapPercent: gap,
+    gapGoalPercent: gap_goal,
+    gapReady: gap_ready,
+    canEvade: !!input.canEvade || speed_ready || gap_ready
+  };
+}
+
+function signed_percent(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+  const rounded = Math.round(value);
+  return `${rounded >= 0 ? "+" : ""}${rounded}%`;
+}
+
+function update_evade_status(state: GameState | null): void {
+  if (!status_evade) {
     return;
   }
-  const p1 = state.rpsScore?.player1 ?? 0;
-  const p2 = state.rpsScore?.player2 ?? 0;
+  status_evade.classList.remove("ready");
+  if (!state) {
+    status_evade.textContent = "EVA --";
+    return;
+  }
+  const p1 = read_evade_telemetry(state, "player1");
+  const p2 = read_evade_telemetry(state, "player2");
   if (!slot) {
-    status_rps.textContent = `PTS P1 ${p1} | P2 ${p2}`;
+    status_evade.textContent = `EVA P1 ${p1.effectiveSpeed}/${p1.speedGoal} ${signed_percent(p1.gapPercent)}/${p1.gapGoalPercent}% | P2 ${p2.effectiveSpeed}/${p2.speedGoal} ${signed_percent(p2.gapPercent)}/${p2.gapGoalPercent}%`;
+    if (p1.canEvade || p2.canEvade) {
+      status_evade.classList.add("ready");
+    }
     return;
   }
   const enemy_slot = slot === "player1" ? "player2" : "player1";
-  const my_score = state.rpsScore?.[slot] ?? 0;
-  const enemy_score = state.rpsScore?.[enemy_slot] ?? 0;
-  status_rps.textContent = `PTS ${my_score} x ${enemy_score}`;
+  const mine = read_evade_telemetry(state, slot);
+  const enemy = read_evade_telemetry(state, enemy_slot);
+  status_evade.textContent = `EVA ME ${mine.effectiveSpeed}/${mine.speedGoal} ${signed_percent(mine.gapPercent)}/${mine.gapGoalPercent}% | EN ${enemy.effectiveSpeed}/${enemy.speedGoal} ${signed_percent(enemy.gapPercent)}/${enemy.gapGoalPercent}%`;
+  if (mine.canEvade) {
+    status_evade.classList.add("ready");
+  }
+}
+
+function update_rps_status(state: GameState | null): void {
+  if (status_rps) {
+    if (!state) {
+      status_rps.textContent = "PTS -- | --";
+    } else {
+      const p1 = state.rpsScore?.player1 ?? 0;
+      const p2 = state.rpsScore?.player2 ?? 0;
+      if (!slot) {
+        status_rps.textContent = `PTS P1 ${p1} | P2 ${p2}`;
+      } else {
+        const enemy_slot = slot === "player1" ? "player2" : "player1";
+        const my_score = state.rpsScore?.[slot] ?? 0;
+        const enemy_score = state.rpsScore?.[enemy_slot] ?? 0;
+        status_rps.textContent = `PTS ${my_score} x ${enemy_score}`;
+      }
+    }
+  }
+  update_evade_status(state);
 }
 
 function emit_local_post(data: RoomPost): void {
@@ -785,11 +859,8 @@ function relay_handle_forced_switch(data: Extract<RoomPost, { $: "forced_switch"
   if (!relay_state.pendingSwitch[slot_id]) {
     return;
   }
-  const player = relay_state.players[slot_id];
-  if (data.targetIndex < 0 || data.targetIndex >= player.team.length) {
-    return;
-  }
-  if (data.targetIndex === player.activeIndex) {
+  const forced_preview = apply_forced_switch(relay_state, slot_id, data.targetIndex);
+  if (forced_preview.error) {
     return;
   }
   relay_forced_switch_intents[slot_id] = data.targetIndex;
@@ -810,13 +881,15 @@ function relay_handle_surrender(data: Extract<RoomPost, { $: "surrender" }>): vo
   const winner: PlayerSlot = loser === "player1" ? "player2" : "player1";
   relay_state.status = "ended";
   relay_state.winner = winner;
+  relay_state.endReason = "surrender";
+  delete relay_state.evadedSlots;
   relay_ended = true;
   const log: EventLog[] = [
     {
       type: "match_end",
       turn: relay_turn,
       summary: `${winner} wins (surrender)`,
-      data: { winner }
+      data: { winner, reason: "surrender" }
     }
   ];
   emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log });
@@ -980,7 +1053,7 @@ function base_stats_for(monster_id: string, level?: number): { maxHp: number; at
   if (!spec) {
     return { maxHp: 1, attack: 0, defense: 0, speed: 0 };
   }
-  const base_stats = normalize_stats(spec.stats, spec.stats);
+  const base_stats = base_stats_from_spec(spec);
   const resolved_level = normalize_stat_value("level", level, base_stats.level);
   const baseline = stats_from_base_level_ev(base_stats, resolved_level, empty_ev_spread());
   return {
@@ -1395,6 +1468,10 @@ function normalize_stats(value: Partial<Stats> | undefined, fallback: Stats): St
   };
 }
 
+function base_stats_from_spec(spec: MonsterCatalogEntry): Stats {
+  return normalize_stats(spec.stats, spec.stats);
+}
+
 function stats_equal(left: Stats, right: Stats): boolean {
   return (
     left.level === right.level &&
@@ -1415,7 +1492,7 @@ function ev_equal(left: EVSpread, right: EVSpread): boolean {
 }
 
 function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): MonsterConfig {
-  const base_stats = normalize_stats(spec.stats, spec.stats);
+  const base_stats = base_stats_from_spec(spec);
   const base_level = normalize_stat_value("level", base_stats.level, 1);
   const base_ev = empty_ev_spread();
   const default_moves = spec.defaultMoves.slice(0, LOBBY_MOVE_SLOTS);
@@ -1517,7 +1594,7 @@ function reset_profile_stats_to_defaults(): void {
   let changed = false;
   for (const spec of roster) {
     const config = coerce_config(spec, profile.monsters[spec.id]);
-    const base_stats = normalize_stats(spec.stats, spec.stats);
+    const base_stats = base_stats_from_spec(spec);
     const default_ev = empty_ev_spread();
     const default_stats = stats_from_base_level_ev(base_stats, base_stats.level, default_ev);
     if (!stats_equal(config.stats, default_stats)) {
@@ -1618,7 +1695,7 @@ function render_config(): void {
   }
 
   const config = get_config(active_tab);
-  const base_stats = normalize_stats(spec.stats, spec.stats);
+  const base_stats = base_stats_from_spec(spec);
   config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
 
   let changed = false;
@@ -2389,7 +2466,7 @@ function build_team_selection(): TeamSelection | null {
       show_warning(`Unknown monster: ${id}`);
       return null;
     }
-    const base_stats = normalize_stats(spec.stats, spec.stats);
+    const base_stats = base_stats_from_spec(spec);
     const config = get_config(id);
     const ev_error = validate_ev_spread(config.ev);
     if (ev_error) {
@@ -2469,14 +2546,43 @@ function update_opponent_ui(opponent_ready: boolean, opponent_name: string | nul
   status_opponent.className = `status-pill ${opponent_ready ? "ok" : opponent_name ? "warn" : "off"}`;
 }
 
-function show_match_end(winner?: PlayerSlot): void {
+function show_match_end(state: GameState): void {
   if (!match_end) return;
+  const winner = state.winner;
+  const end_reason = state.endReason;
+  const slot_label = (slot_id: PlayerSlot): string => (slot_id === "player1" ? "P1" : "P2");
+
+  if (end_reason === "evade_escape") {
+    const evaded = Array.isArray(state.evadedSlots)
+      ? state.evadedSlots.filter((slot_id): slot_id is PlayerSlot => slot_id === "player1" || slot_id === "player2")
+      : [];
+    if (evaded.length >= 2) {
+      match_end_title.textContent = "Double Escape";
+      match_end_sub.textContent = "Both players escaped technically.";
+    } else if (evaded.length === 1) {
+      const escaped = evaded[0];
+      match_end_title.textContent = slot && slot === escaped ? "Escape" : "Match ended";
+      match_end_sub.textContent = `${slot_label(escaped)} escaped technically.`;
+    } else {
+      match_end_title.textContent = "Match ended";
+      match_end_sub.textContent = "Technical escape.";
+    }
+    match_end.classList.add("open");
+    return;
+  }
+
   const is_winner = winner && slot === winner;
   match_end_title.textContent = is_winner ? "Victory" : "Defeat";
   if (!winner) {
     match_end_title.textContent = "Match ended";
   }
-  match_end_sub.textContent = winner ? `${winner} wins the match.` : "Match finished.";
+  if (winner) {
+    match_end_sub.textContent = `${winner} wins the match.`;
+  } else if (end_reason === "turn_limit") {
+    match_end_sub.textContent = "Match finished by turn limit.";
+  } else {
+    match_end_sub.textContent = "Match finished.";
+  }
   match_end.classList.add("open");
 }
 
@@ -2557,97 +2663,166 @@ function effect_chip(label: string, kind: "seeded" | "drain" | "buff" | "debuff"
   return chip;
 }
 
+type EffectChipKind = "seeded" | "drain" | "buff" | "debuff";
+type EffectChipDef = { label: string; kind: EffectChipKind };
+const EFFECT_UI_LABELS: Record<string, string> = {
+  confuse: "Confuse",
+  sleep: "Sleep",
+  stun: "Stun",
+  happiness: "Happiness",
+  taunt: "Taunt",
+  frustration: "Frustration",
+  nocaute: "Nocaute",
+  immobilize: "Immobilize",
+  weakness: "Weakness",
+  deterioration: "Deterioration",
+  paralyse: "Paralyse",
+  silence: "Silence"
+};
+const CURSE_UI_LABELS: Record<string, string> = {
+  madness: "Madness",
+  leech_seed: "Leech Seed",
+  destiny_bond: "Destiny Bond",
+  endure: "Endure"
+};
+
+type ActiveCurseUi = { id: string; sourceSlot: PlayerSlot | null; stacks: number };
+
+function active_curses_for_slot(state: GameState, slot_id: PlayerSlot): ActiveCurseUi[] {
+  const input = state.activeCursesBySlot?.[slot_id];
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input.map((row) => ({
+    id: typeof row.id === "string" ? row.id : "unknown",
+    sourceSlot: row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null,
+    stacks: typeof row.stacks === "number" && Number.isFinite(row.stacks) ? Math.max(1, Math.floor(row.stacks)) : 1
+  }));
+}
+
+function effect_chips_for_slot(state: GameState, slot_id: PlayerSlot, opponent_slot: PlayerSlot): EffectChipDef[] {
+  const chips: EffectChipDef[] = [];
+  const active = state.players[slot_id].team[state.players[slot_id].activeIndex];
+  const opponent_active = state.players[opponent_slot].team[state.players[opponent_slot].activeIndex];
+  const my_curses = active_curses_for_slot(state, slot_id);
+  const enemy_curses = active_curses_for_slot(state, opponent_slot);
+  const seeded = my_curses.some((curse) => curse.id === "leech_seed");
+  const draining_enemy =
+    enemy_curses.find((curse) => curse.id === "leech_seed" && curse.sourceSlot === slot_id) ?? null;
+  const armor_stacks = Math.max(0, state.typePassiveArmorStacks?.[slot_id] ?? 0);
+  const regen_stacks = Math.max(0, state.typePassiveRegenStacks?.[slot_id] ?? 0);
+  const arena_trapped = is_slot_arena_trapped_for_ui(state, slot_id);
+  const arena_trap_turns = arena_trap_remaining_turns(state, slot_id);
+
+  if (seeded) {
+    chips.push({ label: "Seeded", kind: "seeded" });
+  }
+  if (draining_enemy) {
+    chips.push({ label: `Leech+${draining_enemy.stacks > 1 ? ` x${draining_enemy.stacks}` : ""}`, kind: "drain" });
+  }
+  if (armor_stacks > 0) {
+    chips.push({ label: `Armor +${armor_stacks * 10}%`, kind: "buff" });
+    chips.push({ label: "Clear Body", kind: "buff" });
+  }
+  if (regen_stacks > 0) {
+    chips.push({ label: `Regen +${regen_stacks * 5}/turn`, kind: "buff" });
+  }
+  if (arena_trapped) {
+    chips.push({ label: `Arena Trap (${arena_trap_turns}t sem troca)`, kind: "debuff" });
+  }
+  if (opponent_active.screechDebuffActive) {
+    chips.push({ label: "Screech (enemyDEF 0.5)", kind: "debuff" });
+  }
+  if (active.agilityBoostActive) {
+    chips.push({ label: "Agility (mySPE 2)", kind: "buff" });
+  }
+  if (active.endureSpeedBoostActive) {
+    chips.push({ label: "Endure (mySPE 1.5)", kind: "buff" });
+  }
+  if (active.bellyDrumActive) {
+    chips.push({ label: "Belly Drum (myHP 0.5) (myATK 4)", kind: "buff" });
+  }
+  const active_effects = state.activeEffectsBySlot?.[slot_id] ?? [];
+  for (const effect of active_effects) {
+    const label = EFFECT_UI_LABELS[effect.id] ?? effect.id;
+    const turns = Math.max(1, Number.isFinite(effect.remainingTurns) ? Math.floor(effect.remainingTurns) : 1);
+    chips.push({
+      label: `${label} (${turns}t)`,
+      kind: "debuff"
+    });
+  }
+  for (const curse of my_curses) {
+    const label = CURSE_UI_LABELS[curse.id] ?? curse.id;
+    const suffix = curse.stacks > 1 ? ` x${curse.stacks}` : "";
+    chips.push({ label: `${label}${suffix}`, kind: "debuff" });
+  }
+  return chips;
+}
+
+function render_effect_chip_list(container: HTMLDivElement | null, chips: EffectChipDef[]): void {
+  if (!container) {
+    return;
+  }
+  container.innerHTML = "";
+  for (const chip of chips) {
+    container.appendChild(effect_chip(chip.label, chip.kind));
+  }
+}
+
 function render_effects(
   state: GameState,
-  viewer_slot: PlayerSlot,
   player_slot: PlayerSlot,
   enemy_slot: PlayerSlot
 ): void {
-  const player_active = state.players[player_slot].team[state.players[player_slot].activeIndex];
-  const enemy_active = state.players[enemy_slot].team[state.players[enemy_slot].activeIndex];
-  const player_seeded_by = state.leechSeedSourceByTarget?.[player_slot] ?? null;
-  const enemy_seeded_by = state.leechSeedSourceByTarget?.[enemy_slot] ?? null;
-  const player_seeded = state.leechSeedActiveByTarget?.[player_slot] ?? !!player_seeded_by;
-  const enemy_seeded = state.leechSeedActiveByTarget?.[enemy_slot] ?? !!enemy_seeded_by;
-  const player_armor_stacks = Math.max(0, state.typePassiveArmorStacks?.[player_slot] ?? 0);
-  const enemy_armor_stacks = Math.max(0, state.typePassiveArmorStacks?.[enemy_slot] ?? 0);
-  const player_regen_stacks = Math.max(0, state.typePassiveRegenStacks?.[player_slot] ?? 0);
-  const enemy_regen_stacks = Math.max(0, state.typePassiveRegenStacks?.[enemy_slot] ?? 0);
-  const player_arena_trap_turns = arena_trap_remaining_turns(state, player_slot);
-  const enemy_arena_trap_turns = arena_trap_remaining_turns(state, enemy_slot);
-  const player_arena_trapped = is_slot_arena_trapped_for_ui(state, player_slot);
-  const enemy_arena_trapped = is_slot_arena_trapped_for_ui(state, enemy_slot);
+  const player_seeded = active_curses_for_slot(state, player_slot).some((curse) => curse.id === "leech_seed");
+  const enemy_seeded = active_curses_for_slot(state, enemy_slot).some((curse) => curse.id === "leech_seed");
 
   player_sprite_wrap.classList.toggle("seeded", player_seeded);
   enemy_sprite_wrap.classList.toggle("seeded", enemy_seeded);
+  render_effect_chip_list(player_effects, effect_chips_for_slot(state, player_slot, enemy_slot));
+  render_effect_chip_list(enemy_effects, effect_chips_for_slot(state, enemy_slot, player_slot));
+}
 
-  if (player_effects) {
-    player_effects.innerHTML = "";
-    if (player_seeded) {
-      player_effects.appendChild(effect_chip("Seeded", "seeded"));
-    }
-    if (enemy_seeded_by === viewer_slot) {
-      player_effects.appendChild(effect_chip("Leech+", "drain"));
-    }
-    if (player_armor_stacks > 0) {
-      player_effects.appendChild(effect_chip(`Armor +${player_armor_stacks * 10}%`, "buff"));
-      player_effects.appendChild(effect_chip("Clear Body", "buff"));
-    }
-    if (player_regen_stacks > 0) {
-      player_effects.appendChild(effect_chip(`Regen +${player_regen_stacks * 5}/turn`, "buff"));
-    }
-    if (player_arena_trapped) {
-      player_effects.appendChild(
-        effect_chip(`Arena Trap (${player_arena_trap_turns}t sem troca)`, "debuff")
-      );
-    }
-    if (enemy_active.screechDebuffActive) {
-      player_effects.appendChild(effect_chip("Screech (enemyDEF 0.5)", "debuff"));
-    }
-    if (player_active.agilityBoostActive) {
-      player_effects.appendChild(effect_chip("Agility (mySPE 2)", "buff"));
-    }
-    if (player_active.endureSpeedBoostActive) {
-      player_effects.appendChild(effect_chip("Endure (mySPE 1.5)", "buff"));
-    }
-    if (player_active.bellyDrumActive) {
-      player_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 4)", "buff"));
-    }
-  }
+type SidePanelId = "player" | "enemy";
 
-  if (enemy_effects) {
-    enemy_effects.innerHTML = "";
-    if (enemy_seeded) {
-      enemy_effects.appendChild(effect_chip("Seeded", "seeded"));
-    }
-    if (player_seeded_by === enemy_slot) {
-      enemy_effects.appendChild(effect_chip("Leech+", "drain"));
-    }
-    if (enemy_armor_stacks > 0) {
-      enemy_effects.appendChild(effect_chip(`Armor +${enemy_armor_stacks * 10}%`, "buff"));
-      enemy_effects.appendChild(effect_chip("Clear Body", "buff"));
-    }
-    if (enemy_regen_stacks > 0) {
-      enemy_effects.appendChild(effect_chip(`Regen +${enemy_regen_stacks * 5}/turn`, "buff"));
-    }
-    if (enemy_arena_trapped) {
-      enemy_effects.appendChild(
-        effect_chip(`Arena Trap (${enemy_arena_trap_turns}t sem troca)`, "debuff")
-      );
-    }
-    if (player_active.screechDebuffActive) {
-      enemy_effects.appendChild(effect_chip("Screech (enemyDEF 0.5)", "debuff"));
-    }
-    if (enemy_active.agilityBoostActive) {
-      enemy_effects.appendChild(effect_chip("Agility (mySPE 2)", "buff"));
-    }
-    if (enemy_active.endureSpeedBoostActive) {
-      enemy_effects.appendChild(effect_chip("Endure (mySPE 1.5)", "buff"));
-    }
-    if (enemy_active.bellyDrumActive) {
-      enemy_effects.appendChild(effect_chip("Belly Drum (myHP 0.5) (myATK 4)", "buff"));
-    }
+function panel_hp_percent(mon: MonsterState): number {
+  return Math.max(0, Math.min(1, mon.hp / mon.maxHp)) * 100;
+}
+
+function update_side_panel(
+  side: SidePanelId,
+  state: GameState,
+  slot_id: PlayerSlot,
+  skip_meta: boolean,
+  skip_bar: boolean
+): void {
+  const player = state.players[slot_id];
+  const active = player.team[player.activeIndex];
+  const pending_replacement = !!state.pendingSwitch?.[slot_id] && active.hp <= 0;
+  const title = side === "player" ? player_title : enemy_title;
+  const meta = side === "player" ? player_meta : enemy_meta;
+  const hp_bar = side === "player" ? player_hp : enemy_hp;
+  const sprite = side === "player" ? player_sprite : enemy_sprite;
+  const sprite_wrap = side === "player" ? player_sprite_wrap : enemy_sprite_wrap;
+
+  title.textContent = side === "player" ? player.name || player_name : player.name || "Opponent";
+  if (!skip_meta) {
+    meta.textContent = `Lv ${active.level} · HP ${active.hp}/${active.maxHp}`;
   }
+  if (!skip_bar) {
+    hp_bar.style.width = `${panel_hp_percent(active)}%`;
+  }
+  if (pending_replacement) {
+    sprite.removeAttribute("src");
+    sprite.alt = "";
+    sprite.style.visibility = "hidden";
+    set_monster_tooltip(sprite_wrap, null);
+    return;
+  }
+  sprite.src = icon_path(active.id);
+  sprite.alt = monster_label(active.id);
+  sprite.style.visibility = "";
+  set_monster_tooltip(sprite_wrap, tooltip_from_state(active));
 }
 
 function update_panels(
@@ -2657,51 +2832,9 @@ function update_panels(
   const viewer_slot = slot ?? (is_spectator ? "player1" : null);
   if (!viewer_slot) return;
   const enemy_slot = viewer_slot === "player1" ? "player2" : "player1";
-  const me = state.players[viewer_slot];
-  const opp = state.players[enemy_slot];
-  const my_active = me.team[me.activeIndex];
-  const opp_active = opp.team[opp.activeIndex];
-  const my_pending_replacement = !!state.pendingSwitch?.[viewer_slot] && my_active.hp <= 0;
-  const opp_pending_replacement = !!state.pendingSwitch?.[enemy_slot] && opp_active.hp <= 0;
-
-  player_title.textContent = me.name || player_name;
-  if (!opts?.skipMeta?.player) {
-    player_meta.textContent = `Lv ${my_active.level} · HP ${my_active.hp}/${my_active.maxHp}`;
-  }
-  if (!opts?.skipBar?.player) {
-    player_hp.style.width = `${Math.max(0, Math.min(1, my_active.hp / my_active.maxHp)) * 100}%`;
-  }
-  if (my_pending_replacement) {
-    player_sprite.removeAttribute("src");
-    player_sprite.alt = "";
-    player_sprite.style.visibility = "hidden";
-    set_monster_tooltip(player_sprite_wrap, null);
-  } else {
-    player_sprite.src = icon_path(my_active.id);
-    player_sprite.alt = monster_label(my_active.id);
-    player_sprite.style.visibility = "";
-    set_monster_tooltip(player_sprite_wrap, tooltip_from_state(my_active));
-  }
-
-  enemy_title.textContent = opp.name || "Opponent";
-  if (!opts?.skipMeta?.enemy) {
-    enemy_meta.textContent = `Lv ${opp_active.level} · HP ${opp_active.hp}/${opp_active.maxHp}`;
-  }
-  if (!opts?.skipBar?.enemy) {
-    enemy_hp.style.width = `${Math.max(0, Math.min(1, opp_active.hp / opp_active.maxHp)) * 100}%`;
-  }
-  if (opp_pending_replacement) {
-    enemy_sprite.removeAttribute("src");
-    enemy_sprite.alt = "";
-    enemy_sprite.style.visibility = "hidden";
-    set_monster_tooltip(enemy_sprite_wrap, null);
-  } else {
-    enemy_sprite.src = icon_path(opp_active.id);
-    enemy_sprite.alt = monster_label(opp_active.id);
-    enemy_sprite.style.visibility = "";
-    set_monster_tooltip(enemy_sprite_wrap, tooltip_from_state(opp_active));
-  }
-  render_effects(state, viewer_slot, viewer_slot, enemy_slot);
+  update_side_panel("player", state, viewer_slot, !!opts?.skipMeta?.player, !!opts?.skipBar?.player);
+  update_side_panel("enemy", state, enemy_slot, !!opts?.skipMeta?.enemy, !!opts?.skipBar?.enemy);
+  render_effects(state, viewer_slot, enemy_slot);
   update_bench(state, viewer_slot);
 }
 
@@ -2991,7 +3124,7 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
     append_match_end_marker();
   }
   if (data.state.status === "ended") {
-    show_match_end(data.state.winner);
+    show_match_end(data.state);
   }
   if (slot && data.state.pendingSwitch?.[slot] && !switch_modal.classList.contains("open")) {
     open_switch_modal("forced");
