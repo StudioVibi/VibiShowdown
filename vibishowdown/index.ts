@@ -8,6 +8,7 @@ import type { MonsterCatalogEntry } from "../src/data/index.ts";
 import { apply_forced_switch, create_initial_state, resolve_turn, validate_intent } from "../src/engine.ts";
 import {
   BASE_TURN_LIMIT,
+  SHARED_EVADE_START,
   TURN_DURATION_MS
 } from "../src/shared.ts";
 import type {
@@ -291,9 +292,9 @@ function monster_type_description(type: MonsterType): string {
 
 function default_evade_telemetry(): EvadeTelemetry {
   return {
-    effectiveSpeed: 0,
-    speedGoal: 500,
-    speedReady: false,
+    effectiveEvade: SHARED_EVADE_START,
+    evadeGoal: 500,
+    evadeReady: false,
     gapPercent: 0,
     gapGoalPercent: 33,
     gapReady: false,
@@ -302,25 +303,42 @@ function default_evade_telemetry(): EvadeTelemetry {
 }
 
 function read_evade_telemetry(state: GameState, slot_id: PlayerSlot): EvadeTelemetry {
-  const input = state.evadeTelemetry?.[slot_id];
+  const input = state.evadeTelemetry?.[slot_id] as
+    | (Partial<EvadeTelemetry> & {
+        effectiveSpeed?: unknown;
+        speedGoal?: unknown;
+        speedReady?: unknown;
+      })
+    | undefined;
   if (!input) {
     return default_evade_telemetry();
   }
-  const speed_goal = Number.isFinite(input.speedGoal) && input.speedGoal > 0 ? Math.floor(input.speedGoal) : 500;
-  const gap_goal =
-    Number.isFinite(input.gapGoalPercent) && input.gapGoalPercent > 0 ? Math.floor(input.gapGoalPercent) : 33;
-  const speed = Number.isFinite(input.effectiveSpeed) ? Math.max(0, Math.floor(input.effectiveSpeed)) : 0;
-  const gap = Number.isFinite(input.gapPercent) ? Math.round(input.gapPercent) : 0;
-  const speed_ready = !!input.speedReady || speed >= speed_goal;
+  const evade_goal_raw =
+    Number.isFinite(input.evadeGoal) && (input.evadeGoal as number) > 0
+      ? (input.evadeGoal as number)
+      : Number.isFinite(input.speedGoal) && (input.speedGoal as number) > 0
+        ? (input.speedGoal as number)
+        : 500;
+  const evade_goal = Math.floor(evade_goal_raw);
+  const gap_goal_raw = typeof input.gapGoalPercent === "number" ? input.gapGoalPercent : 33;
+  const gap_goal = Number.isFinite(gap_goal_raw) && gap_goal_raw > 0 ? Math.floor(gap_goal_raw) : 33;
+  const evade_raw = Number.isFinite(input.effectiveEvade)
+    ? (input.effectiveEvade as number)
+    : Number.isFinite(input.effectiveSpeed)
+      ? (input.effectiveSpeed as number)
+      : SHARED_EVADE_START;
+  const evade = Math.max(0, Math.floor(evade_raw));
+  const gap = typeof input.gapPercent === "number" && Number.isFinite(input.gapPercent) ? Math.round(input.gapPercent) : 0;
+  const evade_ready = !!input.evadeReady || !!input.speedReady || evade >= evade_goal;
   const gap_ready = !!input.gapReady || gap >= gap_goal;
   return {
-    effectiveSpeed: speed,
-    speedGoal: speed_goal,
-    speedReady: speed_ready,
+    effectiveEvade: evade,
+    evadeGoal: evade_goal,
+    evadeReady: evade_ready,
     gapPercent: gap,
     gapGoalPercent: gap_goal,
     gapReady: gap_ready,
-    canEvade: !!input.canEvade || speed_ready || gap_ready
+    canEvade: !!input.canEvade || evade_ready || gap_ready
   };
 }
 
@@ -344,7 +362,7 @@ function update_evade_status(state: GameState | null): void {
   const p1 = read_evade_telemetry(state, "player1");
   const p2 = read_evade_telemetry(state, "player2");
   if (!slot) {
-    status_evade.textContent = `EVA P1 ${p1.effectiveSpeed}/${p1.speedGoal} ${signed_percent(p1.gapPercent)}/${p1.gapGoalPercent}% | P2 ${p2.effectiveSpeed}/${p2.speedGoal} ${signed_percent(p2.gapPercent)}/${p2.gapGoalPercent}%`;
+    status_evade.textContent = `EVA P1 ${p1.effectiveEvade}/${p1.evadeGoal} ${signed_percent(p1.gapPercent)}/${p1.gapGoalPercent}% | P2 ${p2.effectiveEvade}/${p2.evadeGoal} ${signed_percent(p2.gapPercent)}/${p2.gapGoalPercent}%`;
     if (p1.canEvade || p2.canEvade) {
       status_evade.classList.add("ready");
     }
@@ -353,7 +371,7 @@ function update_evade_status(state: GameState | null): void {
   const enemy_slot = slot === "player1" ? "player2" : "player1";
   const mine = read_evade_telemetry(state, slot);
   const enemy = read_evade_telemetry(state, enemy_slot);
-  status_evade.textContent = `EVA ME ${mine.effectiveSpeed}/${mine.speedGoal} ${signed_percent(mine.gapPercent)}/${mine.gapGoalPercent}% | EN ${enemy.effectiveSpeed}/${enemy.speedGoal} ${signed_percent(enemy.gapPercent)}/${enemy.gapGoalPercent}%`;
+  status_evade.textContent = `EVA ME ${mine.effectiveEvade}/${mine.evadeGoal} ${signed_percent(mine.gapPercent)}/${mine.gapGoalPercent}% | EN ${enemy.effectiveEvade}/${enemy.evadeGoal} ${signed_percent(enemy.gapPercent)}/${enemy.gapGoalPercent}%`;
   if (mine.canEvade) {
     status_evade.classList.add("ready");
   }

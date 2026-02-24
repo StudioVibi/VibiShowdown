@@ -106,7 +106,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Cloyster Template",
     type: "def",
     stats: { level: 12, maxHp: 117, attack: 375, defense: 730, speed: 271 },
-    possibleMoves: ["spikes", "recover", "none"],
+    possibleMoves: ["spikes", "recover", "run", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["spikes", "recover", "none"],
     defaultPassive: "none"
@@ -117,7 +117,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Absol Template",
     type: "atk",
     stats: { level: 12, maxHp: 180, attack: 521, defense: 230, speed: 430 },
-    possibleMoves: ["mega_punch", "bounce_kick", "none"],
+    possibleMoves: ["mega_punch", "bounce_kick", "run", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["mega_punch", "bounce_kick", "none"],
     defaultPassive: "none"
@@ -128,7 +128,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Celebi Template",
     type: "buf",
     stats: { level: 12, maxHp: 325, attack: 396, defense: 396, speed: 396 },
-    possibleMoves: ["meditate", "ki_blast", "none"],
+    possibleMoves: ["meditate", "ki_blast", "run", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["meditate", "ki_blast", "none"],
     defaultPassive: "none"

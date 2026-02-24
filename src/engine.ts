@@ -1,5 +1,6 @@
 import {
   BASE_TURN_LIMIT,
+  SHARED_EVADE_START,
   SHARED_HP_START,
 } from "./shared.ts";
 import type {
@@ -47,6 +48,7 @@ type EndTurnEffectId = (typeof END_TURN_EFFECT_ORDER)[number];
 const TAUNT_BLOCKED_MOVE_IDS = new Set([
   "none",
   "agility",
+  "run",
   "wish",
   "spikes",
   "recover",
@@ -78,7 +80,7 @@ const TYPE_PASSIVE_ATK_TRUE_DAMAGE = 10;
 const TYPE_PASSIVE_DEF_ARMOR_STACK_MAX = 5;
 const TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT = 10;
 const TYPE_PASSIVE_BUF_REGEN_PER_STACK = 5;
-const EVADE_SPEED_GOAL = 500;
+const EVADE_VALUE_GOAL = 500;
 const EVADE_GAP_GOAL_PERCENT = 33;
 const EFFECT_IDS: readonly EffectCollateralId[] = [
   "confuse",
@@ -221,6 +223,7 @@ function clone_monster(monster: MonsterState): MonsterState {
     type: monster.type,
     hp: monster.hp,
     maxHp: monster.maxHp,
+    evade: Math.max(0, normalize_int(monster.evade, SHARED_EVADE_START, 0)),
     level: monster.level,
     baseAttack: base_attack,
     baseDefense: base_defense,
@@ -282,9 +285,9 @@ function empty_last_move_index(): Record<PlayerSlot, number | null> {
 
 function empty_evade_telemetry(): Record<PlayerSlot, EvadeTelemetry> {
   const empty_entry = (): EvadeTelemetry => ({
-    effectiveSpeed: 0,
-    speedGoal: EVADE_SPEED_GOAL,
-    speedReady: false,
+    effectiveEvade: SHARED_EVADE_START,
+    evadeGoal: EVADE_VALUE_GOAL,
+    evadeReady: false,
     gapPercent: 0,
     gapGoalPercent: EVADE_GAP_GOAL_PERCENT,
     gapReady: false,
@@ -692,11 +695,14 @@ function clone_player(player: PlayerState): PlayerState {
   const shared_hp_max = Math.max(1, normalize_int(player.sharedHpMax, fallback_max_hp, 1));
   const fallback_shared_hp = active ? normalize_int(active.hp, shared_hp_max, 0) : shared_hp_max;
   const shared_hp = Math.max(0, Math.min(shared_hp_max, normalize_int(player.sharedHp, fallback_shared_hp, 0)));
+  const fallback_shared_evade = active ? normalize_int(active.evade, SHARED_EVADE_START, 0) : SHARED_EVADE_START;
+  const shared_evade = Math.max(0, normalize_int(player.sharedEvade, fallback_shared_evade, 0));
   return {
     slot: player.slot,
     name: player.name,
     sharedHp: shared_hp,
     sharedHpMax: shared_hp_max,
+    sharedEvade: shared_evade,
     team: player.team.map(clone_monster),
     activeIndex: player.activeIndex
   };
@@ -764,6 +770,7 @@ export function clone_state(state: GameState): GameState {
   cloned.lastMoveIndexBySlot.player2 =
     typeof last_move_p2 === "number" && Number.isInteger(last_move_p2) ? Math.max(0, last_move_p2) : null;
   sync_all_players_shared_hp(cloned);
+  sync_all_players_shared_evade(cloned);
   refresh_evade_telemetry(cloned);
   return cloned;
 }
@@ -789,6 +796,16 @@ function sync_player_shared_hp(state: GameState, slot: PlayerSlot, next_hp: numb
   return clamped;
 }
 
+function sync_player_shared_evade(state: GameState, slot: PlayerSlot, next_evade: number): number {
+  const player = state.players[slot];
+  const clamped = Math.max(0, normalize_int(next_evade, SHARED_EVADE_START, 0));
+  player.sharedEvade = clamped;
+  for (const monster of player.team) {
+    monster.evade = clamped;
+  }
+  return clamped;
+}
+
 function sync_all_players_shared_hp(state: GameState): void {
   for (const slot of SLOT_ORDER) {
     const player = state.players[slot];
@@ -799,6 +816,16 @@ function sync_all_players_shared_hp(state: GameState): void {
     const fallback_shared_hp = active ? normalize_int(active.hp, shared_hp_max, 0) : shared_hp_max;
     const shared_hp = Math.max(0, Math.min(shared_hp_max, normalize_int(player.sharedHp, fallback_shared_hp, 0)));
     sync_player_shared_hp(state, slot, shared_hp);
+  }
+}
+
+function sync_all_players_shared_evade(state: GameState): void {
+  for (const slot of SLOT_ORDER) {
+    const player = state.players[slot];
+    const active = player.team[player.activeIndex] ?? player.team[0];
+    const fallback_shared_evade = active ? normalize_int(active.evade, SHARED_EVADE_START, 0) : SHARED_EVADE_START;
+    const shared_evade = Math.max(0, normalize_int(player.sharedEvade, fallback_shared_evade, 0));
+    sync_player_shared_evade(state, slot, shared_evade);
   }
 }
 
@@ -839,6 +866,7 @@ function ensure_state_runtime_defaults(state: GameState): void {
   if (!state.spikesArmedByTarget) {
     state.spikesArmedByTarget = empty_spikes_armed_by_target();
   }
+  sync_all_players_shared_evade(state);
 }
 
 function compare_monster_type(left: MonsterType, right: MonsterType): number {
@@ -1212,23 +1240,24 @@ function effective_speed_for_slot(state: GameState, slot: PlayerSlot, monster: M
 }
 
 function build_evade_telemetry_entry(state: GameState, slot: PlayerSlot): EvadeTelemetry {
-  const monster = active_monster(state.players[slot]);
   const enemy_slot = other_slot(slot);
-  const enemy = active_monster(state.players[enemy_slot]);
-  const effective_speed = Math.max(0, effective_speed_for_slot(state, slot, monster));
-  const enemy_effective_speed = Math.max(0, effective_speed_for_slot(state, enemy_slot, enemy));
-  const divisor = Math.max(1, enemy_effective_speed);
-  const gap_percent = mul_div_round(effective_speed - enemy_effective_speed, 100, divisor);
-  const speed_ready = effective_speed >= EVADE_SPEED_GOAL;
+  const effective_evade = Math.max(0, normalize_int(state.players[slot].sharedEvade, SHARED_EVADE_START, 0));
+  const enemy_effective_evade = Math.max(
+    0,
+    normalize_int(state.players[enemy_slot].sharedEvade, SHARED_EVADE_START, 0)
+  );
+  const divisor = Math.max(1, enemy_effective_evade);
+  const gap_percent = mul_div_round(effective_evade - enemy_effective_evade, 100, divisor);
+  const evade_ready = effective_evade >= EVADE_VALUE_GOAL;
   const gap_ready = gap_percent >= EVADE_GAP_GOAL_PERCENT;
   return {
-    effectiveSpeed: effective_speed,
-    speedGoal: EVADE_SPEED_GOAL,
-    speedReady: speed_ready,
+    effectiveEvade: effective_evade,
+    evadeGoal: EVADE_VALUE_GOAL,
+    evadeReady: evade_ready,
     gapPercent: gap_percent,
     gapGoalPercent: EVADE_GAP_GOAL_PERCENT,
     gapReady: gap_ready,
-    canEvade: speed_ready || gap_ready
+    canEvade: evade_ready || gap_ready
   };
 }
 
@@ -2086,6 +2115,34 @@ function apply_move(
     return;
   }
 
+  if (spec.id === "run") {
+    const before_evade = player.sharedEvade;
+    const after_evade = sync_player_shared_evade(state, player_slot, before_evade + 32);
+    log.push({
+      type: "stat_mod",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} used Run (${before_evade} -> ${after_evade} EVADE)`,
+      data: {
+        slot: player_slot,
+        target: attacker.id,
+        stat: "evade",
+        amount: 32,
+        before: before_evade,
+        after: after_evade
+      }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Run: user EVADE +32 (${before_evade} -> ${after_evade})`,
+      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_evade, after: after_evade }
+    });
+    finalize_move_success();
+    return;
+  }
+
   if (spec.id === "wish") {
     const trigger_turn = state.turn + 1;
     if (!state.pendingWish) {
@@ -2519,6 +2576,7 @@ function perform_switch(
   clear_curses_on_target_switch(state, log, slot);
   player.activeIndex = target_index;
   sync_player_shared_hp(state, slot, player.sharedHp);
+  sync_player_shared_evade(state, slot, player.sharedEvade);
   apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn);
   log.push({
     type: event_type,
@@ -2607,6 +2665,7 @@ export function create_initial_state(
   const build_player = (slot: PlayerSlot): PlayerState => {
     const selection = teams[slot];
     const shared_hp = SHARED_HP_START;
+    const shared_evade = SHARED_EVADE_START;
     const team = selection.monsters.map((monster) => {
       const spec = MONSTER_BY_ID.get(monster.id);
       if (!spec) {
@@ -2638,6 +2697,7 @@ export function create_initial_state(
         type: resolved_type,
         hp: shared_hp,
         maxHp: shared_hp,
+        evade: shared_evade,
         level,
         baseAttack: final_stats.atk,
         baseDefense: final_stats.def,
@@ -2665,6 +2725,7 @@ export function create_initial_state(
       name: names[slot],
       sharedHp: shared_hp,
       sharedHpMax: shared_hp,
+      sharedEvade: shared_evade,
       team,
       activeIndex: Math.min(Math.max(selection.activeIndex, 0), team.length - 1)
     };
@@ -2694,6 +2755,7 @@ export function create_initial_state(
     lastMoveIndexBySlot: empty_last_move_index(),
   };
   sync_all_players_shared_hp(initial_state);
+  sync_all_players_shared_evade(initial_state);
   refresh_evade_telemetry(initial_state);
   return initial_state;
 }
@@ -2709,6 +2771,7 @@ export function resolve_turn(
   const took_damage_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   const switched_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
+  sync_all_players_shared_evade(next);
   next.baseTurnLimit = Math.max(1, normalize_int(next.baseTurnLimit, BASE_TURN_LIMIT, 1));
 
   if (next.status !== "running") {
