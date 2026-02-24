@@ -2233,7 +2233,7 @@ if (is_integrity_entrypoint()) {
 assert_monster_integrity(MONSTER_ROSTER);
 
 // src/shared.ts
-var SHARED_HP_START = 200;
+var SHARED_HP_START = 600;
 var SHARED_EVADE_START = 100;
 var TURN_DURATION_MS = 50000;
 var BASE_TURN_LIMIT = 12;

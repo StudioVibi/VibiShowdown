@@ -2,7 +2,7 @@ export type RoomId = string;
 
 export type PlayerSlot = "player1" | "player2";
 
-export const SHARED_HP_START = 200;
+export const SHARED_HP_START = 600;
 export const SHARED_EVADE_START = 100;
 export const TURN_DURATION_MS = 50_000;
 export const BASE_TURN_LIMIT = 12;
