@@ -106,9 +106,9 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Cloyster Template",
     type: "def",
     stats: { level: 12, maxHp: 117, attack: 375, defense: 730, speed: 271 },
-    possibleMoves: ["spikes", "recover", "run", "none"],
+    possibleMoves: ["bait", "seismic_toss", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["spikes", "recover", "none"],
+    defaultMoves: ["bait", "seismic_toss", "none"],
     defaultPassive: "none"
   },
   {
@@ -117,9 +117,9 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Absol Template",
     type: "atk",
     stats: { level: 12, maxHp: 180, attack: 521, defense: 230, speed: 430 },
-    possibleMoves: ["mega_punch", "bounce_kick", "run", "none"],
+    possibleMoves: ["kick", "cast", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["mega_punch", "bounce_kick", "none"],
+    defaultMoves: ["kick", "cast", "none"],
     defaultPassive: "none"
   },
   {
@@ -128,9 +128,9 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Celebi Template",
     type: "buf",
     stats: { level: 12, maxHp: 325, attack: 396, defense: 396, speed: 396 },
-    possibleMoves: ["meditate", "ki_blast", "run", "none"],
+    possibleMoves: ["switch_sovietico", "team_cure", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["meditate", "ki_blast", "none"],
+    defaultMoves: ["switch_sovietico", "team_cure", "none"],
     defaultPassive: "none"
   }
 ];

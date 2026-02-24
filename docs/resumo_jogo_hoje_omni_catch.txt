@@ -1,0 +1,274 @@
+VIBISHOWDOWN - RESUMO ATUAL DO JOGO (OMNI-CATCH)
+Data de referencia: 2026-02-24
+
+==================================================
+1) CORE DA PARTIDA
+==================================================
+- Vida compartilhada por player (nao existe HP individual por mon para dano real).
+- Evade compartilhado por player (nao depende de speed para escapar).
+- Duracao de turno: 50 segundos.
+- Total de turnos base: 12.
+- Fases por turno:
+  1) switch
+  2) guard
+  3) attack_01
+  4) end_turn (efeitos do fim do turno)
+
+Constantes atuais:
+- SHARED_HP_START = 200
+- SHARED_EVADE_START = 100
+- TURN_DURATION_MS = 50_000
+- BASE_TURN_LIMIT = 12
+
+==================================================
+2) CONDICOES DE FIM DE PARTIDA
+==================================================
+2.1) Fim por HP zerado (imediato)
+- Se um lado chega a 0 HP e o outro nao: o outro vence.
+- Se ambos chegam a 0 no mesmo check: empate.
+- Razao interna: endReason = "hp_zero".
+
+2.2) Fim por limite de turnos
+- Ao fim do turno 12:
+  - HP diferente: vence quem tem mais HP compartilhado.
+  - HP igual: empate.
+- Nao existe overtime ativo hoje.
+- Razao interna: endReason = "turn_limit".
+
+2.3) Fim por surrender
+- Um player pode desistir durante a partida.
+- Razao interna: endReason = "surrender".
+
+2.4) Fim por EVADE tecnico
+- Checado no inicio da fase switch, antes da resolucao das acoes da fase.
+- Um lado pode "escapar" se cumprir pelo menos uma condicao:
+  - evade >= 500
+  - gap de evade >= 33%
+- Gap de evade:
+  - gapPercent = round((meuEvade - evadeInimigo) * 100 / max(1, evadeInimigo))
+- Se os dois lados cumprem no mesmo turno: double technical escape.
+- Hoje esse fim nao define winner; encerra como escape tecnico.
+- Razao interna: endReason = "evade_escape".
+
+==================================================
+3) SISTEMA DE PONTOS (MINDGAME / RPS SCORE)
+==================================================
+- Tipos: BUF > DEF > ATK > BUF.
+- Regra de pontuacao por turno:
+  - +1 para vencedor, -1 para perdedor.
+- Casos implementados:
+  1) switch vs switch:
+     - compara tipo dos alvos de switch.
+     - empate de tipo: 0 ponto para ambos.
+  2) attack vs switch:
+     - quem atacou ganha o ponto.
+  3) attack vs attack:
+     - compara tipo dos ativos.
+     - empate de tipo: 0 ponto para ambos.
+
+==================================================
+4) PASSIVAS DE TIPO (SOMENTE QUANDO AMBOS TROCAM)
+==================================================
+As passivas de tipo so disparam quando os dois players fazem switch no mesmo turno e existe vantagem de tipo.
+
+4.1) Tipo ATK vencedor
+- Causa true damage fixo de 10 no alvo (ignora armadura).
+
+4.2) Tipo DEF vencedor
+- Ganha stack de armor (+10% por stack).
+- Maximo: 5 stacks (50%).
+- Tambem ativa o comportamento de Clear Body (bloqueia Screech).
+
+4.3) Tipo BUF vencedor
+- Ganha stack de regen.
+- Cada stack cura +5 HP no end_turn.
+
+Observacao importante:
+- O campo de arena trap ainda existe no estado, mas hoje nao ha regra ativa no motor que aplique arena trap.
+
+==================================================
+5) REGRAS DE SWITCH E RESET
+==================================================
+- Ao trocar, o mon que sai reseta stats temporarios para base:
+  - attack/stage
+  - defense
+  - speed
+  - flags de boosts/debuffs temporarios
+- Curses do lado que trocou sao removidas no switch desse lado.
+- Se houver Spikes armada no lado alvo, ela ativa no switch e eh consumida.
+
+Bloqueios de switch atuais:
+- arena trapped (estado existe)
+- taunt
+- effect confuse
+- effect immobilize
+
+==================================================
+6) SISTEMA DE EFFECTS E CURSES
+==================================================
+6.1) Effects (duracao em turnos)
+- Sao armazenados por slot com remainingTurns.
+- No fim de cada turno, remainingTurns reduz 1.
+- Quando chega a 0, o effect encerra.
+
+Bloqueios/restricoes por effect (runtime atual):
+- sleep: bloqueia uso de moves.
+- stun: bloqueia attack moves.
+- confuse: bloqueia attack moves e switch.
+- silence: bloqueia skills.
+- taunt: forca attack moves (bloqueia skills e switch).
+- nocaute: se houver alvo de switch disponivel, forca switch (bloqueia move).
+- happiness: permite apenas repetir o ultimo move.
+- frustration: bloqueia repetir o ultimo move.
+- weakness: attack efetivo = 0.
+- deterioration: defense efetiva = 0.
+- paralyse: speed efetiva = 0.
+- immobilize: bloqueia switch.
+
+6.2) Curses
+- Sao armazenadas por slot com stacks.
+- Sao removidas quando o alvo troca.
+- Runtime com efeito de tick hoje:
+  - leech_seed:
+    - drena 1/8 do HP max por stack no end_turn
+    - cura o lado que aplicou no mon ativo atual
+- Outras curses existem em catalogo, mas sem regra de tick implementada no motor.
+
+==================================================
+7) MOVES ATUAIS E COMPORTAMENTO
+==================================================
+Legenda:
+- attack move: move ofensivo para regras de taunt/stun/confuse.
+- skill: move nao-ofensivo para regras de taunt/silence.
+
+7.1) Moves ofensivos principais
+- quick_attack: dano escalado, com prioridade de execucao.
+- return: dano escalado com componente por level.
+- double_edge: dano escalado + recoil.
+- seismic_toss: dano flat 35.
+- focus_punch: carrega no attack_01, resolve no inicio do end_turn, falha se tomou dano real antes.
+- mega_punch: dano flat 20.
+- bounce_kick: dano flat 5 + self switch para alvo escolhido.
+- ki_blast: dano flat 20.
+
+7.2) Moves de setup/controle/suporte
+- agility: speed x2.
+- run: +32 evade compartilhado do proprio lado.
+- wish: agenda cura de 50% do maxHp no turno seguinte (end_turn).
+- belly_drum: paga 50% do HP atual e vai para stage maximo de ataque.
+- pain_split: ambos ficam com floor((HP1 + HP2)/2), com clamp por max.
+- screech: reduz defense do alvo para metade (min 1), bloqueado por Clear Body.
+- taunt: aplica effect taunt por 2 turnos.
+- spikes: arma armadilha de switch no alvo (1 carga).
+- recover: cura 20% do HP max compartilhado.
+- meditate: +2 stages de ataque.
+- leech_life: aplica curse leech_seed.
+- endure (fase guard): piso de HP 1% no turno, com boost de speed no trigger.
+- protect (fase guard): bloqueia dano no turno.
+- none: wait.
+
+7.3) Cooldown de guard
+- Protect e Endure compartilham cooldown.
+- Ao usar um deles, ambos entram em cooldown e nao podem ser usados no turno seguinte.
+
+==================================================
+8) LOBBY E COMPOSICAO DE TIME
+==================================================
+- Lobby exibe apenas 3 mons habilitados:
+  - Armoth
+  - Kairus
+  - Farien
+- Selecao obrigatoria: exatamente 3 mons.
+- Cada mon joga com exatamente 3 moves selecionados.
+- Passiva de mon no lobby esta travada em "none".
+- Sistema de level/EV continua ativo no setup.
+
+8.1) Mons iniciais visiveis no lobby
+Armoth (DEF)
+- stats base: level 12, hp 117, atk 375, def 730, spe 271
+- possibleMoves: spikes, recover, run, none
+- defaultMoves: spikes, recover, none
+
+Kairus (ATK)
+- stats base: level 12, hp 180, atk 521, def 230, spe 430
+- possibleMoves: mega_punch, bounce_kick, run, none
+- defaultMoves: mega_punch, bounce_kick, none
+
+Farien (BUF)
+- stats base: level 12, hp 325, atk 396, def 396, spe 396
+- possibleMoves: meditate, ki_blast, run, none
+- defaultMoves: meditate, ki_blast, none
+
+Observacao:
+- O catalogo total ainda possui 11 mons no data layer.
+- No lobby, so os 3 acima ficam visiveis/habilitados hoje.
+
+==================================================
+9) DETERMINISMO E REDE (RESUMO)
+==================================================
+- Cliente usa sincronizacao com servidor (vibinet).
+- Existe relay deterministico no frontend para fallback de turno.
+- No timeout de turno, intents faltantes recebem default intent valido.
+- O calculo do motor usa matematica inteira para reduzir dessync.
+
+
+==================================================
+10) ORGANIZACAO DE INFORMACOES, DADOS E CLASSIFICACOES
+==================================================
+
+10.1) Onde cada coisa mora
+- Regras globais e tipos compartilhados:
+  - src/shared.ts
+- Motor de batalha (ordem de fase, dano, status, fim de partida):
+  - src/engine.ts
+- Catalogo de moves:
+  - src/data/moves.ts
+- Catalogo de mons:
+  - src/data/pokemon.ts
+- Catalogo de passivas:
+  - src/data/passives.ts
+- Taxonomia de collateral (effects/curses/buff_debuff):
+  - src/data/collateral.ts
+- Tipos de dados de catalogo:
+  - src/data/types.ts
+- Validacao de integridade dos dados:
+  - src/data/integrity.ts
+- UI/lobby/relay/status:
+  - vibishowdown/index.ts
+
+10.2) Classificacoes principais (enums/tipos)
+- PlayerSlot: player1 | player2
+- MonsterType: buf | def | atk
+- MatchEndReason: hp_zero | turn_limit | surrender | evade_escape
+- DamageType: scaled | true | flat
+- CollateralKind: effect | buff_debuff | curse
+- CollateralRank: S | A | B | C | ?
+
+10.3) IDs de effect
+- confuse, sleep, stun, happiness, taunt, frustration,
+  nocaute, immobilize, weakness, deterioration, paralyse, silence
+
+10.4) IDs de curse
+- madness, leech_seed, destiny_bond, endure
+
+10.5) Estrutura de estado em runtime (GameState)
+- Metadados de partida:
+  - turn, status, winner, endReason, evadedSlots, baseTurnLimit
+- Pontuacao e telemetria:
+  - rpsScore, evadeTelemetry
+- Estado por player:
+  - sharedHp, sharedHpMax, sharedEvade, team, activeIndex
+- Controle de turno/status:
+  - pendingSwitch, pendingWish, tauntUntilTurn
+  - activeEffectsBySlot, activeCursesBySlot, lastMoveIndexBySlot
+- Recursos de regra:
+  - typePassiveArmorStacks, typePassiveRegenStacks
+  - arenaTrapUntilTurn, spikesArmedByTarget
+
+10.6) Regras de integridade dos dados
+- defaultMoves obrigatoriamente com 3 entradas.
+- possiblePassives obrigatoriamente ["none"].
+- defaultPassive obrigatoriamente "none".
+- moves de catalogo precisam existir no MOVE_BY_ID.
+- tipos validos de mon: buf/def/atk.
+

@@ -49,6 +49,8 @@ const TAUNT_BLOCKED_MOVE_IDS = new Set([
   "none",
   "agility",
   "run",
+  "switch_sovietico",
+  "team_cure",
   "wish",
   "spikes",
   "recover",
@@ -242,6 +244,7 @@ function clone_monster(monster: MonsterState): MonsterState {
     chosenPassive: monster.chosenPassive,
     protectActiveThisTurn: monster.protectActiveThisTurn,
     endureActiveThisTurn: monster.endureActiveThisTurn,
+    baitActiveThisTurn: !!monster.baitActiveThisTurn,
     protectCooldownTurns: monster.protectCooldownTurns,
     endureCooldownTurns: monster.endureCooldownTurns
   };
@@ -590,15 +593,19 @@ function is_skill_move(spec: { id: string; phaseId: string }): boolean {
 }
 
 function has_available_switch_target(player: PlayerState): boolean {
+  return first_available_switch_target(player) !== null;
+}
+
+function first_available_switch_target(player: PlayerState): number | null {
   for (let index = 0; index < player.team.length; index++) {
     if (index === player.activeIndex) {
       continue;
     }
     if (is_alive(player.team[index])) {
-      return true;
+      return index;
     }
   }
-  return false;
+  return null;
 }
 
 function switch_block_reason(state: GameState, slot: PlayerSlot): string | null {
@@ -1352,6 +1359,7 @@ function reset_protect_flags(state: GameState): void {
     for (const monster of player.team) {
       monster.protectActiveThisTurn = false;
       monster.endureActiveThisTurn = false;
+      monster.baitActiveThisTurn = false;
     }
   });
 }
@@ -1651,6 +1659,24 @@ function apply_end_turn_phase(
   return "continue";
 }
 
+function resolve_bait_outcomes(state: GameState, log: EventLog[]): void {
+  for (const slot of SLOT_ORDER) {
+    const player = state.players[slot];
+    for (const monster of player.team) {
+      if (!monster.baitActiveThisTurn) {
+        continue;
+      }
+      monster.baitActiveThisTurn = false;
+      log.push({
+        type: "bait_failed",
+        turn: state.turn,
+        summary: `${slot} used Bait but failed (no damage received)`,
+        data: { slot, target: monster.id, move: "bait" }
+      });
+    }
+  }
+}
+
 function minimum_endure_hp(monster: MonsterState): number {
   return Math.max(1, mul_div_ceil(monster.maxHp, 1, 100));
 }
@@ -1842,9 +1868,29 @@ function apply_damage_move(
     damage,
     hp_changed,
     took_damage_this_turn,
-    { source: spec.id }
+    { source: spec.id, ignoreArmor: spec.id === "seismic_toss" }
   );
   const final_damage = defender_result.applied;
+
+  if (final_damage > 0 && defender.baitActiveThisTurn) {
+    defender.baitActiveThisTurn = false;
+    upsert_effect(state, log, player_slot, "weakness", 2, opponent_slot, "bait");
+    log.push({
+      type: "bait_trigger",
+      turn: state.turn,
+      phase: phase_id,
+      summary: `${defender.name} triggered Bait on ${attacker.name} (Weakness 2 turns)`,
+      data: {
+        slot: opponent_slot,
+        targetSlot: player_slot,
+        source: defender.id,
+        target: attacker.id,
+        effect: "weakness",
+        duration: 2
+      }
+    });
+  }
+
   log.push({
     type: "damage",
     turn: state.turn,
@@ -2086,6 +2132,19 @@ function apply_move(
     return;
   }
 
+  if (spec.id === "bait") {
+    attacker.baitActiveThisTurn = true;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: "Bait: if user receives real damage this turn, attacker gets Weakness for 2 turns",
+      data: { move: spec.id, slot: player_slot, target: attacker.id, effect: "weakness", duration: 2 }
+    });
+    finalize_move_success();
+    return;
+  }
+
   if (spec.id === "agility") {
     const before_speed = attacker.speed;
     attacker.speed = Math.max(1, mul_div_round(before_speed, 2, 1));
@@ -2110,6 +2169,116 @@ function apply_move(
       phase: spec.phaseId,
       summary: `Agility: user SPE x2 (${before_speed} -> ${attacker.speed})`,
       data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_speed, after: attacker.speed }
+    });
+    finalize_move_success();
+    return;
+  }
+
+  if (spec.id === "switch_sovietico") {
+    const switched: Record<PlayerSlot, boolean> = { player1: false, player2: false };
+    for (const slot_id of SLOT_ORDER) {
+      const switch_player = state.players[slot_id];
+      const target_index = first_available_switch_target(switch_player);
+      if (target_index === null) {
+        log.push({
+          type: "switch_invalid",
+          turn: state.turn,
+          phase: spec.phaseId,
+          summary: `${slot_id} could not switch (no available target)`,
+          data: { slot: slot_id, move: spec.id, reason: "no_available_target" }
+        });
+        continue;
+      }
+      const switched_ok = apply_switch(state, log, slot_id, target_index, hp_changed, took_damage_this_turn);
+      switched[slot_id] = switched_ok;
+    }
+
+    if (switched.player1 && switched.player2) {
+      const p1_type = active_monster(state.players.player1).type;
+      const p2_type = active_monster(state.players.player2).type;
+      const type_cmp = compare_monster_type(p1_type, p2_type);
+      if (type_cmp !== 0) {
+        if (!state.rpsScore) {
+          state.rpsScore = empty_rps_score();
+        }
+        const winner: PlayerSlot = type_cmp > 0 ? "player1" : "player2";
+        const loser: PlayerSlot = winner === "player1" ? "player2" : "player1";
+        const player1_before = state.rpsScore.player1 ?? 0;
+        const player2_before = state.rpsScore.player2 ?? 0;
+        state.rpsScore[winner] = (state.rpsScore[winner] ?? 0) + 2;
+        state.rpsScore[loser] = (state.rpsScore[loser] ?? 0) - 2;
+        log.push({
+          type: "mindgame_bonus_ready",
+          turn: state.turn,
+          summary: `${winner} won mindgame (switch_sovietico x2)`,
+          data: {
+            winner,
+            loser,
+            reason: "switch_sovietico",
+            multiplier: 2,
+            player1Type: p1_type,
+            player2Type: p2_type
+          }
+        });
+        log.push({
+          type: "rps_score_update",
+          turn: state.turn,
+          summary: `rps score updated (${winner} +2, ${loser} -2)`,
+          data: {
+            winner,
+            loser,
+            player1Before: player1_before,
+            player1After: state.rpsScore.player1,
+            player2Before: player2_before,
+            player2After: state.rpsScore.player2
+          }
+        });
+      }
+      apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn);
+    }
+
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: "Switch Sovietico: both sides switched; switch mindgame bonus applied with x2 value",
+      data: {
+        move: spec.id,
+        switchedPlayer1: switched.player1,
+        switchedPlayer2: switched.player2
+      }
+    });
+    finalize_move_success();
+    return;
+  }
+
+  if (spec.id === "team_cure") {
+    ensure_state_runtime_defaults(state);
+    const effects_before = state.activeEffectsBySlot[player_slot].length;
+    const curses_before = state.activeCursesBySlot[player_slot].length;
+    state.activeEffectsBySlot[player_slot] = [];
+    state.activeCursesBySlot[player_slot] = [];
+    state.tauntUntilTurn[player_slot] = 0;
+    state.arenaTrapUntilTurn[player_slot] = 0;
+    let cleared_screech = 0;
+    for (const mon of player.team) {
+      if (mon.screechDebuffActive) {
+        mon.screechDebuffActive = false;
+        cleared_screech += 1;
+      }
+    }
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Team Cure: removed ${effects_before} effects and ${curses_before} curses from team`,
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        effectsRemoved: effects_before,
+        cursesRemoved: curses_before,
+        screechRemoved: cleared_screech
+      }
     });
     finalize_move_success();
     return;
@@ -2556,6 +2725,7 @@ function reset_monster_on_switch_out(monster: MonsterState): void {
   monster.speed = monster.baseSpeed;
   monster.agilityBoostActive = false;
   monster.endureSpeedBoostActive = false;
+  monster.baitActiveThisTurn = false;
   monster.bellyDrumActive = false;
   monster.screechDebuffActive = false;
 }
@@ -2716,6 +2886,7 @@ export function create_initial_state(
         chosenPassive: monster.passive,
         protectActiveThisTurn: false,
         endureActiveThisTurn: false,
+        baitActiveThisTurn: false,
         protectCooldownTurns: 0,
         endureCooldownTurns: 0
       };
@@ -2888,6 +3059,7 @@ export function resolve_turn(
   if (progress === "continue") {
     progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
   }
+  resolve_bait_outcomes(next, log);
   decrement_cooldowns(next);
   if (next.status === "running") {
     decay_effects_end_turn(next, log);

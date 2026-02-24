@@ -65,6 +65,7 @@ export type MonsterState = {
   chosenPassive: PassiveId;
   protectActiveThisTurn: boolean;
   endureActiveThisTurn: boolean;
+  baitActiveThisTurn: boolean;
   protectCooldownTurns: number;
   endureCooldownTurns: number;
 };
