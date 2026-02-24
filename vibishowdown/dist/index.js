@@ -1834,13 +1834,13 @@ function ping() {
 var MOVE_CATALOG = [
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
   { id: "kick", label: "Kick", phaseId: "attack_01", attackMultiplier100: 120 },
-  { id: "cast", label: "Cast", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 90 },
+  { id: "throw", label: "Throw", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 90 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "run", label: "Run", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "wish", label: "Wish", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "switch_sovietico", label: "Switch Sovietico", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "team_cure", label: "Team Cure", phaseId: "attack_01", attackMultiplier100: 0 },
-  { id: "bait", label: "Bait", phaseId: "guard", attackMultiplier100: 0 },
+  { id: "bait", label: "Bait", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "belly_drum", label: "Belly Drum", phaseId: "attack_01", attackMultiplier100: 0 },
   {
     id: "return",
@@ -1901,10 +1901,12 @@ var MOVE_CATALOG = [
 ];
 var MOVE_OPTIONS = MOVE_CATALOG.map((entry) => entry.id);
 var MOVE_ALIASES = {
-  bells_drum: "belly_drum"
+  bells_drum: "belly_drum",
+  cast: "throw"
 };
 var MOVE_LABELS = Object.fromEntries(MOVE_CATALOG.map((entry) => [entry.id, entry.label]));
 MOVE_LABELS.bells_drum = "Belly Drum";
+MOVE_LABELS.cast = "Throw";
 var MOVE_BY_ID_INTERNAL = new Map(MOVE_CATALOG.map((entry) => [entry.id, entry]));
 for (const [legacy_id, canonical_id] of Object.entries(MOVE_ALIASES)) {
   const canonical = MOVE_BY_ID_INTERNAL.get(canonical_id);
@@ -2058,9 +2060,9 @@ var MONSTER_ROSTER = [
     role: "Absol Template",
     type: "atk",
     stats: { level: 12, maxHp: 180, attack: 521, defense: 230, speed: 430 },
-    possibleMoves: ["kick", "cast", "none"],
+    possibleMoves: ["kick", "throw", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["kick", "cast", "none"],
+    defaultMoves: ["kick", "throw", "none"],
     defaultPassive: "none"
   },
   {
@@ -2323,6 +2325,7 @@ var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "run",
   "switch_sovietico",
   "team_cure",
+  "bait",
   "wish",
   "spikes",
   "recover",
@@ -2386,6 +2389,7 @@ var CURSE_LABELS = {
   destiny_bond: "Destiny Bond",
   endure: "Endure"
 };
+var NEGATIVE_STAT_EFFECT_ID_SET = new Set(["weakness", "deterioration", "paralyse"]);
 function clamp_stat_stage(value) {
   return Math.max(STAT_STAGE_MIN, Math.min(STAT_STAGE_MAX, value));
 }
@@ -2406,6 +2410,10 @@ function infer_stage_from_attack(current_attack, base_attack) {
   }
   const inferred = Math.round(current_attack * 2 / base_attack - 2);
   return clamp_stat_stage(inferred);
+}
+function attack_from_stage(base_attack, stage) {
+  const ratio = stage_ratio(stage);
+  return Math.max(0, mul_div_round(base_attack, ratio.numerator, ratio.denominator));
 }
 function clamp_stat_multiplier_percent(total_percent) {
   return Math.max(STAT_MULTIPLIER_MIN_PERCENT, Math.min(STAT_MULTIPLIER_MAX_PERCENT, total_percent));
@@ -2681,6 +2689,12 @@ function has_effect(state, slot, effect_id) {
 }
 function effect_turns_remaining(state, slot, effect_id) {
   return effect_state(state, slot, effect_id)?.remainingTurns ?? 0;
+}
+function is_negative_stat_effect_id(effect_id) {
+  return NEGATIVE_STAT_EFFECT_ID_SET.has(effect_id);
+}
+function is_negative_stat_buff_debuff(entry) {
+  return (entry.stat === "attack" || entry.stat === "defense" || entry.stat === "speed") && normalize_int(entry.deltaPercent, 0, -99999) < 0;
 }
 function upsert_effect(state, log, target_slot, effect_id, duration_turns, source_slot, source_move_id) {
   ensure_state_runtime_defaults(state);
@@ -3430,7 +3444,8 @@ function check_zero_hp_match_result(state, log) {
 function effective_attack_for_slot(state, slot, monster) {
   refresh_active_monster_stats_for_slot(state, slot);
   if (has_effect(state, slot, "weakness")) {
-    return 0;
+    const weakened_stage = clamp_stat_stage(monster.attackStage - 2);
+    return attack_from_stage(monster.baseAttack, weakened_stage);
   }
   return monster.attack;
 }
@@ -3812,23 +3827,6 @@ function apply_end_turn_phase(state, log, hp_changed, focus_punch_pending, took_
   }
   return "continue";
 }
-function resolve_bait_outcomes(state, log) {
-  for (const slot of SLOT_ORDER) {
-    const player = state.players[slot];
-    for (const monster of player.team) {
-      if (!monster.baitActiveThisTurn) {
-        continue;
-      }
-      monster.baitActiveThisTurn = false;
-      log.push({
-        type: "bait_failed",
-        turn: state.turn,
-        summary: `${slot} used Bait but failed (no damage received)`,
-        data: { slot, target: monster.id, move: "bait" }
-      });
-    }
-  }
-}
 function minimum_endure_hp(monster) {
   return Math.max(1, mul_div_ceil(monster.maxHp, 1, 100));
 }
@@ -3992,24 +3990,6 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
   }
   const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn, { source: spec.id, ignoreArmor: spec.id === "seismic_toss" });
   const final_damage = defender_result.applied;
-  if (final_damage > 0 && defender.baitActiveThisTurn) {
-    defender.baitActiveThisTurn = false;
-    upsert_effect(state, log, player_slot, "weakness", 2, opponent_slot, "bait");
-    log.push({
-      type: "bait_trigger",
-      turn: state.turn,
-      phase: phase_id,
-      summary: `${defender.name} triggered Bait on ${attacker.name} (Weakness 2 turns)`,
-      data: {
-        slot: opponent_slot,
-        targetSlot: player_slot,
-        source: defender.id,
-        target: attacker.id,
-        effect: "weakness",
-        duration: 2
-      }
-    });
-  }
   log.push({
     type: "damage",
     turn: state.turn,
@@ -4211,13 +4191,40 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     return;
   }
   if (spec.id === "bait") {
-    attacker.baitActiveThisTurn = true;
+    const opponent_slot = other_slot(player_slot);
+    const took_damage_before_bait = !!took_damage_this_turn[player_slot];
+    if (!took_damage_before_bait) {
+      log.push({
+        type: "bait_failed",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `${player_slot} used Bait but failed (no prior damage this turn)`,
+        data: { slot: player_slot, target: attacker.id, move: spec.id, reason: "no_prior_damage" }
+      });
+      finalize_move_success();
+      return;
+    }
+    upsert_effect(state, log, opponent_slot, "weakness", 2, player_slot, spec.id);
+    log.push({
+      type: "bait_trigger",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${attacker.name} triggered Bait on ${defender.name} (Weakness 2 turns)`,
+      data: {
+        slot: player_slot,
+        targetSlot: opponent_slot,
+        source: attacker.id,
+        target: defender.id,
+        effect: "weakness",
+        duration: 2
+      }
+    });
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Bait: if user receives real damage this turn, attacker gets Weakness for 2 turns",
-      data: { move: spec.id, slot: player_slot, target: attacker.id, effect: "weakness", duration: 2 }
+      summary: "Bait: success after taking damage earlier this turn (applies Weakness for 2 turns)",
+      data: { move: spec.id, slot: player_slot, target: defender.id, effect: "weakness", duration: 2 }
     });
     finalize_move_success();
     return;
@@ -4335,35 +4342,23 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
   }
   if (spec.id === "team_cure") {
     ensure_state_runtime_defaults(state);
-    const effects_before = state.activeEffectsBySlot[player_slot].length;
-    const curses_before = state.activeCursesBySlot[player_slot].length;
+    const effects_before = state.activeEffectsBySlot[player_slot];
     const buff_debuffs_before = state.activeBuffDebuffsBySlot[player_slot].length;
-    state.activeEffectsBySlot[player_slot] = [];
-    state.activeCursesBySlot[player_slot] = [];
-    state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter((entry) => entry.deltaPercent >= 0);
+    state.activeEffectsBySlot[player_slot] = effects_before.filter((entry) => !is_negative_stat_effect_id(entry.id));
+    const effects_removed = Math.max(0, effects_before.length - state.activeEffectsBySlot[player_slot].length);
+    state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter((entry) => !is_negative_stat_buff_debuff(entry));
     const buff_debuffs_removed = Math.max(0, buff_debuffs_before - state.activeBuffDebuffsBySlot[player_slot].length);
     refresh_active_monster_stats_for_slot(state, player_slot);
-    state.tauntUntilTurn[player_slot] = 0;
-    state.arenaTrapUntilTurn[player_slot] = 0;
-    let cleared_screech = 0;
-    for (const mon of player.team) {
-      if (mon.screechDebuffActive) {
-        mon.screechDebuffActive = false;
-        cleared_screech += 1;
-      }
-    }
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Team Cure: removed ${effects_before} effects, ${curses_before} curses and ${buff_debuffs_removed} negative buff/debuffs from team`,
+      summary: `Team Cure: removed ${effects_removed} negative effects and ${buff_debuffs_removed} negative buff/debuffs from team`,
       data: {
         move: spec.id,
         slot: player_slot,
-        effectsRemoved: effects_before,
-        cursesRemoved: curses_before,
-        buffDebuffsRemoved: buff_debuffs_removed,
-        screechRemoved: cleared_screech
+        effectsRemoved: effects_removed,
+        buffDebuffsRemoved: buff_debuffs_removed
       }
     });
     finalize_move_success();
@@ -5078,7 +5073,6 @@ function resolve_turn(state, intents) {
   if (progress === "continue") {
     progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
   }
-  resolve_bait_outcomes(next, log);
   decrement_cooldowns(next);
   if (next.status === "running") {
     decay_effects_end_turn(next, log);
@@ -6557,6 +6551,9 @@ function coerce_config(spec, value) {
   for (let i = 0;i < moves.length; i++) {
     if (moves[i] === "bells_drum") {
       moves[i] = "belly_drum";
+    }
+    if (moves[i] === "cast") {
+      moves[i] = "throw";
     }
     if (!allowed.has(moves[i])) {
       had_disallowed_move = true;

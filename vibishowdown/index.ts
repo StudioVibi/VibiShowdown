@@ -1632,6 +1632,9 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
     if (moves[i] === "bells_drum") {
       moves[i] = "belly_drum";
     }
+    if (moves[i] === "cast") {
+      moves[i] = "throw";
+    }
     if (!allowed.has(moves[i])) {
       had_disallowed_move = true;
       moves[i] = "none";

@@ -1,0 +1,8 @@
+TODO - revisar regra de limpeza de status compostos
+
+- Team Cure hoje limpa apenas componentes negativos de ATK/DEF/SPE.
+- Ponto pendente:
+  Em efeitos compostos (parte positiva + parte negativa no mesmo pacote),
+  decidir se a limpeza remove:
+  1) apenas a parte negativa; ou
+  2) o pacote inteiro (positivo e negativo).

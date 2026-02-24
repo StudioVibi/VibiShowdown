@@ -117,9 +117,9 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Absol Template",
     type: "atk",
     stats: { level: 12, maxHp: 180, attack: 521, defense: 230, speed: 430 },
-    possibleMoves: ["kick", "cast", "none"],
+    possibleMoves: ["kick", "throw", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["kick", "cast", "none"],
+    defaultMoves: ["kick", "throw", "none"],
     defaultPassive: "none"
   },
   {

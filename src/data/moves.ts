@@ -3,13 +3,13 @@ import type { MoveCatalogEntry } from "./types.ts";
 export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
   { id: "kick", label: "Kick", phaseId: "attack_01", attackMultiplier100: 120 },
-  { id: "cast", label: "Cast", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 90 },
+  { id: "throw", label: "Throw", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 90 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "run", label: "Run", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "wish", label: "Wish", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "switch_sovietico", label: "Switch Sovietico", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "team_cure", label: "Team Cure", phaseId: "attack_01", attackMultiplier100: 0 },
-  { id: "bait", label: "Bait", phaseId: "guard", attackMultiplier100: 0 },
+  { id: "bait", label: "Bait", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "belly_drum", label: "Belly Drum", phaseId: "attack_01", attackMultiplier100: 0 },
   {
     id: "return",
@@ -72,13 +72,15 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
 export const MOVE_OPTIONS: string[] = MOVE_CATALOG.map((entry) => entry.id);
 
 const MOVE_ALIASES: Record<string, string> = {
-  bells_drum: "belly_drum"
+  bells_drum: "belly_drum",
+  cast: "throw"
 };
 
 export const MOVE_LABELS: Record<string, string> = Object.fromEntries(
   MOVE_CATALOG.map((entry) => [entry.id, entry.label])
 );
 MOVE_LABELS.bells_drum = "Belly Drum";
+MOVE_LABELS.cast = "Throw";
 
 const MOVE_BY_ID_INTERNAL = new Map<string, MoveCatalogEntry>(
   MOVE_CATALOG.map((entry) => [entry.id, entry])

@@ -60,6 +60,7 @@ const TAUNT_BLOCKED_MOVE_IDS = new Set([
   "run",
   "switch_sovietico",
   "team_cure",
+  "bait",
   "wish",
   "spikes",
   "recover",
@@ -138,6 +139,8 @@ const CURSE_LABELS: Record<CurseCollateralId, string> = {
   destiny_bond: "Destiny Bond",
   endure: "Endure"
 };
+
+const NEGATIVE_STAT_EFFECT_ID_SET = new Set<EffectCollateralId>(["weakness", "deterioration", "paralyse"]);
 
 function clamp_stat_stage(value: number): number {
   return Math.max(STAT_STAGE_MIN, Math.min(STAT_STAGE_MAX, value));
@@ -524,6 +527,17 @@ function curse_stacks(state: GameState, slot: PlayerSlot, curse_id: CurseCollate
 
 function effect_turns_remaining(state: GameState, slot: PlayerSlot, effect_id: EffectCollateralId): number {
   return effect_state(state, slot, effect_id)?.remainingTurns ?? 0;
+}
+
+function is_negative_stat_effect_id(effect_id: string): boolean {
+  return NEGATIVE_STAT_EFFECT_ID_SET.has(effect_id as EffectCollateralId);
+}
+
+function is_negative_stat_buff_debuff(entry: ActiveBuffDebuffState): boolean {
+  return (
+    (entry.stat === "attack" || entry.stat === "defense" || entry.stat === "speed") &&
+    normalize_int(entry.deltaPercent, 0, -99999) < 0
+  );
 }
 
 function upsert_effect(
@@ -1455,7 +1469,8 @@ function check_zero_hp_match_result(state: GameState, log: EventLog[]): MatchPro
 function effective_attack_for_slot(state: GameState, slot: PlayerSlot, monster: MonsterState): number {
   refresh_active_monster_stats_for_slot(state, slot);
   if (has_effect(state, slot, "weakness")) {
-    return 0;
+    const weakened_stage = clamp_stat_stage(monster.attackStage - 2);
+    return attack_from_stage(monster.baseAttack, weakened_stage);
   }
   return monster.attack;
 }
@@ -1921,24 +1936,6 @@ function apply_end_turn_phase(
   return "continue";
 }
 
-function resolve_bait_outcomes(state: GameState, log: EventLog[]): void {
-  for (const slot of SLOT_ORDER) {
-    const player = state.players[slot];
-    for (const monster of player.team) {
-      if (!monster.baitActiveThisTurn) {
-        continue;
-      }
-      monster.baitActiveThisTurn = false;
-      log.push({
-        type: "bait_failed",
-        turn: state.turn,
-        summary: `${slot} used Bait but failed (no damage received)`,
-        data: { slot, target: monster.id, move: "bait" }
-      });
-    }
-  }
-}
-
 function minimum_endure_hp(monster: MonsterState): number {
   return Math.max(1, mul_div_ceil(monster.maxHp, 1, 100));
 }
@@ -2149,25 +2146,6 @@ function apply_damage_move(
     { source: spec.id, ignoreArmor: spec.id === "seismic_toss" }
   );
   const final_damage = defender_result.applied;
-
-  if (final_damage > 0 && defender.baitActiveThisTurn) {
-    defender.baitActiveThisTurn = false;
-    upsert_effect(state, log, player_slot, "weakness", 2, opponent_slot, "bait");
-    log.push({
-      type: "bait_trigger",
-      turn: state.turn,
-      phase: phase_id,
-      summary: `${defender.name} triggered Bait on ${attacker.name} (Weakness 2 turns)`,
-      data: {
-        slot: opponent_slot,
-        targetSlot: player_slot,
-        source: defender.id,
-        target: attacker.id,
-        effect: "weakness",
-        duration: 2
-      }
-    });
-  }
 
   log.push({
     type: "damage",
@@ -2420,13 +2398,40 @@ function apply_move(
   }
 
   if (spec.id === "bait") {
-    attacker.baitActiveThisTurn = true;
+    const opponent_slot = other_slot(player_slot);
+    const took_damage_before_bait = !!took_damage_this_turn[player_slot];
+    if (!took_damage_before_bait) {
+      log.push({
+        type: "bait_failed",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `${player_slot} used Bait but failed (no prior damage this turn)`,
+        data: { slot: player_slot, target: attacker.id, move: spec.id, reason: "no_prior_damage" }
+      });
+      finalize_move_success();
+      return;
+    }
+    upsert_effect(state, log, opponent_slot, "weakness", 2, player_slot, spec.id);
+    log.push({
+      type: "bait_trigger",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${attacker.name} triggered Bait on ${defender.name} (Weakness 2 turns)`,
+      data: {
+        slot: player_slot,
+        targetSlot: opponent_slot,
+        source: attacker.id,
+        target: defender.id,
+        effect: "weakness",
+        duration: 2
+      }
+    });
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Bait: if user receives real damage this turn, attacker gets Weakness for 2 turns",
-      data: { move: spec.id, slot: player_slot, target: attacker.id, effect: "weakness", duration: 2 }
+      summary: "Bait: success after taking damage earlier this turn (applies Weakness for 2 turns)",
+      data: { move: spec.id, slot: player_slot, target: defender.id, effect: "weakness", duration: 2 }
     });
     finalize_move_success();
     return;
@@ -2556,40 +2561,28 @@ function apply_move(
 
   if (spec.id === "team_cure") {
     ensure_state_runtime_defaults(state);
-    const effects_before = state.activeEffectsBySlot[player_slot].length;
-    const curses_before = state.activeCursesBySlot[player_slot].length;
+    const effects_before = state.activeEffectsBySlot[player_slot];
     const buff_debuffs_before = state.activeBuffDebuffsBySlot[player_slot].length;
-    state.activeEffectsBySlot[player_slot] = [];
-    state.activeCursesBySlot[player_slot] = [];
+    state.activeEffectsBySlot[player_slot] = effects_before.filter((entry) => !is_negative_stat_effect_id(entry.id));
+    const effects_removed = Math.max(0, effects_before.length - state.activeEffectsBySlot[player_slot].length);
     state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter(
-      (entry) => entry.deltaPercent >= 0
+      (entry) => !is_negative_stat_buff_debuff(entry)
     );
     const buff_debuffs_removed = Math.max(
       0,
       buff_debuffs_before - state.activeBuffDebuffsBySlot[player_slot].length
     );
     refresh_active_monster_stats_for_slot(state, player_slot);
-    state.tauntUntilTurn[player_slot] = 0;
-    state.arenaTrapUntilTurn[player_slot] = 0;
-    let cleared_screech = 0;
-    for (const mon of player.team) {
-      if (mon.screechDebuffActive) {
-        mon.screechDebuffActive = false;
-        cleared_screech += 1;
-      }
-    }
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Team Cure: removed ${effects_before} effects, ${curses_before} curses and ${buff_debuffs_removed} negative buff/debuffs from team`,
+      summary: `Team Cure: removed ${effects_removed} negative effects and ${buff_debuffs_removed} negative buff/debuffs from team`,
       data: {
         move: spec.id,
         slot: player_slot,
-        effectsRemoved: effects_before,
-        cursesRemoved: curses_before,
-        buffDebuffsRemoved: buff_debuffs_removed,
-        screechRemoved: cleared_screech
+        effectsRemoved: effects_removed,
+        buffDebuffsRemoved: buff_debuffs_removed
       }
     });
     finalize_move_success();
@@ -3422,7 +3415,6 @@ export function resolve_turn(
   if (progress === "continue") {
     progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
   }
-  resolve_bait_outcomes(next, log);
   decrement_cooldowns(next);
   if (next.status === "running") {
     decay_effects_end_turn(next, log);
