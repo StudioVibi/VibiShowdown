@@ -1533,12 +1533,34 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
     moves.push("none");
   }
   const allowed = new Set(spec.possibleMoves);
+  let had_disallowed_move = false;
   for (let i = 0; i < moves.length; i++) {
     if (moves[i] === "bells_drum") {
       moves[i] = "belly_drum";
     }
     if (!allowed.has(moves[i])) {
+      had_disallowed_move = true;
       moves[i] = "none";
+    }
+  }
+  if (had_disallowed_move) {
+    const used_moves = new Set(moves.filter((move_id) => move_id !== "none"));
+    for (let i = 0; i < moves.length; i++) {
+      if (moves[i] !== "none") {
+        continue;
+      }
+      const fallback_move = default_moves[i] ?? "none";
+      if (fallback_move === "none") {
+        continue;
+      }
+      if (!allowed.has(fallback_move)) {
+        continue;
+      }
+      if (used_moves.has(fallback_move)) {
+        continue;
+      }
+      moves[i] = fallback_move;
+      used_moves.add(fallback_move);
     }
   }
   const level = normalize_stat_value("level", value.stats?.level, base.stats.level);
