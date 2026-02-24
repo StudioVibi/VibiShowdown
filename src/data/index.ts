@@ -2,9 +2,11 @@ import { MOVE_BY_ID, MOVE_CATALOG, MOVE_LABELS, MOVE_OPTIONS, move_spec } from "
 import { PASSIVE_BY_ID, PASSIVE_CATALOG, PASSIVE_LABELS, PASSIVE_OPTIONS, normalize_passive_id, passive_spec } from "./passives.ts";
 import { MONSTER_BY_ID, MONSTER_ROSTER } from "./pokemon.ts";
 import {
+  BUFF_DEBUFF_COLLATERAL_TEMPLATES,
   COLLATERAL_KIND_OPTIONS,
   CURSE_COLLATERAL_TEMPLATES,
-  EFFECT_COLLATERAL_TEMPLATES
+  EFFECT_COLLATERAL_TEMPLATES,
+  INSTANT_COLLATERAL_TEMPLATES
 } from "./collateral.ts";
 import type {
   BuffDebuffCollateral,
@@ -16,6 +18,8 @@ import type {
   CurseCollateralId,
   EffectCollateral,
   EffectCollateralId,
+  InstantCollateral,
+  InstantCollateralId,
   MonsterCatalogEntry,
   MoveCatalogEntry,
   MoveCollateral,
@@ -29,6 +33,8 @@ export {
   COLLATERAL_KIND_OPTIONS,
   CURSE_COLLATERAL_TEMPLATES,
   EFFECT_COLLATERAL_TEMPLATES,
+  BUFF_DEBUFF_COLLATERAL_TEMPLATES,
+  INSTANT_COLLATERAL_TEMPLATES,
   MOVE_BY_ID,
   MOVE_CATALOG,
   MOVE_LABELS,
@@ -54,6 +60,8 @@ export type {
   CurseCollateralId,
   EffectCollateral,
   EffectCollateralId,
+  InstantCollateral,
+  InstantCollateralId,
   MonsterCatalogEntry,
   MoveCatalogEntry,
   MoveCollateral,

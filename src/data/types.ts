@@ -2,7 +2,7 @@ import type { MonsterType, Stats } from "../shared.ts";
 
 export type DamageType = "scaled" | "true" | "flat";
 
-export type CollateralKind = "effect" | "buff_debuff" | "curse";
+export type CollateralKind = "effect" | "buff_debuff" | "curse" | "instant";
 
 export type CollateralRank = "S" | "A" | "B" | "C" | "?";
 
@@ -22,6 +22,8 @@ export type EffectCollateralId =
 
 export type CurseCollateralId = "madness" | "leech_seed" | "destiny_bond" | "endure";
 
+export type InstantCollateralId = "clear_body" | string;
+
 export type BuffDebuffTarget = "self" | "opponent";
 
 export type BuffDebuffStat = "attack" | "defense" | "speed";
@@ -36,9 +38,10 @@ export type EffectCollateral = {
 
 export type BuffDebuffCollateral = {
   kind: "buff_debuff";
+  id: string;
   target: BuffDebuffTarget;
   stat: BuffDebuffStat;
-  amount: number;
+  deltaPercent: number;
   clearsOnSwitch: true;
 };
 
@@ -49,7 +52,13 @@ export type CurseCollateral = {
   clearsOnSwitch: true;
 };
 
-export type MoveCollateral = EffectCollateral | BuffDebuffCollateral | CurseCollateral;
+export type InstantCollateral = {
+  kind: "instant";
+  id: InstantCollateralId;
+  target?: BuffDebuffTarget;
+};
+
+export type MoveCollateral = EffectCollateral | BuffDebuffCollateral | CurseCollateral | InstantCollateral;
 
 export type MoveCatalogEntry = {
   id: string;
@@ -61,12 +70,15 @@ export type MoveCatalogEntry = {
   flatDamage?: number;
   recoilNumerator?: number;
   recoilDenominator?: number;
+  components?: MoveCollateral[];
   collateral?: MoveCollateral[];
 };
 
 export type PassiveCatalogEntry = {
   id: string;
   label: string;
+  kind?: "none" | "instant";
+  components?: MoveCollateral[];
   aliases?: string[];
 };
 

@@ -1870,7 +1870,7 @@ var MOVE_CATALOG = [
     label: "Leech Life",
     phaseId: "attack_01",
     attackMultiplier100: 0,
-    collateral: [{ kind: "curse", id: "leech_seed", clearsOnSwitch: true }]
+    components: [{ kind: "curse", id: "leech_seed", clearsOnSwitch: true }]
   },
   { id: "focus_punch", label: "Focus Punch", phaseId: "attack_01", attackMultiplier100: 150 },
   { id: "pain_split", label: "Pain Split", phaseId: "attack_01", attackMultiplier100: 0 },
@@ -1880,7 +1880,7 @@ var MOVE_CATALOG = [
     label: "Taunt",
     phaseId: "attack_01",
     attackMultiplier100: 0,
-    collateral: [{ kind: "effect", id: "taunt", maxDurationTurns: 2 }]
+    components: [{ kind: "effect", id: "taunt", maxDurationTurns: 2 }]
   },
   { id: "spikes", label: "Spikes", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "recover", label: "Recover", phaseId: "attack_01", attackMultiplier100: 0 },
@@ -1919,7 +1919,13 @@ function move_spec(move_id) {
 
 // src/data/passives.ts
 var PASSIVE_CATALOG = [
-  { id: "none", label: "none" }
+  { id: "none", label: "none", kind: "none", components: [] },
+  {
+    id: "clear_body",
+    label: "Clear Body [Instant]",
+    kind: "instant",
+    components: [{ kind: "instant", id: "clear_body", target: "self" }]
+  }
 ];
 var PASSIVE_OPTIONS = PASSIVE_CATALOG.map((entry) => entry.id);
 var PASSIVE_LABELS = Object.fromEntries(PASSIVE_CATALOG.flatMap((entry) => {
@@ -2139,10 +2145,11 @@ function ensure_valid_type(monster) {
 }
 function assert_monster_integrity(monsters) {
   for (const move of MOVE_CATALOG) {
-    if (!move.collateral) {
+    const components = move.components ?? move.collateral ?? [];
+    if (components.length === 0) {
       continue;
     }
-    for (const collateral of move.collateral) {
+    for (const collateral of components) {
       if (collateral.kind === "effect") {
         ensure_int(collateral.maxDurationTurns, `${move.id}: effect ${collateral.id} duration must be integer`);
         ensure(collateral.maxDurationTurns > 0, `${move.id}: effect ${collateral.id} duration must be > 0`);
@@ -2150,6 +2157,16 @@ function assert_monster_integrity(monsters) {
       }
       if (collateral.kind === "curse") {
         ensure(collateral.clearsOnSwitch === true, `${move.id}: curse ${collateral.id} must clear on switch`);
+        continue;
+      }
+      if (collateral.kind === "buff_debuff") {
+        ensure(collateral.id.trim().length > 0, `${move.id}: buff_debuff id is required`);
+        ensure_int(collateral.deltaPercent, `${move.id}: buff_debuff ${collateral.id} deltaPercent must be integer`);
+        ensure(collateral.clearsOnSwitch === true, `${move.id}: buff_debuff ${collateral.id} must clear on switch`);
+        continue;
+      }
+      if (collateral.kind === "instant") {
+        ensure(collateral.id.trim().length > 0, `${move.id}: instant id is required`);
         continue;
       }
     }
@@ -2175,12 +2192,14 @@ function assert_monster_integrity(monsters) {
         move_dedup.add(move_id);
       }
     }
-    ensure(monster.possiblePassives.length === 1, `${monster.id}: possiblePassives must contain exactly 1 entry`);
-    const only_passive = monster.possiblePassives[0];
-    ensure(PASSIVE_BY_ID.has(only_passive), `${monster.id}: unknown passive in possiblePassives: ${only_passive}`);
-    ensure(only_passive === "none", `${monster.id}: possiblePassives must be [none]`);
+    ensure(monster.possiblePassives.length > 0, `${monster.id}: possiblePassives cannot be empty`);
+    const possible_passives = new Set;
+    for (const passive_id of monster.possiblePassives) {
+      ensure(PASSIVE_BY_ID.has(passive_id), `${monster.id}: unknown passive in possiblePassives: ${passive_id}`);
+      possible_passives.add(passive_id);
+    }
     ensure(PASSIVE_BY_ID.has(monster.defaultPassive), `${monster.id}: unknown default passive: ${monster.defaultPassive}`);
-    ensure(monster.defaultPassive === "none", `${monster.id}: default passive must be none`);
+    ensure(possible_passives.has(monster.defaultPassive), `${monster.id}: default passive not allowed: ${monster.defaultPassive}`);
     ensure_int(monster.stats.level, `${monster.id}: level must be integer`);
     ensure_int(monster.stats.maxHp, `${monster.id}: maxHp must be integer`);
     ensure_int(monster.stats.attack, `${monster.id}: attack must be integer`);
@@ -2321,6 +2340,8 @@ var TYPE_PASSIVE_ATK_TRUE_DAMAGE = 10;
 var TYPE_PASSIVE_DEF_ARMOR_STACK_MAX = 5;
 var TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT = 10;
 var TYPE_PASSIVE_BUF_REGEN_PER_STACK = 5;
+var STAT_MULTIPLIER_MIN_PERCENT = 25;
+var STAT_MULTIPLIER_MAX_PERCENT = 400;
 var EVADE_VALUE_GOAL = 500;
 var EVADE_GAP_GOAL_PERCENT = 33;
 var EFFECT_IDS = [
@@ -2386,15 +2407,42 @@ function infer_stage_from_attack(current_attack, base_attack) {
   const inferred = Math.round(current_attack * 2 / base_attack - 2);
   return clamp_stat_stage(inferred);
 }
-function attack_from_stage(base_attack, stage) {
-  const ratio = stage_ratio(stage);
-  return Math.max(0, mul_div_round(base_attack, ratio.numerator, ratio.denominator));
+function clamp_stat_multiplier_percent(total_percent) {
+  return Math.max(STAT_MULTIPLIER_MIN_PERCENT, Math.min(STAT_MULTIPLIER_MAX_PERCENT, total_percent));
 }
-function set_attack_stage(monster, next_stage) {
-  const normalized = clamp_stat_stage(next_stage);
-  monster.attackStage = normalized;
-  monster.attack = attack_from_stage(monster.baseAttack, normalized);
-  return normalized;
+function stat_multiplier_percent_from_delta(delta_percent) {
+  return clamp_stat_multiplier_percent(100 + delta_percent);
+}
+function stat_value_from_delta_percent(base_value, delta_percent) {
+  return Math.max(0, mul_div_round(base_value, stat_multiplier_percent_from_delta(delta_percent), 100));
+}
+function total_delta_percent_from_buff_debuffs(state, slot, stat) {
+  let total = 0;
+  for (const entry of buff_debuff_list(state, slot)) {
+    if (entry.stat !== stat) {
+      continue;
+    }
+    total += entry.deltaPercent;
+  }
+  return total;
+}
+function refresh_active_monster_stats_for_slot(state, slot) {
+  const monster = active_monster(state.players[slot]);
+  const attack_delta = total_delta_percent_from_buff_debuffs(state, slot, "attack");
+  const defense_delta = total_delta_percent_from_buff_debuffs(state, slot, "defense");
+  const speed_delta = total_delta_percent_from_buff_debuffs(state, slot, "speed");
+  monster.attack = stat_value_from_delta_percent(monster.baseAttack, attack_delta);
+  monster.defense = stat_value_from_delta_percent(monster.baseDefense, defense_delta);
+  monster.speed = stat_value_from_delta_percent(monster.baseSpeed, speed_delta);
+  monster.attackStage = infer_stage_from_attack(monster.attack, monster.baseAttack);
+  monster.agilityBoostActive = buff_debuff_list(state, slot).some((entry) => entry.id === "agility_speed_up");
+  monster.endureSpeedBoostActive = buff_debuff_list(state, slot).some((entry) => entry.id === "endure_speed_up");
+  monster.bellyDrumActive = buff_debuff_list(state, slot).some((entry) => entry.id === "belly_drum_attack_up");
+  monster.screechDebuffActive = buff_debuff_list(state, slot).some((entry) => entry.id === "screech_def_down");
+}
+function refresh_active_monster_stats(state) {
+  refresh_active_monster_stats_for_slot(state, "player1");
+  refresh_active_monster_stats_for_slot(state, "player2");
 }
 function compare_action_initiative(state, phase, a, b) {
   const a_slot = a.player;
@@ -2443,6 +2491,9 @@ function clone_monster(monster) {
   const base_defense = Number.isFinite(monster.baseDefense) ? monster.baseDefense : monster.defense;
   const base_speed = Number.isFinite(monster.baseSpeed) ? monster.baseSpeed : monster.speed;
   const attack_stage = normalize_stat_stage(monster.attackStage, infer_stage_from_attack(monster.attack, base_attack));
+  const attack_value = Number.isFinite(monster.attack) ? normalize_int(monster.attack, base_attack, 0) : base_attack;
+  const defense_value = Number.isFinite(monster.defense) ? normalize_int(monster.defense, base_defense, 0) : base_defense;
+  const speed_value = Number.isFinite(monster.speed) ? normalize_int(monster.speed, base_speed, 0) : base_speed;
   return {
     id: monster.id,
     name: monster.name,
@@ -2454,10 +2505,10 @@ function clone_monster(monster) {
     baseAttack: base_attack,
     baseDefense: base_defense,
     baseSpeed: base_speed,
-    attack: attack_from_stage(base_attack, attack_stage),
+    attack: attack_value,
     attackStage: attack_stage,
-    defense: monster.defense,
-    speed: monster.speed,
+    defense: defense_value,
+    speed: speed_value,
     agilityBoostActive: !!monster.agilityBoostActive,
     endureSpeedBoostActive: !!monster.endureSpeedBoostActive,
     bellyDrumActive: !!monster.bellyDrumActive,
@@ -2495,6 +2546,9 @@ function empty_taunt_until_turn() {
   return empty_slot_record(0, 0);
 }
 function empty_active_effects() {
+  return empty_slot_record([], []);
+}
+function empty_active_buff_debuffs() {
   return empty_slot_record([], []);
 }
 function empty_last_move_index() {
@@ -2566,14 +2620,53 @@ function normalize_active_curses(input) {
       continue;
     }
     const source_slot = row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null;
-    const stacks_raw = typeof row.stacks === "number" ? row.stacks : 1;
-    const stacks = Math.max(1, normalize_int(stacks_raw, 1, 1));
-    normalized.push({ id: row.id, sourceSlot: source_slot, stacks });
+    normalized.push({ id: row.id, sourceSlot: source_slot, stacks: 1 });
+  }
+  return normalized;
+}
+function is_buff_debuff_stat(value) {
+  return value === "attack" || value === "defense" || value === "speed";
+}
+function normalize_active_buff_debuffs(input) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const normalized = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const row = item;
+    if (typeof row.id !== "string" || row.id.trim().length === 0) {
+      continue;
+    }
+    if (!is_buff_debuff_stat(row.stat)) {
+      continue;
+    }
+    const source_slot = row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null;
+    const source = typeof row.source === "string" && row.source.trim().length > 0 ? row.source : "unknown";
+    const raw_delta = typeof row.deltaPercent === "number" ? row.deltaPercent : 0;
+    const delta = normalize_int(raw_delta, 0, -1e6);
+    const clears_on_switch = row.clearsOnSwitch === true;
+    if (!clears_on_switch) {
+      continue;
+    }
+    normalized.push({
+      id: row.id,
+      sourceSlot: source_slot,
+      source,
+      stat: row.stat,
+      deltaPercent: delta,
+      clearsOnSwitch: true
+    });
   }
   return normalized;
 }
 function effect_list(state, slot) {
   return state.activeEffectsBySlot?.[slot] ?? [];
+}
+function buff_debuff_list(state, slot) {
+  return state.activeBuffDebuffsBySlot?.[slot] ?? [];
 }
 function effect_state(state, slot, effect_id) {
   for (const effect of effect_list(state, slot)) {
@@ -2628,31 +2721,36 @@ function upsert_curse(state, log, target_slot, curse_id, source_slot, source_mov
   ensure_state_runtime_defaults(state);
   const curses = state.activeCursesBySlot[target_slot];
   const existing = curses.find((entry) => entry.id === curse_id) ?? null;
-  const before_stacks = existing?.stacks ?? 0;
   if (existing) {
-    existing.stacks += 1;
-    if (source_slot) {
-      existing.sourceSlot = source_slot;
-    }
-  } else {
-    curses.push({
-      id: curse_id,
-      sourceSlot: source_slot,
-      stacks: 1
+    log.push({
+      type: "curse_apply",
+      turn: state.turn,
+      summary: `${curse_label(curse_id)} already active on ${target_slot} (no stack)`,
+      data: {
+        slot: source_slot,
+        targetSlot: target_slot,
+        move: source_move_id,
+        curse: curse_id,
+        alreadyActive: true
+      }
     });
+    return;
   }
-  const after_stacks = existing?.stacks ?? 1;
+  curses.push({
+    id: curse_id,
+    sourceSlot: source_slot,
+    stacks: 1
+  });
   log.push({
     type: "curse_apply",
     turn: state.turn,
-    summary: `${curse_label(curse_id)} cursed ${target_slot}${after_stacks > 1 ? ` (x${after_stacks})` : ""}`,
+    summary: `${curse_label(curse_id)} cursed ${target_slot}`,
     data: {
       slot: source_slot,
       targetSlot: target_slot,
       move: source_move_id,
       curse: curse_id,
-      beforeStacks: before_stacks,
-      afterStacks: after_stacks
+      alreadyActive: false
     }
   });
 }
@@ -2663,6 +2761,83 @@ function apply_move_curses_from_collateral(state, log, source_slot, collaterals,
   for (const collateral of collaterals) {
     const target_slot = source_slot === "player1" ? "player2" : "player1";
     upsert_curse(state, log, target_slot, collateral.id, source_slot, source_move_id);
+  }
+}
+function stat_label_for_buff(stat) {
+  if (stat === "attack")
+    return "ATK";
+  if (stat === "defense")
+    return "DEF";
+  return "SPE";
+}
+function stat_value_for_active_monster(monster, stat) {
+  if (stat === "attack")
+    return monster.attack;
+  if (stat === "defense")
+    return monster.defense;
+  return monster.speed;
+}
+function apply_buff_debuff_component(state, log, target_slot, collateral, source_slot, source_move_id) {
+  ensure_state_runtime_defaults(state);
+  const target = active_monster(state.players[target_slot]);
+  refresh_active_monster_stats_for_slot(state, target_slot);
+  const before = stat_value_for_active_monster(target, collateral.stat);
+  state.activeBuffDebuffsBySlot[target_slot].push({
+    id: collateral.id,
+    sourceSlot: source_slot,
+    source: source_move_id,
+    stat: collateral.stat,
+    deltaPercent: collateral.deltaPercent,
+    clearsOnSwitch: true
+  });
+  refresh_active_monster_stats_for_slot(state, target_slot);
+  const after = stat_value_for_active_monster(target, collateral.stat);
+  const total_delta = total_delta_percent_from_buff_debuffs(state, target_slot, collateral.stat);
+  const total_percent = stat_multiplier_percent_from_delta(total_delta);
+  log.push({
+    type: "buff_debuff_apply",
+    turn: state.turn,
+    summary: `${target.name} ${stat_label_for_buff(collateral.stat)} ${(collateral.deltaPercent >= 0 ? "+" : "") + collateral.deltaPercent}%`,
+    data: {
+      slot: source_slot,
+      targetSlot: target_slot,
+      move: source_move_id,
+      componentId: collateral.id,
+      stat: collateral.stat,
+      deltaPercent: collateral.deltaPercent,
+      totalDeltaPercent: total_delta,
+      totalPercent: total_percent,
+      before,
+      after
+    }
+  });
+}
+function apply_move_buff_debuffs_from_collateral(state, log, source_slot, collaterals, source_move_id) {
+  if (collaterals.length === 0) {
+    return;
+  }
+  for (const collateral of collaterals) {
+    const target_slot = collateral.target === "self" ? source_slot : other_slot(source_slot);
+    apply_buff_debuff_component(state, log, target_slot, collateral, source_slot, source_move_id);
+  }
+}
+function apply_move_instants_from_collateral(state, log, source_slot, collaterals, source_move_id) {
+  if (collaterals.length === 0) {
+    return;
+  }
+  for (const collateral of collaterals) {
+    const target_slot = collateral.target === "self" ? source_slot : other_slot(source_slot);
+    log.push({
+      type: "instant_trigger",
+      turn: state.turn,
+      summary: `Instant ${collateral.id} triggered by ${source_move_id}`,
+      data: {
+        slot: source_slot,
+        targetSlot: target_slot,
+        move: source_move_id,
+        instant: collateral.id
+      }
+    });
   }
 }
 function decay_effects_end_turn(state, log) {
@@ -2852,6 +3027,7 @@ function clone_state(state) {
     tauntUntilTurn: empty_taunt_until_turn(),
     activeEffectsBySlot: empty_active_effects(),
     activeCursesBySlot: empty_active_curses(),
+    activeBuffDebuffsBySlot: empty_active_buff_debuffs(),
     lastMoveIndexBySlot: empty_last_move_index()
   };
   cloned.rpsScore.player1 = normalize_int(state.rpsScore?.player1, 0, -99999);
@@ -2874,12 +3050,15 @@ function clone_state(state) {
   cloned.activeEffectsBySlot.player2 = normalize_active_effects(state.activeEffectsBySlot?.player2);
   cloned.activeCursesBySlot.player1 = normalize_active_curses(state.activeCursesBySlot?.player1);
   cloned.activeCursesBySlot.player2 = normalize_active_curses(state.activeCursesBySlot?.player2);
+  cloned.activeBuffDebuffsBySlot.player1 = normalize_active_buff_debuffs(state.activeBuffDebuffsBySlot?.player1);
+  cloned.activeBuffDebuffsBySlot.player2 = normalize_active_buff_debuffs(state.activeBuffDebuffsBySlot?.player2);
   const last_move_p1 = state.lastMoveIndexBySlot?.player1;
   const last_move_p2 = state.lastMoveIndexBySlot?.player2;
   cloned.lastMoveIndexBySlot.player1 = typeof last_move_p1 === "number" && Number.isInteger(last_move_p1) ? Math.max(0, last_move_p1) : null;
   cloned.lastMoveIndexBySlot.player2 = typeof last_move_p2 === "number" && Number.isInteger(last_move_p2) ? Math.max(0, last_move_p2) : null;
   sync_all_players_shared_hp(cloned);
   sync_all_players_shared_evade(cloned);
+  refresh_active_monster_stats(cloned);
   refresh_evade_telemetry(cloned);
   return cloned;
 }
@@ -2947,6 +3126,9 @@ function ensure_state_runtime_defaults(state) {
   if (!state.activeCursesBySlot) {
     state.activeCursesBySlot = empty_active_curses();
   }
+  if (!state.activeBuffDebuffsBySlot) {
+    state.activeBuffDebuffsBySlot = empty_active_buff_debuffs();
+  }
   if (!state.lastMoveIndexBySlot) {
     state.lastMoveIndexBySlot = empty_last_move_index();
   }
@@ -2969,6 +3151,7 @@ function ensure_state_runtime_defaults(state) {
     state.spikesArmedByTarget = empty_spikes_armed_by_target();
   }
   sync_all_players_shared_evade(state);
+  refresh_active_monster_stats(state);
 }
 function compare_monster_type(left, right) {
   if (left === right) {
@@ -3160,7 +3343,7 @@ function apply_simultaneous_switch_passives(state, log, switched_this_turn, hp_c
       type: "passive_trigger",
       turn: state.turn,
       phase: "switch",
-      summary: `${winner_mon.name} activated DEF passive (Clear Body + Armor ${after_stack2 * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT}%)`,
+      summary: `${winner_mon.name} activated DEF passive (Clear Body [Instant] + Armor ${after_stack2 * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT}%)`,
       data: {
         slot: winner,
         source: winner_mon.id,
@@ -3245,18 +3428,21 @@ function check_zero_hp_match_result(state, log) {
   return "ended";
 }
 function effective_attack_for_slot(state, slot, monster) {
+  refresh_active_monster_stats_for_slot(state, slot);
   if (has_effect(state, slot, "weakness")) {
     return 0;
   }
   return monster.attack;
 }
 function effective_defense_for_slot(state, slot, monster) {
+  refresh_active_monster_stats_for_slot(state, slot);
   if (has_effect(state, slot, "deterioration")) {
     return 0;
   }
   return monster.defense;
 }
 function effective_speed_for_slot(state, slot, monster) {
+  refresh_active_monster_stats_for_slot(state, slot);
   if (has_effect(state, slot, "paralyse")) {
     return 0;
   }
@@ -3442,6 +3628,36 @@ function clear_curses_on_target_switch(state, log, target_slot) {
     });
   }
   state.activeCursesBySlot[target_slot] = [];
+}
+function clear_buff_debuffs_on_target_switch(state, log, target_slot) {
+  ensure_state_runtime_defaults(state);
+  const active = state.activeBuffDebuffsBySlot[target_slot];
+  if (!Array.isArray(active) || active.length === 0) {
+    return;
+  }
+  const removed = active.length;
+  state.activeBuffDebuffsBySlot[target_slot] = [];
+  refresh_active_monster_stats_for_slot(state, target_slot);
+  log.push({
+    type: "buff_debuff_end",
+    turn: state.turn,
+    summary: `${target_slot} cleared ${removed} buff/debuff modifier${removed === 1 ? "" : "s"} on switch`,
+    data: { slot: target_slot, removed, reason: "switch" }
+  });
+}
+function clear_buff_debuffs_for_stat(state, slot, stat) {
+  ensure_state_runtime_defaults(state);
+  const before = state.activeBuffDebuffsBySlot[slot];
+  if (!Array.isArray(before) || before.length === 0) {
+    return 0;
+  }
+  const filtered = before.filter((entry) => entry.stat !== stat);
+  const removed = before.length - filtered.length;
+  if (removed > 0) {
+    state.activeBuffDebuffsBySlot[slot] = filtered;
+    refresh_active_monster_stats_for_slot(state, slot);
+  }
+  return removed;
 }
 function apply_curse_end_turn(state, log, hp_changed) {
   ensure_state_runtime_defaults(state);
@@ -3654,8 +3870,17 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
       const capped_damage = Math.max(0, before - survive_hp);
       after = survive_hp;
       monster.endureActiveThisTurn = false;
+      refresh_active_monster_stats_for_slot(state, slot);
       const speed_before = monster.speed;
-      monster.speed = Math.max(1, mul_div_round(speed_before, 3, 2));
+      apply_buff_debuff_component(state, log, slot, {
+        kind: "buff_debuff",
+        id: "endure_speed_up",
+        target: "self",
+        stat: "speed",
+        deltaPercent: 50,
+        clearsOnSwitch: true
+      }, slot, "endure");
+      const speed_after = monster.speed;
       monster.endureSpeedBoostActive = true;
       log.push({
         type: "endure_trigger",
@@ -3676,14 +3901,14 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
         type: "stat_mod",
         turn: state.turn,
         phase,
-        summary: `${monster.name} gained speed from Endure (${speed_before} -> ${monster.speed})`,
-        data: { slot, target: monster.id, stat: "speed", multiplier: 1.5, before: speed_before, after: monster.speed }
+        summary: `${monster.name} gained speed from Endure (${speed_before} -> ${speed_after})`,
+        data: { slot, target: monster.id, stat: "speed", multiplier: 1.5, before: speed_before, after: speed_after }
       });
       log.push({
         type: "move_detail",
         turn: state.turn,
         phase,
-        summary: `Endure: immortal trigger (HP floor 1% => ${after}); dmg capped ${attempted_damage} -> ${capped_damage}; SPE x1.5 (${speed_before} -> ${monster.speed})`,
+        summary: `Endure: immortal trigger (HP floor 1% => ${after}); dmg capped ${attempted_damage} -> ${capped_damage}; SPE x1.5 (${speed_before} -> ${speed_after})`,
         data: {
           move: "endure",
           slot,
@@ -3694,7 +3919,7 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
           damageAfterArmor: damage_after_armor,
           damageApplied: capped_damage,
           speedBefore: speed_before,
-          speedAfter: monster.speed
+          speedAfter: speed_after
         }
       });
     }
@@ -3886,12 +4111,17 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     return;
   }
   const spec = move_spec(move_id);
-  const effect_collaterals = (spec.collateral ?? []).filter((entry) => entry.kind === "effect");
-  const curse_collaterals = (spec.collateral ?? []).filter((entry) => entry.kind === "curse");
+  const components = spec.components ?? spec.collateral ?? [];
+  const effect_collaterals = components.filter((entry) => entry.kind === "effect");
+  const curse_collaterals = components.filter((entry) => entry.kind === "curse");
+  const buff_debuff_collaterals = components.filter((entry) => entry.kind === "buff_debuff");
+  const instant_collaterals = components.filter((entry) => entry.kind === "instant");
   const finalize_move_success = () => {
     mark_last_move_used(state, player_slot, move_id, move_index);
     apply_move_effects_from_collateral(state, log, player_slot, effect_collaterals, spec.id);
     apply_move_curses_from_collateral(state, log, player_slot, curse_collaterals, spec.id);
+    apply_move_buff_debuffs_from_collateral(state, log, player_slot, buff_debuff_collaterals, spec.id);
+    apply_move_instants_from_collateral(state, log, player_slot, instant_collaterals, spec.id);
   };
   const blocked_by = move_block_reason(state, player_slot, move_index, spec);
   if (blocked_by) {
@@ -3993,29 +4223,37 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     return;
   }
   if (spec.id === "agility") {
+    refresh_active_monster_stats_for_slot(state, player_slot);
     const before_speed = attacker.speed;
-    attacker.speed = Math.max(1, mul_div_round(before_speed, 2, 1));
-    attacker.agilityBoostActive = true;
+    apply_buff_debuff_component(state, log, player_slot, {
+      kind: "buff_debuff",
+      id: "agility_speed_up",
+      target: "self",
+      stat: "speed",
+      deltaPercent: 100,
+      clearsOnSwitch: true
+    }, player_slot, spec.id);
+    const after_speed = attacker.speed;
     log.push({
       type: "stat_mod",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `${player_slot} Agility success on ${attacker.name} (SPE ${before_speed} -> ${attacker.speed})`,
+      summary: `${player_slot} Agility success on ${attacker.name} (SPE ${before_speed} -> ${after_speed})`,
       data: {
         slot: player_slot,
         target: attacker.id,
         stat: "speed",
         multiplier: 2,
         before: before_speed,
-        after: attacker.speed
+        after: after_speed
       }
     });
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Agility: user SPE x2 (${before_speed} -> ${attacker.speed})`,
-      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_speed, after: attacker.speed }
+      summary: `Agility: user SPE x2 (${before_speed} -> ${after_speed})`,
+      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_speed, after: after_speed }
     });
     finalize_move_success();
     return;
@@ -4099,8 +4337,12 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     ensure_state_runtime_defaults(state);
     const effects_before = state.activeEffectsBySlot[player_slot].length;
     const curses_before = state.activeCursesBySlot[player_slot].length;
+    const buff_debuffs_before = state.activeBuffDebuffsBySlot[player_slot].length;
     state.activeEffectsBySlot[player_slot] = [];
     state.activeCursesBySlot[player_slot] = [];
+    state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter((entry) => entry.deltaPercent >= 0);
+    const buff_debuffs_removed = Math.max(0, buff_debuffs_before - state.activeBuffDebuffsBySlot[player_slot].length);
+    refresh_active_monster_stats_for_slot(state, player_slot);
     state.tauntUntilTurn[player_slot] = 0;
     state.arenaTrapUntilTurn[player_slot] = 0;
     let cleared_screech = 0;
@@ -4114,12 +4356,13 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Team Cure: removed ${effects_before} effects and ${curses_before} curses from team`,
+      summary: `Team Cure: removed ${effects_before} effects, ${curses_before} curses and ${buff_debuffs_removed} negative buff/debuffs from team`,
       data: {
         move: spec.id,
         slot: player_slot,
         effectsRemoved: effects_before,
         cursesRemoved: curses_before,
+        buffDebuffsRemoved: buff_debuffs_removed,
         screechRemoved: cleared_screech
       }
     });
@@ -4208,9 +4451,18 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     return;
   }
   if (spec.id === "meditate") {
+    refresh_active_monster_stats_for_slot(state, player_slot);
     const before_stage = attacker.attackStage;
     const before_attack = attacker.attack;
-    const after_stage = set_attack_stage(attacker, before_stage + 2);
+    apply_buff_debuff_component(state, log, player_slot, {
+      kind: "buff_debuff",
+      id: "meditate_attack_up",
+      target: "self",
+      stat: "attack",
+      deltaPercent: 100,
+      clearsOnSwitch: true
+    }, player_slot, spec.id);
+    const after_stage = attacker.attackStage;
     const after_attack = attacker.attack;
     const ratio = stage_ratio(after_stage);
     log.push({
@@ -4249,6 +4501,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     return;
   }
   if (spec.id === "belly_drum") {
+    refresh_active_monster_stats_for_slot(state, player_slot);
     const before_hp = player.sharedHp;
     if (before_hp * 2 <= attacker.maxHp) {
       log.push({
@@ -4265,9 +4518,17 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     const hp_cost = mul_div_floor(before_hp, 1, 2);
     const after_hp = Math.max(0, before_hp - hp_cost);
     sync_player_shared_hp(state, player_slot, after_hp);
-    const after_stage = set_attack_stage(attacker, STAT_STAGE_MAX);
+    clear_buff_debuffs_for_stat(state, player_slot, "attack");
+    apply_buff_debuff_component(state, log, player_slot, {
+      kind: "buff_debuff",
+      id: "belly_drum_attack_up",
+      target: "self",
+      stat: "attack",
+      deltaPercent: 300,
+      clearsOnSwitch: true
+    }, player_slot, spec.id);
+    const after_stage = attacker.attackStage;
     const after_attack = attacker.attack;
-    attacker.bellyDrumActive = true;
     const hp_spent = Math.max(0, before_hp - after_hp);
     if (hp_spent > 0) {
       hp_changed.add(attacker);
@@ -4406,7 +4667,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
         type: "clear_body_blocked",
         turn: state.turn,
         phase: spec.phaseId,
-        summary: `${defender.name} blocked Screech with Clear Body`,
+        summary: `${defender.name} blocked Screech with Clear Body [Instant]`,
         data: {
           slot: defender_slot,
           target: defender.id,
@@ -4420,16 +4681,23 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
         type: "move_detail",
         turn: state.turn,
         phase: spec.phaseId,
-        summary: `Screech blocked by Clear Body (armor stack ${armor_stack})`,
+        summary: `Screech blocked by Clear Body [Instant] (armor stack ${armor_stack})`,
         data: { move: spec.id, target: defender.id, blockedBy: "clear_body", armorStack: armor_stack }
       });
       finalize_move_success();
       return;
     }
+    refresh_active_monster_stats_for_slot(state, defender_slot);
     const before_defense = defender.defense;
-    const after_defense = Math.max(1, mul_div_floor(before_defense, 1, 2));
-    defender.defense = after_defense;
-    defender.screechDebuffActive = true;
+    apply_buff_debuff_component(state, log, defender_slot, {
+      kind: "buff_debuff",
+      id: "screech_def_down",
+      target: "opponent",
+      stat: "defense",
+      deltaPercent: -50,
+      clearsOnSwitch: true
+    }, player_slot, spec.id);
+    const after_defense = defender.defense;
     log.push({
       type: "stat_mod",
       turn: state.turn,
@@ -4553,9 +4821,11 @@ function perform_switch(state, log, slot, target_index, event_type, hp_changed, 
   const outgoing = player.team[from];
   reset_monster_on_switch_out(outgoing);
   clear_curses_on_target_switch(state, log, slot);
+  clear_buff_debuffs_on_target_switch(state, log, slot);
   player.activeIndex = target_index;
   sync_player_shared_hp(state, slot, player.sharedHp);
   sync_player_shared_evade(state, slot, player.sharedEvade);
+  refresh_active_monster_stats_for_slot(state, slot);
   apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn);
   log.push({
     type: event_type,
@@ -4707,10 +4977,12 @@ function create_initial_state(teams, names) {
     tauntUntilTurn: empty_taunt_until_turn(),
     activeEffectsBySlot: empty_active_effects(),
     activeCursesBySlot: empty_active_curses(),
+    activeBuffDebuffsBySlot: empty_active_buff_debuffs(),
     lastMoveIndexBySlot: empty_last_move_index()
   };
   sync_all_players_shared_hp(initial_state);
   sync_all_players_shared_evade(initial_state);
+  refresh_active_monster_stats(initial_state);
   refresh_evade_telemetry(initial_state);
   return initial_state;
 }
@@ -4723,6 +4995,7 @@ function resolve_turn(state, intents) {
   const switched_this_turn = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
   sync_all_players_shared_evade(next);
+  refresh_active_monster_stats(next);
   next.baseTurnLimit = Math.max(1, normalize_int(next.baseTurnLimit, BASE_TURN_LIMIT, 1));
   if (next.status !== "running") {
     return { state: next, log };
@@ -4810,6 +5083,7 @@ function resolve_turn(state, intents) {
   if (next.status === "running") {
     decay_effects_end_turn(next, log);
   }
+  refresh_active_monster_stats(next);
   reset_protect_flags(next);
   if (next.status === "running") {
     maybe_end_match_by_turn_limit(next, log);
@@ -5800,17 +6074,74 @@ function stat_mod_feedback(entry) {
 function base_stats_for(monster_id, level) {
   const spec = MONSTER_BY_ID.get(monster_id);
   if (!spec) {
-    return { maxHp: 1, attack: 0, defense: 0, speed: 0 };
+    return { attack: 0, defense: 0, speed: 0 };
   }
   const base_stats = base_stats_from_spec(spec);
   const resolved_level = normalize_stat_value("level", level, base_stats.level);
   const baseline = stats_from_base_level_ev(base_stats, resolved_level, empty_ev_spread());
   return {
-    maxHp: baseline.maxHp,
     attack: baseline.attack,
     defense: baseline.defense,
     speed: baseline.speed
   };
+}
+var TOOLTIP_ARMOR_STACK_MAX = 5;
+var TOOLTIP_ARMOR_BONUS_PERCENT_PER_STACK = 10;
+var TOOLTIP_STAT_MULTIPLIER_MIN_PERCENT = 25;
+var TOOLTIP_STAT_MULTIPLIER_MAX_PERCENT = 400;
+function armor_stacks_for_slot(state, slot_id) {
+  const raw = state.typePassiveArmorStacks?.[slot_id] ?? 0;
+  if (!Number.isFinite(raw)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(TOOLTIP_ARMOR_STACK_MAX, Math.floor(raw)));
+}
+function clamp_tooltip_total_percent(total_percent) {
+  return Math.max(TOOLTIP_STAT_MULTIPLIER_MIN_PERCENT, Math.min(TOOLTIP_STAT_MULTIPLIER_MAX_PERCENT, total_percent));
+}
+function tooltip_stat_delta_sum(entries, stat) {
+  let total = 0;
+  for (const entry of entries) {
+    if (entry.stat !== stat) {
+      continue;
+    }
+    total += entry.deltaPercent;
+  }
+  return total;
+}
+function active_buff_debuffs_for_slot(state, slot_id) {
+  const raw = state.activeBuffDebuffsBySlot?.[slot_id];
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const normalized = [];
+  for (const row of raw) {
+    const id = typeof row.id === "string" && row.id.trim().length > 0 ? row.id : "buff_debuff";
+    const stat = row.stat;
+    if (stat !== "attack" && stat !== "defense" && stat !== "speed") {
+      continue;
+    }
+    const delta = typeof row.deltaPercent === "number" && Number.isFinite(row.deltaPercent) ? Math.trunc(row.deltaPercent) : 0;
+    normalized.push({ id, stat, deltaPercent: delta });
+  }
+  return normalized;
+}
+function has_active_effect(state, slot_id, effect_id) {
+  const effects = state.activeEffectsBySlot?.[slot_id];
+  if (!Array.isArray(effects)) {
+    return false;
+  }
+  return effects.some((row) => row?.id === effect_id);
+}
+function tooltip_total_percent_for_stat(state, slot_id, stat, entries) {
+  let total = 100 + tooltip_stat_delta_sum(entries, stat);
+  if (stat === "defense") {
+    total += armor_stacks_for_slot(state, slot_id) * TOOLTIP_ARMOR_BONUS_PERCENT_PER_STACK;
+  }
+  return clamp_tooltip_total_percent(total);
+}
+function tooltip_stat_value_from_percent(base, total_percent) {
+  return Math.max(0, mul_div_round(base, total_percent, 100));
 }
 function tooltip_from_config(monster_id) {
   const config = get_config(monster_id);
@@ -5821,34 +6152,45 @@ function tooltip_from_config(monster_id) {
     id: monster_id,
     name: monster_label(monster_id),
     type,
-    showHp: false,
     moves: config.moves.slice(0, LOBBY_MOVE_SLOTS),
     current: {
-      hp: config.stats.maxHp,
-      maxHp: config.stats.maxHp,
       attack: config.stats.attack,
       defense: config.stats.defense,
       speed: config.stats.speed
     },
-    base
+    base,
+    totalPercent: {
+      attack: 100,
+      defense: 100,
+      speed: 100
+    }
   };
 }
-function tooltip_from_state(mon) {
+function tooltip_from_state(state, slot_id, mon) {
   const base = base_stats_for(mon.id, mon.level);
+  const entries = active_buff_debuffs_for_slot(state, slot_id);
+  const attack_total_percent = tooltip_total_percent_for_stat(state, slot_id, "attack", entries);
+  const defense_total_percent = tooltip_total_percent_for_stat(state, slot_id, "defense", entries);
+  const speed_total_percent = tooltip_total_percent_for_stat(state, slot_id, "speed", entries);
+  const attack_blocked = has_active_effect(state, slot_id, "weakness");
+  const defense_blocked = has_active_effect(state, slot_id, "deterioration");
+  const speed_blocked = has_active_effect(state, slot_id, "paralyse");
   return {
     id: mon.id,
     name: monster_label(mon.id),
     type: mon.type,
-    showHp: true,
     moves: mon.chosenMoves.slice(0, LOBBY_MOVE_SLOTS),
     current: {
-      hp: Math.max(0, mon.hp),
-      maxHp: mon.maxHp,
-      attack: mon.attack,
-      defense: mon.defense,
-      speed: mon.speed
+      attack: attack_blocked ? 0 : tooltip_stat_value_from_percent(base.attack, attack_total_percent),
+      defense: defense_blocked ? 0 : tooltip_stat_value_from_percent(base.defense, defense_total_percent),
+      speed: speed_blocked ? 0 : tooltip_stat_value_from_percent(base.speed, speed_total_percent)
     },
-    base
+    base,
+    totalPercent: {
+      attack: attack_total_percent,
+      defense: defense_total_percent,
+      speed: speed_total_percent
+    }
   };
 }
 function tooltip_value_state(current, base) {
@@ -5883,6 +6225,19 @@ function tooltip_stat_row(label, current, base) {
   row.appendChild(value_el);
   return row;
 }
+function format_tooltip_multiplier(percent) {
+  const mult = percent / 100;
+  const mult_text = Number.isInteger(mult) ? `${mult}` : mult.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  const delta = percent - 100;
+  const delta_text = `${delta >= 0 ? "+" : ""}${delta}%`;
+  return `x${mult_text} (${delta_text})`;
+}
+function tooltip_multiplier_row(label, percent) {
+  const row = document.createElement("div");
+  row.className = "stat-tooltip-mult-row";
+  row.textContent = `${label} total: ${format_tooltip_multiplier(percent)}`;
+  return row;
+}
 function render_monster_tooltip(payload) {
   if (!stat_tooltip)
     return;
@@ -5900,16 +6255,13 @@ function render_monster_tooltip(payload) {
   stats_grid2.appendChild(tooltip_stat_row("ATK", payload.current.attack, payload.base.attack));
   stats_grid2.appendChild(tooltip_stat_row("DEF", payload.current.defense, payload.base.defense));
   stats_grid2.appendChild(tooltip_stat_row("SPE", payload.current.speed, payload.base.speed));
-  if (payload.showHp) {
-    stats_grid2.appendChild(tooltip_stat_row("HP", payload.current.maxHp, payload.base.maxHp));
-  }
   stat_tooltip.appendChild(stats_grid2);
-  if (payload.showHp) {
-    const hp_line = document.createElement("div");
-    hp_line.className = "stat-tooltip-hp";
-    hp_line.textContent = `Vida atual: ${payload.current.hp}/${payload.current.maxHp}`;
-    stat_tooltip.appendChild(hp_line);
-  }
+  const totals_box = document.createElement("div");
+  totals_box.className = "stat-tooltip-mult";
+  totals_box.appendChild(tooltip_multiplier_row("ATK", payload.totalPercent.attack));
+  totals_box.appendChild(tooltip_multiplier_row("DEF", payload.totalPercent.defense));
+  totals_box.appendChild(tooltip_multiplier_row("SPE", payload.totalPercent.speed));
+  stat_tooltip.appendChild(totals_box);
   const moves_box = document.createElement("div");
   moves_box.className = "stat-tooltip-moves";
   const moves = payload.moves.slice(0, LOBBY_MOVE_SLOTS);
@@ -5970,8 +6322,8 @@ function close_tooltip() {
 function append_log(line) {
   append_line(log_list, compact_slot_labels(line));
 }
-function append_chat(line) {
-  append_line(chat_messages, line);
+function append_chat(line, class_name) {
+  append_line(chat_messages, line, class_name);
 }
 function append_chat_user(name, message) {
   append_line(chat_messages, `${name}: ${message}`, "log-user");
@@ -6731,7 +7083,7 @@ function render_roster() {
     list.appendChild(card);
   }
 }
-function set_bench_slot(slot2, mon, index, enabled, blocked_switch = false) {
+function set_bench_slot(slot2, mon, index, enabled, blocked_switch = false, tooltip = null) {
   if (!mon || index === null || index < 0) {
     slot2.btn.classList.add("empty");
     slot2.btn.classList.remove("blocked-switch");
@@ -6743,7 +7095,6 @@ function set_bench_slot(slot2, mon, index, enabled, blocked_switch = false) {
     slot2.img.style.display = "none";
     return;
   }
-  const tooltip = tooltip_from_state(mon);
   slot2.btn.classList.remove("empty");
   slot2.btn.classList.toggle("blocked-switch", blocked_switch);
   slot2.btn.dataset.index = `${index}`;
@@ -6769,7 +7120,8 @@ function is_slot_arena_trapped_for_ui(state, target_slot) {
 }
 function update_bench(state, viewer_slot) {
   const me = state.players[viewer_slot];
-  const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
+  const enemy_slot = viewer_slot === "player1" ? "player2" : "player1";
+  const opp = state.players[enemy_slot];
   const my_bench = me.team.map((_, idx) => idx).filter((idx) => idx !== me.activeIndex);
   const opp_bench = opp.team.map((_, idx) => idx).filter((idx) => idx !== opp.activeIndex);
   const my_switch_blocked = is_slot_arena_trapped_for_ui(state, viewer_slot);
@@ -6777,12 +7129,14 @@ function update_bench(state, viewer_slot) {
   player_bench_slots.forEach((slot_el, i) => {
     const idx = my_bench[i] ?? null;
     const mon = idx !== null ? me.team[idx] : null;
-    set_bench_slot(slot_el, mon, idx, can_switch, my_switch_blocked);
+    const tooltip = mon && idx !== null ? tooltip_from_state(state, viewer_slot, mon) : null;
+    set_bench_slot(slot_el, mon, idx, can_switch, my_switch_blocked, tooltip);
   });
   enemy_bench_slots.forEach((slot_el, i) => {
     const idx = opp_bench[i] ?? null;
     const mon = idx !== null ? opp.team[idx] : null;
-    set_bench_slot(slot_el, mon, idx, false, false);
+    const tooltip = mon && idx !== null ? tooltip_from_state(state, enemy_slot, mon) : null;
+    set_bench_slot(slot_el, mon, idx, false, false, tooltip);
   });
 }
 function update_action_controls() {
@@ -7226,6 +7580,17 @@ function handle_turn_start(data) {
 }
 function log_events(log) {
   for (const entry of log) {
+    if (entry.type === "clear_body_blocked") {
+      append_chat(entry.summary, "log-clear-body");
+      continue;
+    }
+    if (entry.type === "passive_trigger") {
+      const data = entry.data;
+      if (data?.passive === "type_def_armor_stack") {
+        append_chat(entry.summary, "log-clear-body");
+        continue;
+      }
+    }
     if (entry.type === "damage") {
       const data = entry.data;
       const attacker_slot = data?.slot;
@@ -7274,6 +7639,22 @@ var CURSE_UI_LABELS = {
   destiny_bond: "Destiny Bond",
   endure: "Endure"
 };
+function stat_short_label(stat) {
+  if (stat === "attack")
+    return "ATK";
+  if (stat === "defense")
+    return "DEF";
+  return "SPE";
+}
+function format_delta_percent(delta) {
+  return `${delta >= 0 ? "+" : ""}${delta}%`;
+}
+function format_entry_multiplier(delta_percent) {
+  const percent = 100 + delta_percent;
+  const mult = percent / 100;
+  const text = Number.isInteger(mult) ? `${mult}` : mult.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  return `x${text}`;
+}
 function active_curses_for_slot(state, slot_id) {
   const input = state.activeCursesBySlot?.[slot_id];
   if (!Array.isArray(input)) {
@@ -7287,8 +7668,7 @@ function active_curses_for_slot(state, slot_id) {
 }
 function effect_chips_for_slot(state, slot_id, opponent_slot) {
   const chips = [];
-  const active = state.players[slot_id].team[state.players[slot_id].activeIndex];
-  const opponent_active = state.players[opponent_slot].team[state.players[opponent_slot].activeIndex];
+  const buff_entries = active_buff_debuffs_for_slot(state, slot_id);
   const my_curses = active_curses_for_slot(state, slot_id);
   const enemy_curses = active_curses_for_slot(state, opponent_slot);
   const seeded = my_curses.some((curse) => curse.id === "leech_seed");
@@ -7305,7 +7685,6 @@ function effect_chips_for_slot(state, slot_id, opponent_slot) {
   }
   if (armor_stacks > 0) {
     chips.push({ label: `Armor +${armor_stacks * 10}%`, kind: "buff" });
-    chips.push({ label: "Clear Body", kind: "buff" });
   }
   if (regen_stacks > 0) {
     chips.push({ label: `Regen +${regen_stacks * 5}/turn`, kind: "buff" });
@@ -7313,17 +7692,9 @@ function effect_chips_for_slot(state, slot_id, opponent_slot) {
   if (arena_trapped) {
     chips.push({ label: `Arena Trap (${arena_trap_turns}t sem troca)`, kind: "debuff" });
   }
-  if (opponent_active.screechDebuffActive) {
-    chips.push({ label: "Screech (enemyDEF 0.5)", kind: "debuff" });
-  }
-  if (active.agilityBoostActive) {
-    chips.push({ label: "Agility (mySPE 2)", kind: "buff" });
-  }
-  if (active.endureSpeedBoostActive) {
-    chips.push({ label: "Endure (mySPE 1.5)", kind: "buff" });
-  }
-  if (active.bellyDrumActive) {
-    chips.push({ label: "Belly Drum (myHP 0.5) (myATK 4)", kind: "buff" });
+  for (const entry of buff_entries) {
+    const label = `${stat_short_label(entry.stat)} ${format_entry_multiplier(entry.deltaPercent)} (${format_delta_percent(entry.deltaPercent)})`;
+    chips.push({ label, kind: entry.deltaPercent >= 0 ? "buff" : "debuff" });
   }
   const active_effects = state.activeEffectsBySlot?.[slot_id] ?? [];
   for (const effect of active_effects) {
@@ -7387,7 +7758,7 @@ function update_side_panel(side, state, slot_id, skip_meta, skip_bar) {
   sprite.src = icon_path(active.id);
   sprite.alt = monster_label(active.id);
   sprite.style.visibility = "";
-  set_monster_tooltip(sprite_wrap, tooltip_from_state(active));
+  set_monster_tooltip(sprite_wrap, tooltip_from_state(state, slot_id, active));
 }
 function update_panels(state, opts) {
   const viewer_slot = slot ?? (is_spectator ? "player1" : null);

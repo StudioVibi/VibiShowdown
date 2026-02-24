@@ -24,7 +24,7 @@ import type {
   Stats,
   TeamSelection
 } from "../src/shared.ts";
-import { normalize_int } from "../src/int_math.ts";
+import { mul_div_round, normalize_int } from "../src/int_math.ts";
 import {
   EV_PER_STAT_MAX,
   EV_TOTAL_MAX,
@@ -55,10 +55,10 @@ type MonsterTooltipPayload = {
   id: string;
   name: string;
   type: MonsterType;
-  showHp: boolean;
   moves: string[];
-  current: { hp: number; maxHp: number; attack: number; defense: number; speed: number };
-  base: { maxHp: number; attack: number; defense: number; speed: number };
+  current: { attack: number; defense: number; speed: number };
+  base: { attack: number; defense: number; speed: number };
+  totalPercent: { attack: number; defense: number; speed: number };
 };
 
 type SwitchModalMode = "intent" | "forced" | "bounce_kick";
@@ -1066,20 +1066,92 @@ function stat_mod_feedback(entry: EventLog): string | null {
   return `modificador aplicado: ${target_name} ${label}${multiplier_text} (${before} -> ${after})`;
 }
 
-function base_stats_for(monster_id: string, level?: number): { maxHp: number; attack: number; defense: number; speed: number } {
+function base_stats_for(monster_id: string, level?: number): { attack: number; defense: number; speed: number } {
   const spec = roster_by_id.get(monster_id);
   if (!spec) {
-    return { maxHp: 1, attack: 0, defense: 0, speed: 0 };
+    return { attack: 0, defense: 0, speed: 0 };
   }
   const base_stats = base_stats_from_spec(spec);
   const resolved_level = normalize_stat_value("level", level, base_stats.level);
   const baseline = stats_from_base_level_ev(base_stats, resolved_level, empty_ev_spread());
   return {
-    maxHp: baseline.maxHp,
     attack: baseline.attack,
     defense: baseline.defense,
     speed: baseline.speed
   };
+}
+
+const TOOLTIP_ARMOR_STACK_MAX = 5;
+const TOOLTIP_ARMOR_BONUS_PERCENT_PER_STACK = 10;
+const TOOLTIP_STAT_MULTIPLIER_MIN_PERCENT = 25;
+const TOOLTIP_STAT_MULTIPLIER_MAX_PERCENT = 400;
+type TooltipStatKey = "attack" | "defense" | "speed";
+type UiBuffDebuffEntry = { id: string; stat: TooltipStatKey; deltaPercent: number };
+
+function armor_stacks_for_slot(state: GameState, slot_id: PlayerSlot): number {
+  const raw = state.typePassiveArmorStacks?.[slot_id] ?? 0;
+  if (!Number.isFinite(raw)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(TOOLTIP_ARMOR_STACK_MAX, Math.floor(raw)));
+}
+
+function clamp_tooltip_total_percent(total_percent: number): number {
+  return Math.max(TOOLTIP_STAT_MULTIPLIER_MIN_PERCENT, Math.min(TOOLTIP_STAT_MULTIPLIER_MAX_PERCENT, total_percent));
+}
+
+function tooltip_stat_delta_sum(entries: UiBuffDebuffEntry[], stat: TooltipStatKey): number {
+  let total = 0;
+  for (const entry of entries) {
+    if (entry.stat !== stat) {
+      continue;
+    }
+    total += entry.deltaPercent;
+  }
+  return total;
+}
+
+function active_buff_debuffs_for_slot(state: GameState, slot_id: PlayerSlot): UiBuffDebuffEntry[] {
+  const raw = state.activeBuffDebuffsBySlot?.[slot_id];
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const normalized: UiBuffDebuffEntry[] = [];
+  for (const row of raw) {
+    const id = typeof row.id === "string" && row.id.trim().length > 0 ? row.id : "buff_debuff";
+    const stat = row.stat;
+    if (stat !== "attack" && stat !== "defense" && stat !== "speed") {
+      continue;
+    }
+    const delta = typeof row.deltaPercent === "number" && Number.isFinite(row.deltaPercent) ? Math.trunc(row.deltaPercent) : 0;
+    normalized.push({ id, stat, deltaPercent: delta });
+  }
+  return normalized;
+}
+
+function has_active_effect(state: GameState, slot_id: PlayerSlot, effect_id: string): boolean {
+  const effects = state.activeEffectsBySlot?.[slot_id];
+  if (!Array.isArray(effects)) {
+    return false;
+  }
+  return effects.some((row) => row?.id === effect_id);
+}
+
+function tooltip_total_percent_for_stat(
+  state: GameState,
+  slot_id: PlayerSlot,
+  stat: TooltipStatKey,
+  entries: UiBuffDebuffEntry[]
+): number {
+  let total = 100 + tooltip_stat_delta_sum(entries, stat);
+  if (stat === "defense") {
+    total += armor_stacks_for_slot(state, slot_id) * TOOLTIP_ARMOR_BONUS_PERCENT_PER_STACK;
+  }
+  return clamp_tooltip_total_percent(total);
+}
+
+function tooltip_stat_value_from_percent(base: number, total_percent: number): number {
+  return Math.max(0, mul_div_round(base, total_percent, 100));
 }
 
 function tooltip_from_config(monster_id: string): MonsterTooltipPayload {
@@ -1091,35 +1163,46 @@ function tooltip_from_config(monster_id: string): MonsterTooltipPayload {
     id: monster_id,
     name: monster_label(monster_id),
     type,
-    showHp: false,
     moves: config.moves.slice(0, LOBBY_MOVE_SLOTS),
     current: {
-      hp: config.stats.maxHp,
-      maxHp: config.stats.maxHp,
       attack: config.stats.attack,
       defense: config.stats.defense,
       speed: config.stats.speed
     },
-    base
+    base,
+    totalPercent: {
+      attack: 100,
+      defense: 100,
+      speed: 100
+    }
   };
 }
 
-function tooltip_from_state(mon: MonsterState): MonsterTooltipPayload {
+function tooltip_from_state(state: GameState, slot_id: PlayerSlot, mon: MonsterState): MonsterTooltipPayload {
   const base = base_stats_for(mon.id, mon.level);
+  const entries = active_buff_debuffs_for_slot(state, slot_id);
+  const attack_total_percent = tooltip_total_percent_for_stat(state, slot_id, "attack", entries);
+  const defense_total_percent = tooltip_total_percent_for_stat(state, slot_id, "defense", entries);
+  const speed_total_percent = tooltip_total_percent_for_stat(state, slot_id, "speed", entries);
+  const attack_blocked = has_active_effect(state, slot_id, "weakness");
+  const defense_blocked = has_active_effect(state, slot_id, "deterioration");
+  const speed_blocked = has_active_effect(state, slot_id, "paralyse");
   return {
     id: mon.id,
     name: monster_label(mon.id),
     type: mon.type,
-    showHp: true,
     moves: mon.chosenMoves.slice(0, LOBBY_MOVE_SLOTS),
     current: {
-      hp: Math.max(0, mon.hp),
-      maxHp: mon.maxHp,
-      attack: mon.attack,
-      defense: mon.defense,
-      speed: mon.speed
+      attack: attack_blocked ? 0 : tooltip_stat_value_from_percent(base.attack, attack_total_percent),
+      defense: defense_blocked ? 0 : tooltip_stat_value_from_percent(base.defense, defense_total_percent),
+      speed: speed_blocked ? 0 : tooltip_stat_value_from_percent(base.speed, speed_total_percent)
     },
-    base
+    base,
+    totalPercent: {
+      attack: attack_total_percent,
+      defense: defense_total_percent,
+      speed: speed_total_percent
+    }
   };
 }
 
@@ -1158,6 +1241,23 @@ function tooltip_stat_row(label: string, current: number, base: number): HTMLDiv
   return row;
 }
 
+function format_tooltip_multiplier(percent: number): string {
+  const mult = percent / 100;
+  const mult_text = Number.isInteger(mult)
+    ? `${mult}`
+    : mult.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  const delta = percent - 100;
+  const delta_text = `${delta >= 0 ? "+" : ""}${delta}%`;
+  return `x${mult_text} (${delta_text})`;
+}
+
+function tooltip_multiplier_row(label: string, percent: number): HTMLDivElement {
+  const row = document.createElement("div");
+  row.className = "stat-tooltip-mult-row";
+  row.textContent = `${label} total: ${format_tooltip_multiplier(percent)}`;
+  return row;
+}
+
 function render_monster_tooltip(payload: MonsterTooltipPayload): void {
   if (!stat_tooltip) return;
   stat_tooltip.innerHTML = "";
@@ -1177,17 +1277,14 @@ function render_monster_tooltip(payload: MonsterTooltipPayload): void {
   stats_grid.appendChild(tooltip_stat_row("ATK", payload.current.attack, payload.base.attack));
   stats_grid.appendChild(tooltip_stat_row("DEF", payload.current.defense, payload.base.defense));
   stats_grid.appendChild(tooltip_stat_row("SPE", payload.current.speed, payload.base.speed));
-  if (payload.showHp) {
-    stats_grid.appendChild(tooltip_stat_row("HP", payload.current.maxHp, payload.base.maxHp));
-  }
   stat_tooltip.appendChild(stats_grid);
 
-  if (payload.showHp) {
-    const hp_line = document.createElement("div");
-    hp_line.className = "stat-tooltip-hp";
-    hp_line.textContent = `Vida atual: ${payload.current.hp}/${payload.current.maxHp}`;
-    stat_tooltip.appendChild(hp_line);
-  }
+  const totals_box = document.createElement("div");
+  totals_box.className = "stat-tooltip-mult";
+  totals_box.appendChild(tooltip_multiplier_row("ATK", payload.totalPercent.attack));
+  totals_box.appendChild(tooltip_multiplier_row("DEF", payload.totalPercent.defense));
+  totals_box.appendChild(tooltip_multiplier_row("SPE", payload.totalPercent.speed));
+  stat_tooltip.appendChild(totals_box);
 
   const moves_box = document.createElement("div");
   moves_box.className = "stat-tooltip-moves";
@@ -1252,8 +1349,8 @@ function append_log(line: string): void {
   append_line(log_list, compact_slot_labels(line));
 }
 
-function append_chat(line: string): void {
-  append_line(chat_messages, line);
+function append_chat(line: string, class_name?: string): void {
+  append_line(chat_messages, line, class_name);
 }
 
 function append_chat_user(name: string, message: string): void {
@@ -2122,7 +2219,8 @@ function set_bench_slot(
   mon: MonsterState | null,
   index: number | null,
   enabled: boolean,
-  blocked_switch: boolean = false
+  blocked_switch: boolean = false,
+  tooltip: MonsterTooltipPayload | null = null
 ): void {
   if (!mon || index === null || index < 0) {
     slot.btn.classList.add("empty");
@@ -2135,7 +2233,6 @@ function set_bench_slot(
     slot.img.style.display = "none";
     return;
   }
-  const tooltip = tooltip_from_state(mon);
   slot.btn.classList.remove("empty");
   slot.btn.classList.toggle("blocked-switch", blocked_switch);
   slot.btn.dataset.index = `${index}`;
@@ -2164,7 +2261,8 @@ function is_slot_arena_trapped_for_ui(state: GameState, target_slot: PlayerSlot)
 
 function update_bench(state: GameState, viewer_slot: PlayerSlot): void {
   const me = state.players[viewer_slot];
-  const opp = state.players[viewer_slot === "player1" ? "player2" : "player1"];
+  const enemy_slot = viewer_slot === "player1" ? "player2" : "player1";
+  const opp = state.players[enemy_slot];
   const my_bench = me.team.map((_, idx) => idx).filter((idx) => idx !== me.activeIndex);
   const opp_bench = opp.team.map((_, idx) => idx).filter((idx) => idx !== opp.activeIndex);
   const my_switch_blocked = is_slot_arena_trapped_for_ui(state, viewer_slot);
@@ -2179,12 +2277,14 @@ function update_bench(state: GameState, viewer_slot: PlayerSlot): void {
   player_bench_slots.forEach((slot_el, i) => {
     const idx = my_bench[i] ?? null;
     const mon = idx !== null ? me.team[idx] : null;
-    set_bench_slot(slot_el, mon, idx, can_switch, my_switch_blocked);
+    const tooltip = mon && idx !== null ? tooltip_from_state(state, viewer_slot, mon) : null;
+    set_bench_slot(slot_el, mon, idx, can_switch, my_switch_blocked, tooltip);
   });
   enemy_bench_slots.forEach((slot_el, i) => {
     const idx = opp_bench[i] ?? null;
     const mon = idx !== null ? opp.team[idx] : null;
-    set_bench_slot(slot_el, mon, idx, false, false);
+    const tooltip = mon && idx !== null ? tooltip_from_state(state, enemy_slot, mon) : null;
+    set_bench_slot(slot_el, mon, idx, false, false, tooltip);
   });
 }
 
@@ -2673,6 +2773,17 @@ function handle_turn_start(data: { turn: number; deadline_at: number }): void {
 
 function log_events(log: EventLog[]): void {
   for (const entry of log) {
+    if (entry.type === "clear_body_blocked") {
+      append_chat(entry.summary, "log-clear-body");
+      continue;
+    }
+    if (entry.type === "passive_trigger") {
+      const data = entry.data as { passive?: string } | undefined;
+      if (data?.passive === "type_def_armor_stack") {
+        append_chat(entry.summary, "log-clear-body");
+        continue;
+      }
+    }
     if (entry.type === "damage") {
       const data = entry.data as { slot?: PlayerSlot; damage?: number; target?: string } | undefined;
       const attacker_slot = data?.slot;
@@ -2726,6 +2837,23 @@ const CURSE_UI_LABELS: Record<string, string> = {
   endure: "Endure"
 };
 
+function stat_short_label(stat: TooltipStatKey): string {
+  if (stat === "attack") return "ATK";
+  if (stat === "defense") return "DEF";
+  return "SPE";
+}
+
+function format_delta_percent(delta: number): string {
+  return `${delta >= 0 ? "+" : ""}${delta}%`;
+}
+
+function format_entry_multiplier(delta_percent: number): string {
+  const percent = 100 + delta_percent;
+  const mult = percent / 100;
+  const text = Number.isInteger(mult) ? `${mult}` : mult.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  return `x${text}`;
+}
+
 type ActiveCurseUi = { id: string; sourceSlot: PlayerSlot | null; stacks: number };
 
 function active_curses_for_slot(state: GameState, slot_id: PlayerSlot): ActiveCurseUi[] {
@@ -2742,8 +2870,7 @@ function active_curses_for_slot(state: GameState, slot_id: PlayerSlot): ActiveCu
 
 function effect_chips_for_slot(state: GameState, slot_id: PlayerSlot, opponent_slot: PlayerSlot): EffectChipDef[] {
   const chips: EffectChipDef[] = [];
-  const active = state.players[slot_id].team[state.players[slot_id].activeIndex];
-  const opponent_active = state.players[opponent_slot].team[state.players[opponent_slot].activeIndex];
+  const buff_entries = active_buff_debuffs_for_slot(state, slot_id);
   const my_curses = active_curses_for_slot(state, slot_id);
   const enemy_curses = active_curses_for_slot(state, opponent_slot);
   const seeded = my_curses.some((curse) => curse.id === "leech_seed");
@@ -2762,7 +2889,6 @@ function effect_chips_for_slot(state: GameState, slot_id: PlayerSlot, opponent_s
   }
   if (armor_stacks > 0) {
     chips.push({ label: `Armor +${armor_stacks * 10}%`, kind: "buff" });
-    chips.push({ label: "Clear Body", kind: "buff" });
   }
   if (regen_stacks > 0) {
     chips.push({ label: `Regen +${regen_stacks * 5}/turn`, kind: "buff" });
@@ -2770,17 +2896,9 @@ function effect_chips_for_slot(state: GameState, slot_id: PlayerSlot, opponent_s
   if (arena_trapped) {
     chips.push({ label: `Arena Trap (${arena_trap_turns}t sem troca)`, kind: "debuff" });
   }
-  if (opponent_active.screechDebuffActive) {
-    chips.push({ label: "Screech (enemyDEF 0.5)", kind: "debuff" });
-  }
-  if (active.agilityBoostActive) {
-    chips.push({ label: "Agility (mySPE 2)", kind: "buff" });
-  }
-  if (active.endureSpeedBoostActive) {
-    chips.push({ label: "Endure (mySPE 1.5)", kind: "buff" });
-  }
-  if (active.bellyDrumActive) {
-    chips.push({ label: "Belly Drum (myHP 0.5) (myATK 4)", kind: "buff" });
+  for (const entry of buff_entries) {
+    const label = `${stat_short_label(entry.stat)} ${format_entry_multiplier(entry.deltaPercent)} (${format_delta_percent(entry.deltaPercent)})`;
+    chips.push({ label, kind: entry.deltaPercent >= 0 ? "buff" : "debuff" });
   }
   const active_effects = state.activeEffectsBySlot?.[slot_id] ?? [];
   for (const effect of active_effects) {
@@ -2862,7 +2980,7 @@ function update_side_panel(
   sprite.src = icon_path(active.id);
   sprite.alt = monster_label(active.id);
   sprite.style.visibility = "";
-  set_monster_tooltip(sprite_wrap, tooltip_from_state(active));
+  set_monster_tooltip(sprite_wrap, tooltip_from_state(state, slot_id, active));
 }
 
 function update_panels(

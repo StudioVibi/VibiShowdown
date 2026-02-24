@@ -91,6 +91,17 @@ export type ActiveCurseState = {
   stacks: number;
 };
 
+export type BuffDebuffStat = "attack" | "defense" | "speed";
+
+export type ActiveBuffDebuffState = {
+  id: string;
+  sourceSlot: PlayerSlot | null;
+  source: string;
+  stat: BuffDebuffStat;
+  deltaPercent: number;
+  clearsOnSwitch: true;
+};
+
 export type MatchEndReason = "hp_zero" | "turn_limit" | "surrender" | "evade_escape";
 
 export type EvadeTelemetry = {
@@ -122,6 +133,7 @@ export type GameState = {
   tauntUntilTurn: Record<PlayerSlot, number>;
   activeEffectsBySlot: Record<PlayerSlot, ActiveEffectState[]>;
   activeCursesBySlot: Record<PlayerSlot, ActiveCurseState[]>;
+  activeBuffDebuffsBySlot: Record<PlayerSlot, ActiveBuffDebuffState[]>;
   lastMoveIndexBySlot: Record<PlayerSlot, number | null>;
 };
 

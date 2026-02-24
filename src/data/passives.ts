@@ -1,7 +1,13 @@
 import type { PassiveCatalogEntry } from "./types.ts";
 
 export const PASSIVE_CATALOG: readonly PassiveCatalogEntry[] = [
-  { id: "none", label: "none" }
+  { id: "none", label: "none", kind: "none", components: [] },
+  {
+    id: "clear_body",
+    label: "Clear Body [Instant]",
+    kind: "instant",
+    components: [{ kind: "instant", id: "clear_body", target: "self" }]
+  }
 ];
 
 export const PASSIVE_OPTIONS: string[] = PASSIVE_CATALOG.map((entry) => entry.id);

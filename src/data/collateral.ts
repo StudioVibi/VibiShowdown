@@ -1,8 +1,10 @@
 import type {
+  BuffDebuffStat,
   CollateralKind,
   CollateralRank,
   CurseCollateralId,
-  EffectCollateralId
+  EffectCollateralId,
+  InstantCollateralId
 } from "./types.ts";
 
 export type EffectCollateralTemplate = {
@@ -19,10 +21,25 @@ export type CurseCollateralTemplate = {
   summary: string;
 };
 
+export type BuffDebuffCollateralTemplate = {
+  id: string;
+  label: string;
+  stat: BuffDebuffStat;
+  deltaPercent: number;
+  summary: string;
+};
+
+export type InstantCollateralTemplate = {
+  id: InstantCollateralId;
+  label: string;
+  summary: string;
+};
+
 export const COLLATERAL_KIND_OPTIONS: readonly CollateralKind[] = [
   "effect",
   "buff_debuff",
-  "curse"
+  "curse",
+  "instant"
 ] as const;
 
 // Effect taxonomy. Runtime behavior exists in engine for effect collaterals.
@@ -47,4 +64,38 @@ export const CURSE_COLLATERAL_TEMPLATES: readonly CurseCollateralTemplate[] = [
   { id: "leech_seed", label: "Leech Seed", rank: "?", summary: "Maldição removida ao trocar." },
   { id: "destiny_bond", label: "Destiny Bond", rank: "?", summary: "Maldição removida ao trocar." },
   { id: "endure", label: "Endure", rank: "?", summary: "Maldição removida ao trocar." }
+] as const;
+
+// Buff/debuff taxonomy. Values are additive deltas over base stats (no multiplier chaining).
+export const BUFF_DEBUFF_COLLATERAL_TEMPLATES: readonly BuffDebuffCollateralTemplate[] = [
+  {
+    id: "attack_up_100",
+    label: "Attack Up",
+    stat: "attack",
+    deltaPercent: 100,
+    summary: "ATK x2 (+100%). Remove ao trocar."
+  },
+  {
+    id: "defense_down_50",
+    label: "Defense Down",
+    stat: "defense",
+    deltaPercent: -50,
+    summary: "DEF x0.5 (-50%). Remove ao trocar."
+  },
+  {
+    id: "speed_up_100",
+    label: "Speed Up",
+    stat: "speed",
+    deltaPercent: 100,
+    summary: "SPE x2 (+100%). Remove ao trocar."
+  }
+] as const;
+
+// Instant taxonomy. Instant entries resolve immediately and do not persist as effect chips.
+export const INSTANT_COLLATERAL_TEMPLATES: readonly InstantCollateralTemplate[] = [
+  {
+    id: "clear_body",
+    label: "Clear Body",
+    summary: "Instant: bloqueia redução de status quando aplicável."
+  }
 ] as const;

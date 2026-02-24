@@ -4,8 +4,10 @@ import {
   SHARED_HP_START,
 } from "./shared.ts";
 import type {
+  ActiveBuffDebuffState,
   ActiveCurseState,
   ActiveEffectState,
+  BuffDebuffStat,
   EvadeTelemetry,
   EVSpread,
   EventLog,
@@ -21,7 +23,14 @@ import type {
 } from "./shared.ts";
 import { MONSTER_BY_ID } from "./data/pokemon.ts";
 import { move_spec } from "./data/moves.ts";
-import type { CurseCollateral, CurseCollateralId, EffectCollateral, EffectCollateralId } from "./data/types.ts";
+import type {
+  BuffDebuffCollateral,
+  CurseCollateral,
+  CurseCollateralId,
+  EffectCollateral,
+  EffectCollateralId,
+  InstantCollateral
+} from "./data/types.ts";
 import { mul_div_ceil, mul_div_floor, mul_div_round, normalize_int } from "./int_math.ts";
 import { LEVEL_MAX, LEVEL_MIN, calc_final_stats, validate_ev_spread } from "./stats_calc.ts";
 
@@ -82,6 +91,8 @@ const TYPE_PASSIVE_ATK_TRUE_DAMAGE = 10;
 const TYPE_PASSIVE_DEF_ARMOR_STACK_MAX = 5;
 const TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT = 10;
 const TYPE_PASSIVE_BUF_REGEN_PER_STACK = 5;
+const STAT_MULTIPLIER_MIN_PERCENT = 25;
+const STAT_MULTIPLIER_MAX_PERCENT = 400;
 const EVADE_VALUE_GOAL = 500;
 const EVADE_GAP_GOAL_PERCENT = 33;
 const EFFECT_IDS: readonly EffectCollateralId[] = [
@@ -165,6 +176,55 @@ function set_attack_stage(monster: MonsterState, next_stage: number): number {
   return normalized;
 }
 
+function clamp_stat_multiplier_percent(total_percent: number): number {
+  return Math.max(STAT_MULTIPLIER_MIN_PERCENT, Math.min(STAT_MULTIPLIER_MAX_PERCENT, total_percent));
+}
+
+function stat_multiplier_percent_from_delta(delta_percent: number): number {
+  return clamp_stat_multiplier_percent(100 + delta_percent);
+}
+
+function stat_value_from_delta_percent(base_value: number, delta_percent: number): number {
+  return Math.max(0, mul_div_round(base_value, stat_multiplier_percent_from_delta(delta_percent), 100));
+}
+
+function total_delta_percent_from_buff_debuffs(
+  state: GameState,
+  slot: PlayerSlot,
+  stat: BuffDebuffStat
+): number {
+  let total = 0;
+  for (const entry of buff_debuff_list(state, slot)) {
+    if (entry.stat !== stat) {
+      continue;
+    }
+    total += entry.deltaPercent;
+  }
+  return total;
+}
+
+function refresh_active_monster_stats_for_slot(state: GameState, slot: PlayerSlot): void {
+  const monster = active_monster(state.players[slot]);
+  const attack_delta = total_delta_percent_from_buff_debuffs(state, slot, "attack");
+  const defense_delta = total_delta_percent_from_buff_debuffs(state, slot, "defense");
+  const speed_delta = total_delta_percent_from_buff_debuffs(state, slot, "speed");
+
+  monster.attack = stat_value_from_delta_percent(monster.baseAttack, attack_delta);
+  monster.defense = stat_value_from_delta_percent(monster.baseDefense, defense_delta);
+  monster.speed = stat_value_from_delta_percent(monster.baseSpeed, speed_delta);
+  monster.attackStage = infer_stage_from_attack(monster.attack, monster.baseAttack);
+
+  monster.agilityBoostActive = buff_debuff_list(state, slot).some((entry) => entry.id === "agility_speed_up");
+  monster.endureSpeedBoostActive = buff_debuff_list(state, slot).some((entry) => entry.id === "endure_speed_up");
+  monster.bellyDrumActive = buff_debuff_list(state, slot).some((entry) => entry.id === "belly_drum_attack_up");
+  monster.screechDebuffActive = buff_debuff_list(state, slot).some((entry) => entry.id === "screech_def_down");
+}
+
+function refresh_active_monster_stats(state: GameState): void {
+  refresh_active_monster_stats_for_slot(state, "player1");
+  refresh_active_monster_stats_for_slot(state, "player2");
+}
+
 function compare_action_initiative(state: GameState, phase: Phase, a: Action, b: Action): number {
   const a_slot = a.player;
   const b_slot = b.player;
@@ -219,6 +279,9 @@ function clone_monster(monster: MonsterState): MonsterState {
     monster.attackStage,
     infer_stage_from_attack(monster.attack, base_attack)
   );
+  const attack_value = Number.isFinite(monster.attack) ? normalize_int(monster.attack, base_attack, 0) : base_attack;
+  const defense_value = Number.isFinite(monster.defense) ? normalize_int(monster.defense, base_defense, 0) : base_defense;
+  const speed_value = Number.isFinite(monster.speed) ? normalize_int(monster.speed, base_speed, 0) : base_speed;
   return {
     id: monster.id,
     name: monster.name,
@@ -230,10 +293,10 @@ function clone_monster(monster: MonsterState): MonsterState {
     baseAttack: base_attack,
     baseDefense: base_defense,
     baseSpeed: base_speed,
-    attack: attack_from_stage(base_attack, attack_stage),
+    attack: attack_value,
     attackStage: attack_stage,
-    defense: monster.defense,
-    speed: monster.speed,
+    defense: defense_value,
+    speed: speed_value,
     agilityBoostActive: !!monster.agilityBoostActive,
     endureSpeedBoostActive: !!monster.endureSpeedBoostActive,
     bellyDrumActive: !!monster.bellyDrumActive,
@@ -279,6 +342,10 @@ function empty_taunt_until_turn(): Record<PlayerSlot, number> {
 }
 
 function empty_active_effects(): Record<PlayerSlot, ActiveEffectState[]> {
+  return empty_slot_record([], []);
+}
+
+function empty_active_buff_debuffs(): Record<PlayerSlot, ActiveBuffDebuffState[]> {
   return empty_slot_record([], []);
 }
 
@@ -360,9 +427,55 @@ function normalize_active_curses(input: unknown): ActiveCurseState[] {
     }
     const source_slot: PlayerSlot | null =
       row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null;
-    const stacks_raw = typeof row.stacks === "number" ? row.stacks : 1;
-    const stacks = Math.max(1, normalize_int(stacks_raw, 1, 1));
-    normalized.push({ id: row.id, sourceSlot: source_slot, stacks });
+    normalized.push({ id: row.id, sourceSlot: source_slot, stacks: 1 });
+  }
+  return normalized;
+}
+
+function is_buff_debuff_stat(value: unknown): value is BuffDebuffStat {
+  return value === "attack" || value === "defense" || value === "speed";
+}
+
+function normalize_active_buff_debuffs(input: unknown): ActiveBuffDebuffState[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const normalized: ActiveBuffDebuffState[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const row = item as {
+      id?: unknown;
+      sourceSlot?: unknown;
+      source?: unknown;
+      stat?: unknown;
+      deltaPercent?: unknown;
+      clearsOnSwitch?: unknown;
+    };
+    if (typeof row.id !== "string" || row.id.trim().length === 0) {
+      continue;
+    }
+    if (!is_buff_debuff_stat(row.stat)) {
+      continue;
+    }
+    const source_slot: PlayerSlot | null =
+      row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null;
+    const source = typeof row.source === "string" && row.source.trim().length > 0 ? row.source : "unknown";
+    const raw_delta = typeof row.deltaPercent === "number" ? row.deltaPercent : 0;
+    const delta = normalize_int(raw_delta, 0, -1000000);
+    const clears_on_switch = row.clearsOnSwitch === true;
+    if (!clears_on_switch) {
+      continue;
+    }
+    normalized.push({
+      id: row.id,
+      sourceSlot: source_slot,
+      source,
+      stat: row.stat,
+      deltaPercent: delta,
+      clearsOnSwitch: true
+    });
   }
   return normalized;
 }
@@ -373,6 +486,10 @@ function effect_list(state: GameState, slot: PlayerSlot): ActiveEffectState[] {
 
 function curse_list(state: GameState, slot: PlayerSlot): ActiveCurseState[] {
   return state.activeCursesBySlot?.[slot] ?? [];
+}
+
+function buff_debuff_list(state: GameState, slot: PlayerSlot): ActiveBuffDebuffState[] {
+  return state.activeBuffDebuffsBySlot?.[slot] ?? [];
 }
 
 function effect_state(state: GameState, slot: PlayerSlot, effect_id: EffectCollateralId): ActiveEffectState | null {
@@ -479,31 +596,36 @@ function upsert_curse(
   ensure_state_runtime_defaults(state);
   const curses = state.activeCursesBySlot[target_slot];
   const existing = curses.find((entry) => entry.id === curse_id) ?? null;
-  const before_stacks = existing?.stacks ?? 0;
   if (existing) {
-    existing.stacks += 1;
-    if (source_slot) {
-      existing.sourceSlot = source_slot;
-    }
-  } else {
-    curses.push({
-      id: curse_id,
-      sourceSlot: source_slot,
-      stacks: 1
+    log.push({
+      type: "curse_apply",
+      turn: state.turn,
+      summary: `${curse_label(curse_id)} already active on ${target_slot} (no stack)`,
+      data: {
+        slot: source_slot,
+        targetSlot: target_slot,
+        move: source_move_id,
+        curse: curse_id,
+        alreadyActive: true
+      }
     });
+    return;
   }
-  const after_stacks = existing?.stacks ?? 1;
+  curses.push({
+    id: curse_id,
+    sourceSlot: source_slot,
+    stacks: 1
+  });
   log.push({
     type: "curse_apply",
     turn: state.turn,
-    summary: `${curse_label(curse_id)} cursed ${target_slot}${after_stacks > 1 ? ` (x${after_stacks})` : ""}`,
+    summary: `${curse_label(curse_id)} cursed ${target_slot}`,
     data: {
       slot: source_slot,
       targetSlot: target_slot,
       move: source_move_id,
       curse: curse_id,
-      beforeStacks: before_stacks,
-      afterStacks: after_stacks
+      alreadyActive: false
     }
   });
 }
@@ -521,6 +643,103 @@ function apply_move_curses_from_collateral(
   for (const collateral of collaterals) {
     const target_slot: PlayerSlot = source_slot === "player1" ? "player2" : "player1";
     upsert_curse(state, log, target_slot, collateral.id, source_slot, source_move_id);
+  }
+}
+
+function stat_label_for_buff(stat: BuffDebuffStat): string {
+  if (stat === "attack") return "ATK";
+  if (stat === "defense") return "DEF";
+  return "SPE";
+}
+
+function stat_value_for_active_monster(monster: MonsterState, stat: BuffDebuffStat): number {
+  if (stat === "attack") return monster.attack;
+  if (stat === "defense") return monster.defense;
+  return monster.speed;
+}
+
+function apply_buff_debuff_component(
+  state: GameState,
+  log: EventLog[],
+  target_slot: PlayerSlot,
+  collateral: BuffDebuffCollateral,
+  source_slot: PlayerSlot | null,
+  source_move_id: string
+): void {
+  ensure_state_runtime_defaults(state);
+  const target = active_monster(state.players[target_slot]);
+  refresh_active_monster_stats_for_slot(state, target_slot);
+  const before = stat_value_for_active_monster(target, collateral.stat);
+  state.activeBuffDebuffsBySlot[target_slot].push({
+    id: collateral.id,
+    sourceSlot: source_slot,
+    source: source_move_id,
+    stat: collateral.stat,
+    deltaPercent: collateral.deltaPercent,
+    clearsOnSwitch: true
+  });
+  refresh_active_monster_stats_for_slot(state, target_slot);
+  const after = stat_value_for_active_monster(target, collateral.stat);
+  const total_delta = total_delta_percent_from_buff_debuffs(state, target_slot, collateral.stat);
+  const total_percent = stat_multiplier_percent_from_delta(total_delta);
+  log.push({
+    type: "buff_debuff_apply",
+    turn: state.turn,
+    summary: `${target.name} ${stat_label_for_buff(collateral.stat)} ${(collateral.deltaPercent >= 0 ? "+" : "") + collateral.deltaPercent}%`,
+    data: {
+      slot: source_slot,
+      targetSlot: target_slot,
+      move: source_move_id,
+      componentId: collateral.id,
+      stat: collateral.stat,
+      deltaPercent: collateral.deltaPercent,
+      totalDeltaPercent: total_delta,
+      totalPercent: total_percent,
+      before,
+      after
+    }
+  });
+}
+
+function apply_move_buff_debuffs_from_collateral(
+  state: GameState,
+  log: EventLog[],
+  source_slot: PlayerSlot,
+  collaterals: readonly BuffDebuffCollateral[],
+  source_move_id: string
+): void {
+  if (collaterals.length === 0) {
+    return;
+  }
+  for (const collateral of collaterals) {
+    const target_slot: PlayerSlot = collateral.target === "self" ? source_slot : other_slot(source_slot);
+    apply_buff_debuff_component(state, log, target_slot, collateral, source_slot, source_move_id);
+  }
+}
+
+function apply_move_instants_from_collateral(
+  state: GameState,
+  log: EventLog[],
+  source_slot: PlayerSlot,
+  collaterals: readonly InstantCollateral[],
+  source_move_id: string
+): void {
+  if (collaterals.length === 0) {
+    return;
+  }
+  for (const collateral of collaterals) {
+    const target_slot: PlayerSlot = collateral.target === "self" ? source_slot : other_slot(source_slot);
+    log.push({
+      type: "instant_trigger",
+      turn: state.turn,
+      summary: `Instant ${collateral.id} triggered by ${source_move_id}`,
+      data: {
+        slot: source_slot,
+        targetSlot: target_slot,
+        move: source_move_id,
+        instant: collateral.id
+      }
+    });
   }
 }
 
@@ -738,6 +957,7 @@ export function clone_state(state: GameState): GameState {
     tauntUntilTurn: empty_taunt_until_turn(),
     activeEffectsBySlot: empty_active_effects(),
     activeCursesBySlot: empty_active_curses(),
+    activeBuffDebuffsBySlot: empty_active_buff_debuffs(),
     lastMoveIndexBySlot: empty_last_move_index(),
   };
   cloned.rpsScore.player1 = normalize_int(state.rpsScore?.player1, 0, -99999);
@@ -770,6 +990,8 @@ export function clone_state(state: GameState): GameState {
   cloned.activeEffectsBySlot.player2 = normalize_active_effects(state.activeEffectsBySlot?.player2);
   cloned.activeCursesBySlot.player1 = normalize_active_curses(state.activeCursesBySlot?.player1);
   cloned.activeCursesBySlot.player2 = normalize_active_curses(state.activeCursesBySlot?.player2);
+  cloned.activeBuffDebuffsBySlot.player1 = normalize_active_buff_debuffs(state.activeBuffDebuffsBySlot?.player1);
+  cloned.activeBuffDebuffsBySlot.player2 = normalize_active_buff_debuffs(state.activeBuffDebuffsBySlot?.player2);
   const last_move_p1 = state.lastMoveIndexBySlot?.player1;
   const last_move_p2 = state.lastMoveIndexBySlot?.player2;
   cloned.lastMoveIndexBySlot.player1 =
@@ -778,6 +1000,7 @@ export function clone_state(state: GameState): GameState {
     typeof last_move_p2 === "number" && Number.isInteger(last_move_p2) ? Math.max(0, last_move_p2) : null;
   sync_all_players_shared_hp(cloned);
   sync_all_players_shared_evade(cloned);
+  refresh_active_monster_stats(cloned);
   refresh_evade_telemetry(cloned);
   return cloned;
 }
@@ -852,6 +1075,9 @@ function ensure_state_runtime_defaults(state: GameState): void {
   if (!state.activeCursesBySlot) {
     state.activeCursesBySlot = empty_active_curses();
   }
+  if (!state.activeBuffDebuffsBySlot) {
+    state.activeBuffDebuffsBySlot = empty_active_buff_debuffs();
+  }
   if (!state.lastMoveIndexBySlot) {
     state.lastMoveIndexBySlot = empty_last_move_index();
   }
@@ -874,6 +1100,7 @@ function ensure_state_runtime_defaults(state: GameState): void {
     state.spikesArmedByTarget = empty_spikes_armed_by_target();
   }
   sync_all_players_shared_evade(state);
+  refresh_active_monster_stats(state);
 }
 
 function compare_monster_type(left: MonsterType, right: MonsterType): number {
@@ -1123,7 +1350,7 @@ function apply_simultaneous_switch_passives(
       type: "passive_trigger",
       turn: state.turn,
       phase: "switch",
-      summary: `${winner_mon.name} activated DEF passive (Clear Body + Armor ${after_stack * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT}%)`,
+      summary: `${winner_mon.name} activated DEF passive (Clear Body [Instant] + Armor ${after_stack * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT}%)`,
       data: {
         slot: winner,
         source: winner_mon.id,
@@ -1226,6 +1453,7 @@ function check_zero_hp_match_result(state: GameState, log: EventLog[]): MatchPro
 }
 
 function effective_attack_for_slot(state: GameState, slot: PlayerSlot, monster: MonsterState): number {
+  refresh_active_monster_stats_for_slot(state, slot);
   if (has_effect(state, slot, "weakness")) {
     return 0;
   }
@@ -1233,6 +1461,7 @@ function effective_attack_for_slot(state: GameState, slot: PlayerSlot, monster: 
 }
 
 function effective_defense_for_slot(state: GameState, slot: PlayerSlot, monster: MonsterState): number {
+  refresh_active_monster_stats_for_slot(state, slot);
   if (has_effect(state, slot, "deterioration")) {
     return 0;
   }
@@ -1240,6 +1469,7 @@ function effective_defense_for_slot(state: GameState, slot: PlayerSlot, monster:
 }
 
 function effective_speed_for_slot(state: GameState, slot: PlayerSlot, monster: MonsterState): number {
+  refresh_active_monster_stats_for_slot(state, slot);
   if (has_effect(state, slot, "paralyse")) {
     return 0;
   }
@@ -1467,6 +1697,38 @@ function clear_curses_on_target_switch(state: GameState, log: EventLog[], target
     });
   }
   state.activeCursesBySlot[target_slot] = [];
+}
+
+function clear_buff_debuffs_on_target_switch(state: GameState, log: EventLog[], target_slot: PlayerSlot): void {
+  ensure_state_runtime_defaults(state);
+  const active = state.activeBuffDebuffsBySlot[target_slot];
+  if (!Array.isArray(active) || active.length === 0) {
+    return;
+  }
+  const removed = active.length;
+  state.activeBuffDebuffsBySlot[target_slot] = [];
+  refresh_active_monster_stats_for_slot(state, target_slot);
+  log.push({
+    type: "buff_debuff_end",
+    turn: state.turn,
+    summary: `${target_slot} cleared ${removed} buff/debuff modifier${removed === 1 ? "" : "s"} on switch`,
+    data: { slot: target_slot, removed, reason: "switch" }
+  });
+}
+
+function clear_buff_debuffs_for_stat(state: GameState, slot: PlayerSlot, stat: BuffDebuffStat): number {
+  ensure_state_runtime_defaults(state);
+  const before = state.activeBuffDebuffsBySlot[slot];
+  if (!Array.isArray(before) || before.length === 0) {
+    return 0;
+  }
+  const filtered = before.filter((entry) => entry.stat !== stat);
+  const removed = before.length - filtered.length;
+  if (removed > 0) {
+    state.activeBuffDebuffsBySlot[slot] = filtered;
+    refresh_active_monster_stats_for_slot(state, slot);
+  }
+  return removed;
 }
 
 function apply_curse_end_turn(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
@@ -1735,8 +1997,24 @@ function apply_damage_with_endure(
       after = survive_hp;
       monster.endureActiveThisTurn = false;
 
+      refresh_active_monster_stats_for_slot(state, slot);
       const speed_before = monster.speed;
-      monster.speed = Math.max(1, mul_div_round(speed_before, 3, 2));
+      apply_buff_debuff_component(
+        state,
+        log,
+        slot,
+        {
+          kind: "buff_debuff",
+          id: "endure_speed_up",
+          target: "self",
+          stat: "speed",
+          deltaPercent: 50,
+          clearsOnSwitch: true
+        },
+        slot,
+        "endure"
+      );
+      const speed_after = monster.speed;
       monster.endureSpeedBoostActive = true;
       log.push({
         type: "endure_trigger",
@@ -1757,14 +2035,14 @@ function apply_damage_with_endure(
         type: "stat_mod",
         turn: state.turn,
         phase,
-        summary: `${monster.name} gained speed from Endure (${speed_before} -> ${monster.speed})`,
-        data: { slot, target: monster.id, stat: "speed", multiplier: 1.5, before: speed_before, after: monster.speed }
+        summary: `${monster.name} gained speed from Endure (${speed_before} -> ${speed_after})`,
+        data: { slot, target: monster.id, stat: "speed", multiplier: 1.5, before: speed_before, after: speed_after }
       });
       log.push({
         type: "move_detail",
         turn: state.turn,
         phase,
-        summary: `Endure: immortal trigger (HP floor 1% => ${after}); dmg capped ${attempted_damage} -> ${capped_damage}; SPE x1.5 (${speed_before} -> ${monster.speed})`,
+        summary: `Endure: immortal trigger (HP floor 1% => ${after}); dmg capped ${attempted_damage} -> ${capped_damage}; SPE x1.5 (${speed_before} -> ${speed_after})`,
         data: {
           move: "endure",
           slot,
@@ -1775,7 +2053,7 @@ function apply_damage_with_endure(
           damageAfterArmor: damage_after_armor,
           damageApplied: capped_damage,
           speedBefore: speed_before,
-          speedAfter: monster.speed
+          speedAfter: speed_after
         }
       });
     }
@@ -2028,16 +2306,25 @@ function apply_move(
   }
 
   const spec = move_spec(move_id);
-  const effect_collaterals = (spec.collateral ?? []).filter(
+  const components = spec.components ?? spec.collateral ?? [];
+  const effect_collaterals = components.filter(
     (entry): entry is EffectCollateral => entry.kind === "effect"
   );
-  const curse_collaterals = (spec.collateral ?? []).filter(
+  const curse_collaterals = components.filter(
     (entry): entry is CurseCollateral => entry.kind === "curse"
+  );
+  const buff_debuff_collaterals = components.filter(
+    (entry): entry is BuffDebuffCollateral => entry.kind === "buff_debuff"
+  );
+  const instant_collaterals = components.filter(
+    (entry): entry is InstantCollateral => entry.kind === "instant"
   );
   const finalize_move_success = (): void => {
     mark_last_move_used(state, player_slot, move_id, move_index);
     apply_move_effects_from_collateral(state, log, player_slot, effect_collaterals, spec.id);
     apply_move_curses_from_collateral(state, log, player_slot, curse_collaterals, spec.id);
+    apply_move_buff_debuffs_from_collateral(state, log, player_slot, buff_debuff_collaterals, spec.id);
+    apply_move_instants_from_collateral(state, log, player_slot, instant_collaterals, spec.id);
   };
 
   const blocked_by = move_block_reason(state, player_slot, move_index, spec);
@@ -2146,29 +2433,44 @@ function apply_move(
   }
 
   if (spec.id === "agility") {
+    refresh_active_monster_stats_for_slot(state, player_slot);
     const before_speed = attacker.speed;
-    attacker.speed = Math.max(1, mul_div_round(before_speed, 2, 1));
-    attacker.agilityBoostActive = true;
+    apply_buff_debuff_component(
+      state,
+      log,
+      player_slot,
+      {
+        kind: "buff_debuff",
+        id: "agility_speed_up",
+        target: "self",
+        stat: "speed",
+        deltaPercent: 100,
+        clearsOnSwitch: true
+      },
+      player_slot,
+      spec.id
+    );
+    const after_speed = attacker.speed;
     log.push({
       type: "stat_mod",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `${player_slot} Agility success on ${attacker.name} (SPE ${before_speed} -> ${attacker.speed})`,
+      summary: `${player_slot} Agility success on ${attacker.name} (SPE ${before_speed} -> ${after_speed})`,
       data: {
         slot: player_slot,
         target: attacker.id,
         stat: "speed",
         multiplier: 2,
         before: before_speed,
-        after: attacker.speed
+        after: after_speed
       }
     });
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Agility: user SPE x2 (${before_speed} -> ${attacker.speed})`,
-      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_speed, after: attacker.speed }
+      summary: `Agility: user SPE x2 (${before_speed} -> ${after_speed})`,
+      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_speed, after: after_speed }
     });
     finalize_move_success();
     return;
@@ -2256,8 +2558,17 @@ function apply_move(
     ensure_state_runtime_defaults(state);
     const effects_before = state.activeEffectsBySlot[player_slot].length;
     const curses_before = state.activeCursesBySlot[player_slot].length;
+    const buff_debuffs_before = state.activeBuffDebuffsBySlot[player_slot].length;
     state.activeEffectsBySlot[player_slot] = [];
     state.activeCursesBySlot[player_slot] = [];
+    state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter(
+      (entry) => entry.deltaPercent >= 0
+    );
+    const buff_debuffs_removed = Math.max(
+      0,
+      buff_debuffs_before - state.activeBuffDebuffsBySlot[player_slot].length
+    );
+    refresh_active_monster_stats_for_slot(state, player_slot);
     state.tauntUntilTurn[player_slot] = 0;
     state.arenaTrapUntilTurn[player_slot] = 0;
     let cleared_screech = 0;
@@ -2271,12 +2582,13 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Team Cure: removed ${effects_before} effects and ${curses_before} curses from team`,
+      summary: `Team Cure: removed ${effects_before} effects, ${curses_before} curses and ${buff_debuffs_removed} negative buff/debuffs from team`,
       data: {
         move: spec.id,
         slot: player_slot,
         effectsRemoved: effects_before,
         cursesRemoved: curses_before,
+        buffDebuffsRemoved: buff_debuffs_removed,
         screechRemoved: cleared_screech
       }
     });
@@ -2370,9 +2682,25 @@ function apply_move(
   }
 
   if (spec.id === "meditate") {
+    refresh_active_monster_stats_for_slot(state, player_slot);
     const before_stage = attacker.attackStage;
     const before_attack = attacker.attack;
-    const after_stage = set_attack_stage(attacker, before_stage + 2);
+    apply_buff_debuff_component(
+      state,
+      log,
+      player_slot,
+      {
+        kind: "buff_debuff",
+        id: "meditate_attack_up",
+        target: "self",
+        stat: "attack",
+        deltaPercent: 100,
+        clearsOnSwitch: true
+      },
+      player_slot,
+      spec.id
+    );
+    const after_stage = attacker.attackStage;
     const after_attack = attacker.attack;
     const ratio = stage_ratio(after_stage);
     log.push({
@@ -2412,6 +2740,7 @@ function apply_move(
   }
 
   if (spec.id === "belly_drum") {
+    refresh_active_monster_stats_for_slot(state, player_slot);
     const before_hp = player.sharedHp;
     if (before_hp * 2 <= attacker.maxHp) {
       log.push({
@@ -2429,9 +2758,24 @@ function apply_move(
     const hp_cost = mul_div_floor(before_hp, 1, 2);
     const after_hp = Math.max(0, before_hp - hp_cost);
     sync_player_shared_hp(state, player_slot, after_hp);
-    const after_stage = set_attack_stage(attacker, STAT_STAGE_MAX);
+    clear_buff_debuffs_for_stat(state, player_slot, "attack");
+    apply_buff_debuff_component(
+      state,
+      log,
+      player_slot,
+      {
+        kind: "buff_debuff",
+        id: "belly_drum_attack_up",
+        target: "self",
+        stat: "attack",
+        deltaPercent: 300,
+        clearsOnSwitch: true
+      },
+      player_slot,
+      spec.id
+    );
+    const after_stage = attacker.attackStage;
     const after_attack = attacker.attack;
-    attacker.bellyDrumActive = true;
 
     const hp_spent = Math.max(0, before_hp - after_hp);
     if (hp_spent > 0) {
@@ -2579,7 +2923,7 @@ function apply_move(
         type: "clear_body_blocked",
         turn: state.turn,
         phase: spec.phaseId,
-        summary: `${defender.name} blocked Screech with Clear Body`,
+        summary: `${defender.name} blocked Screech with Clear Body [Instant]`,
         data: {
           slot: defender_slot,
           target: defender.id,
@@ -2593,16 +2937,30 @@ function apply_move(
         type: "move_detail",
         turn: state.turn,
         phase: spec.phaseId,
-        summary: `Screech blocked by Clear Body (armor stack ${armor_stack})`,
+        summary: `Screech blocked by Clear Body [Instant] (armor stack ${armor_stack})`,
         data: { move: spec.id, target: defender.id, blockedBy: "clear_body", armorStack: armor_stack }
       });
       finalize_move_success();
       return;
     }
+    refresh_active_monster_stats_for_slot(state, defender_slot);
     const before_defense = defender.defense;
-    const after_defense = Math.max(1, mul_div_floor(before_defense, 1, 2));
-    defender.defense = after_defense;
-    defender.screechDebuffActive = true;
+    apply_buff_debuff_component(
+      state,
+      log,
+      defender_slot,
+      {
+        kind: "buff_debuff",
+        id: "screech_def_down",
+        target: "opponent",
+        stat: "defense",
+        deltaPercent: -50,
+        clearsOnSwitch: true
+      },
+      player_slot,
+      spec.id
+    );
+    const after_defense = defender.defense;
     log.push({
       type: "stat_mod",
       turn: state.turn,
@@ -2744,9 +3102,11 @@ function perform_switch(
   const outgoing = player.team[from];
   reset_monster_on_switch_out(outgoing);
   clear_curses_on_target_switch(state, log, slot);
+  clear_buff_debuffs_on_target_switch(state, log, slot);
   player.activeIndex = target_index;
   sync_player_shared_hp(state, slot, player.sharedHp);
   sync_player_shared_evade(state, slot, player.sharedEvade);
+  refresh_active_monster_stats_for_slot(state, slot);
   apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn);
   log.push({
     type: event_type,
@@ -2923,10 +3283,12 @@ export function create_initial_state(
     tauntUntilTurn: empty_taunt_until_turn(),
     activeEffectsBySlot: empty_active_effects(),
     activeCursesBySlot: empty_active_curses(),
+    activeBuffDebuffsBySlot: empty_active_buff_debuffs(),
     lastMoveIndexBySlot: empty_last_move_index(),
   };
   sync_all_players_shared_hp(initial_state);
   sync_all_players_shared_evade(initial_state);
+  refresh_active_monster_stats(initial_state);
   refresh_evade_telemetry(initial_state);
   return initial_state;
 }
@@ -2943,6 +3305,7 @@ export function resolve_turn(
   const switched_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
   sync_all_players_shared_evade(next);
+  refresh_active_monster_stats(next);
   next.baseTurnLimit = Math.max(1, normalize_int(next.baseTurnLimit, BASE_TURN_LIMIT, 1));
 
   if (next.status !== "running") {
@@ -3064,6 +3427,7 @@ export function resolve_turn(
   if (next.status === "running") {
     decay_effects_end_turn(next, log);
   }
+  refresh_active_monster_stats(next);
   // Clear guard flags after the turn resolves (so next turn starts unprotected/not-enduring).
   reset_protect_flags(next);
 
