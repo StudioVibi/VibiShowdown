@@ -674,31 +674,16 @@
 
       .stat-tooltip-grid {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 4px 8px;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 4px;
         font-family: "Space Mono", monospace;
         font-size: 11px;
       }
 
-      .stat-tooltip-mult {
-        margin-top: 6px;
-        display: grid;
-        gap: 3px;
-        font-family: "Space Mono", monospace;
-        font-size: 10px;
-      }
-
-      .stat-tooltip-mult-row {
-        border-radius: 6px;
-        padding: 3px 5px;
-        background: rgba(255, 255, 255, 0.035);
-        color: #c7d2f0;
-      }
-
       .stat-tooltip-row {
-        display: flex;
+        display: grid;
+        grid-template-columns: 34px minmax(36px, auto) minmax(98px, 1fr);
         align-items: center;
-        justify-content: space-between;
         gap: 8px;
         border-radius: 7px;
         padding: 3px 5px;
@@ -723,6 +708,23 @@
 
       .stat-tooltip-value.neutral {
         color: #fff;
+      }
+
+      .stat-tooltip-multiplier {
+        text-align: right;
+        color: #c7d2f0;
+      }
+
+      .stat-tooltip-multiplier.up {
+        color: #6ff7b0;
+      }
+
+      .stat-tooltip-multiplier.down {
+        color: #ff8e8e;
+      }
+
+      .stat-tooltip-multiplier.neutral {
+        color: #c7d2f0;
       }
 
       .stat-tooltip-hp {

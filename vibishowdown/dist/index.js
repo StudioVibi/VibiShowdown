@@ -6212,7 +6212,14 @@ function set_monster_tooltip(target, payload) {
   tooltip_payload_by_element.set(target, payload);
   target.dataset.monsterTooltip = "1";
 }
-function tooltip_stat_row(label, current, base) {
+function multiplier_value_state(percent) {
+  if (percent > 100)
+    return "up";
+  if (percent < 100)
+    return "down";
+  return "neutral";
+}
+function tooltip_stat_row(label, current, base, total_percent) {
   const row = document.createElement("div");
   row.className = "stat-tooltip-row";
   const label_el = document.createElement("span");
@@ -6221,8 +6228,12 @@ function tooltip_stat_row(label, current, base) {
   const value_el = document.createElement("span");
   value_el.className = `stat-tooltip-value ${tooltip_value_state(current, base)}`;
   value_el.textContent = `${current}`;
+  const mult_el = document.createElement("span");
+  mult_el.className = `stat-tooltip-multiplier ${multiplier_value_state(total_percent)}`;
+  mult_el.textContent = format_tooltip_multiplier(total_percent);
   row.appendChild(label_el);
   row.appendChild(value_el);
+  row.appendChild(mult_el);
   return row;
 }
 function format_tooltip_multiplier(percent) {
@@ -6231,12 +6242,6 @@ function format_tooltip_multiplier(percent) {
   const delta = percent - 100;
   const delta_text = `${delta >= 0 ? "+" : ""}${delta}%`;
   return `x${mult_text} (${delta_text})`;
-}
-function tooltip_multiplier_row(label, percent) {
-  const row = document.createElement("div");
-  row.className = "stat-tooltip-mult-row";
-  row.textContent = `${label} total: ${format_tooltip_multiplier(percent)}`;
-  return row;
 }
 function render_monster_tooltip(payload) {
   if (!stat_tooltip)
@@ -6252,16 +6257,10 @@ function render_monster_tooltip(payload) {
   stat_tooltip.appendChild(type_line);
   const stats_grid2 = document.createElement("div");
   stats_grid2.className = "stat-tooltip-grid";
-  stats_grid2.appendChild(tooltip_stat_row("ATK", payload.current.attack, payload.base.attack));
-  stats_grid2.appendChild(tooltip_stat_row("DEF", payload.current.defense, payload.base.defense));
-  stats_grid2.appendChild(tooltip_stat_row("SPE", payload.current.speed, payload.base.speed));
+  stats_grid2.appendChild(tooltip_stat_row("ATK", payload.current.attack, payload.base.attack, payload.totalPercent.attack));
+  stats_grid2.appendChild(tooltip_stat_row("DEF", payload.current.defense, payload.base.defense, payload.totalPercent.defense));
+  stats_grid2.appendChild(tooltip_stat_row("SPE", payload.current.speed, payload.base.speed, payload.totalPercent.speed));
   stat_tooltip.appendChild(stats_grid2);
-  const totals_box = document.createElement("div");
-  totals_box.className = "stat-tooltip-mult";
-  totals_box.appendChild(tooltip_multiplier_row("ATK", payload.totalPercent.attack));
-  totals_box.appendChild(tooltip_multiplier_row("DEF", payload.totalPercent.defense));
-  totals_box.appendChild(tooltip_multiplier_row("SPE", payload.totalPercent.speed));
-  stat_tooltip.appendChild(totals_box);
   const moves_box = document.createElement("div");
   moves_box.className = "stat-tooltip-moves";
   const moves = payload.moves.slice(0, LOBBY_MOVE_SLOTS);
