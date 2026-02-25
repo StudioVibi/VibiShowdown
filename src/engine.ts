@@ -3452,7 +3452,27 @@ export function resolve_turn(
   next.pendingSwitchReason = empty_pending_switch_reason();
   next.pendingSwitchResolvedThisTurn = empty_pending_switch_resolved_this_turn();
 
-  const actions = build_actions(intents, next);
+  const intents_after_forced_switch: Record<PlayerSlot, PlayerIntent | null> = {
+    player1: intents.player1,
+    player2: intents.player2
+  };
+  for (const slot_id of SLOT_ORDER) {
+    if (!switch_sovietico_resolved_this_turn[slot_id]) {
+      continue;
+    }
+    if (intents_after_forced_switch[slot_id] !== null) {
+      log.push({
+        type: "action_skipped",
+        turn: next.turn,
+        phase: "switch",
+        summary: `${slot_id} cannot act this turn after Switch Sovietico forced switch`,
+        data: { slot: slot_id, reason: "switch_sovietico_forced_switch" }
+      });
+    }
+    intents_after_forced_switch[slot_id] = null;
+  }
+
+  const actions = build_actions(intents_after_forced_switch, next);
   reset_protect_flags(next);
   let progress = check_zero_hp_match_result(next, log);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
