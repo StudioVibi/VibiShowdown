@@ -105,6 +105,8 @@ export type ActiveBuffDebuffState = {
 
 export type MatchEndReason = "hp_zero" | "turn_limit" | "surrender" | "mSPE_escape";
 
+export type PendingSwitchReason = "none" | "switch_sovietico";
+
 export type MSPETelemetry = {
   effectiveMSPE: number;
   mSPEGoal: number;
@@ -130,6 +132,8 @@ export type GameState = {
   spikesArmedByTarget: Record<PlayerSlot, boolean>;
   players: Record<PlayerSlot, PlayerState>;
   pendingSwitch: Record<PlayerSlot, boolean>;
+  pendingSwitchReason: Record<PlayerSlot, PendingSwitchReason>;
+  pendingSwitchResolvedThisTurn: Record<PlayerSlot, boolean>;
   pendingWish: Record<PlayerSlot, number | null>;
   tauntUntilTurn: Record<PlayerSlot, number>;
   activeEffectsBySlot: Record<PlayerSlot, ActiveEffectState[]>;

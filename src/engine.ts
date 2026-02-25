@@ -9,6 +9,7 @@ import type {
   ActiveEffectState,
   BuffDebuffStat,
   MSPETelemetry,
+  PendingSwitchReason,
   EVSpread,
   EventLog,
   GameState,
@@ -32,7 +33,7 @@ import type {
   InstantCollateral
 } from "./data/types.ts";
 import { mul_div_ceil, mul_div_floor, mul_div_round, normalize_int } from "./int_math.ts";
-import { LEVEL_MAX, LEVEL_MIN, calc_final_stats, validate_ev_spread } from "./stats_calc.ts";
+import { LEVEL_MAX, LEVEL_MIN, calc_final_stats, scaled_level_for_formula, validate_ev_spread } from "./stats_calc.ts";
 
 type Phase = {
   id: string;
@@ -327,6 +328,14 @@ function empty_slot_record<T>(player1: T, player2: T): Record<PlayerSlot, T> {
 }
 
 function empty_pending(): Record<PlayerSlot, boolean> {
+  return empty_slot_record(false, false);
+}
+
+function empty_pending_switch_reason(): Record<PlayerSlot, PendingSwitchReason> {
+  return empty_slot_record<PendingSwitchReason>("none", "none");
+}
+
+function empty_pending_switch_resolved_this_turn(): Record<PlayerSlot, boolean> {
   return empty_slot_record(false, false);
 }
 
@@ -999,6 +1008,8 @@ export function clone_state(state: GameState): GameState {
       player2: clone_player(state.players.player2)
     },
     pendingSwitch: empty_pending(),
+    pendingSwitchReason: empty_pending_switch_reason(),
+    pendingSwitchResolvedThisTurn: empty_pending_switch_resolved_this_turn(),
     pendingWish: empty_pending_wish(),
     tauntUntilTurn: empty_taunt_until_turn(),
     activeEffectsBySlot: empty_active_effects(),
@@ -1028,6 +1039,10 @@ export function clone_state(state: GameState): GameState {
   cloned.spikesArmedByTarget.player2 = !!state.spikesArmedByTarget?.player2;
   cloned.pendingSwitch.player1 = !!state.pendingSwitch?.player1;
   cloned.pendingSwitch.player2 = !!state.pendingSwitch?.player2;
+  cloned.pendingSwitchReason.player1 = state.pendingSwitchReason?.player1 ?? "none";
+  cloned.pendingSwitchReason.player2 = state.pendingSwitchReason?.player2 ?? "none";
+  cloned.pendingSwitchResolvedThisTurn.player1 = !!state.pendingSwitchResolvedThisTurn?.player1;
+  cloned.pendingSwitchResolvedThisTurn.player2 = !!state.pendingSwitchResolvedThisTurn?.player2;
   cloned.pendingWish.player1 = state.pendingWish?.player1 ?? null;
   cloned.pendingWish.player2 = state.pendingWish?.player2 ?? null;
   cloned.tauntUntilTurn.player1 = state.tauntUntilTurn?.player1 ?? 0;
@@ -1108,6 +1123,12 @@ function sync_all_players_shared_mSPE(state: GameState): void {
 function ensure_state_runtime_defaults(state: GameState): void {
   if (!state.pendingSwitch) {
     state.pendingSwitch = empty_pending();
+  }
+  if (!state.pendingSwitchReason) {
+    state.pendingSwitchReason = empty_pending_switch_reason();
+  }
+  if (!state.pendingSwitchResolvedThisTurn) {
+    state.pendingSwitchResolvedThisTurn = empty_pending_switch_resolved_this_turn();
   }
   if (!state.pendingWish) {
     state.pendingWish = empty_pending_wish();
@@ -1192,31 +1213,34 @@ function award_mindgame_point(
   log: EventLog[],
   winner: PlayerSlot,
   loser: PlayerSlot,
-  reason: "switch_vs_switch" | "attack_vs_switch" | "attack_vs_attack",
-  context: Record<string, unknown>
+  reason: "switch_vs_switch" | "attack_vs_switch" | "attack_vs_attack" | "switch_sovietico",
+  context: Record<string, unknown>,
+  score_delta: number = 1
 ): void {
   if (!state.rpsScore) {
     state.rpsScore = empty_rps_score();
   }
+  const normalized_delta = Math.max(1, normalize_int(score_delta, 1, 1));
   const player1_before = state.rpsScore.player1 ?? 0;
   const player2_before = state.rpsScore.player2 ?? 0;
-  state.rpsScore[winner] = (state.rpsScore[winner] ?? 0) + 1;
-  state.rpsScore[loser] = (state.rpsScore[loser] ?? 0) - 1;
+  state.rpsScore[winner] = (state.rpsScore[winner] ?? 0) + normalized_delta;
+  state.rpsScore[loser] = (state.rpsScore[loser] ?? 0) - normalized_delta;
   log.push({
     type: "mindgame_bonus_ready",
     turn: state.turn,
-    summary: `${winner} won mindgame (${reason})`,
+    summary: `${winner} won mindgame (${reason}${normalized_delta > 1 ? ` x${normalized_delta}` : ""})`,
     data: {
       winner,
       loser,
       reason,
+      scoreDelta: normalized_delta,
       ...context
     }
   });
   log.push({
     type: "rps_score_update",
     turn: state.turn,
-    summary: `rps score updated (${winner} +1, ${loser} -1)`,
+    summary: `rps score updated (${winner} +${normalized_delta}, ${loser} -${normalized_delta})`,
     data: {
       winner,
       loser,
@@ -1274,6 +1298,53 @@ function apply_mindgame_bonus_event(state: GameState, log: EventLog[], actions: 
     player1Type: p1_type,
     player2Type: p2_type
   });
+}
+
+function apply_switch_sovietico_predict_bonus(
+  state: GameState,
+  log: EventLog[],
+  resolved_this_turn: Record<PlayerSlot, boolean>,
+  hp_changed: WeakSet<MonsterState>,
+  took_damage_this_turn: Record<PlayerSlot, boolean>
+): boolean {
+  if (!resolved_this_turn.player1 || !resolved_this_turn.player2) {
+    return false;
+  }
+
+  const p1_type = active_monster(state.players.player1).type;
+  const p2_type = active_monster(state.players.player2).type;
+  const type_cmp = compare_monster_type(p1_type, p2_type);
+  if (type_cmp === 0) {
+    log.push({
+      type: "mindgame_bonus_ready",
+      turn: state.turn,
+      summary: "Switch Sovietico predict resolved in tie (no score/passive bonus)",
+      data: {
+        reason: "switch_sovietico",
+        player1Type: p1_type,
+        player2Type: p2_type,
+        scoreDelta: 0
+      }
+    });
+    return true;
+  }
+
+  const winner: PlayerSlot = type_cmp > 0 ? "player1" : "player2";
+  const loser: PlayerSlot = winner === "player1" ? "player2" : "player1";
+  award_mindgame_point(
+    state,
+    log,
+    winner,
+    loser,
+    "switch_sovietico",
+    { player1Type: p1_type, player2Type: p2_type, passiveRepeats: 2 },
+    2
+  );
+
+  const switched: Record<PlayerSlot, boolean> = { player1: true, player2: true };
+  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn);
+  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn);
+  return true;
 }
 
 function apply_spikes_on_switch(
@@ -2150,11 +2221,12 @@ function apply_damage_move(
   }
 
   const effective_attack = effective_attack_for_slot(state, player_slot, attacker);
-  const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
+  const formula_level = scaled_level_for_formula(attacker.level);
+  const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * formula_level;
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense_base = effective_defense_for_slot(state, opponent_slot, defender);
   const effective_defense = effective_defense_base <= 0 ? 1 : effective_defense_base;
-  const level_term = mul_div_floor(1, attacker.level, 1) + 30;
+  const level_term = mul_div_floor(2, formula_level, 5) + 2;
   let raw_damage = 0;
   if (spec.id === "throw") {
     const scaled_by_defense = mul_div_floor(level_term * THROW_FIXED_OFFENSE_TERM, 1, effective_defense);
@@ -2598,6 +2670,8 @@ function apply_move(
       const switch_player = state.players[slot_id];
       if (first_available_switch_target(switch_player) === null) {
         state.pendingSwitch[slot_id] = false;
+        state.pendingSwitchReason[slot_id] = "none";
+        state.pendingSwitchResolvedThisTurn[slot_id] = false;
         log.push({
           type: "switch_invalid",
           turn: state.turn,
@@ -2612,6 +2686,8 @@ function apply_move(
         continue;
       }
       state.pendingSwitch[slot_id] = true;
+      state.pendingSwitchReason[slot_id] = "switch_sovietico";
+      state.pendingSwitchResolvedThisTurn[slot_id] = false;
       queued_slots.push(slot_id);
     }
 
@@ -3332,6 +3408,8 @@ export function create_initial_state(
       player2: build_player("player2")
     },
     pendingSwitch: empty_pending(),
+    pendingSwitchReason: empty_pending_switch_reason(),
+    pendingSwitchResolvedThisTurn: empty_pending_switch_resolved_this_turn(),
     pendingWish: empty_pending_wish(),
     tauntUntilTurn: empty_taunt_until_turn(),
     activeEffectsBySlot: empty_active_effects(),
@@ -3366,7 +3444,13 @@ export function resolve_turn(
   }
 
   ensure_state_runtime_defaults(next);
+  const switch_sovietico_resolved_this_turn: Record<PlayerSlot, boolean> = {
+    player1: !!next.pendingSwitchResolvedThisTurn.player1,
+    player2: !!next.pendingSwitchResolvedThisTurn.player2
+  };
   next.pendingSwitch = empty_pending();
+  next.pendingSwitchReason = empty_pending_switch_reason();
+  next.pendingSwitchResolvedThisTurn = empty_pending_switch_resolved_this_turn();
 
   const actions = build_actions(intents, next);
   reset_protect_flags(next);
@@ -3383,7 +3467,16 @@ export function resolve_turn(
       if (progress !== "continue") {
         break;
       }
-      apply_mindgame_bonus_event(next, log, actions);
+      const sovietico_bonus_applied = apply_switch_sovietico_predict_bonus(
+        next,
+        log,
+        switch_sovietico_resolved_this_turn,
+        hp_changed_this_turn,
+        took_damage_this_turn
+      );
+      if (!sovietico_bonus_applied) {
+        apply_mindgame_bonus_event(next, log, actions);
+      }
       mindgame_checked = true;
       progress = check_zero_hp_match_result(next, log);
       if (progress !== "continue") {
@@ -3511,8 +3604,11 @@ export function apply_forced_switch(
   if (error) {
     return { state: next, log, error };
   }
+  const switch_reason = next.pendingSwitchReason?.[slot] ?? "none";
   perform_switch(next, log, slot, targetIndex, "forced_switch");
   next.pendingSwitch[slot] = false;
+  next.pendingSwitchReason[slot] = "none";
+  next.pendingSwitchResolvedThisTurn[slot] = switch_reason === "switch_sovietico";
   refresh_mSPE_telemetry(next);
   return { state: next, log };
 }
