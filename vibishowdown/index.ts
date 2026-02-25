@@ -61,7 +61,7 @@ type MonsterTooltipPayload = {
   totalPercent: { attack: number; defense: number; speed: number };
 };
 
-type SwitchModalMode = "intent" | "forced" | "bounce_kick";
+type SwitchModalMode = "intent" | "forced" | "bounce_kick" | "switch_sovietico";
 
 const LOBBY_MOVE_SLOTS = 3;
 const STARTER_MONSTER_IDS = new Set<string>(["armoth", "kairus", "farien"]);
@@ -266,7 +266,7 @@ let chat_ready = false;
 let forced_switch_target_index: number | null = null;
 let forced_switch_target_turn = 0;
 let switch_modal_mode: SwitchModalMode = "intent";
-let bounce_kick_move_index: number | null = null;
+let switch_target_move_index: number | null = null;
 let room_game_count = 0;
 
 const ICON_ALIASES: Record<string, string> = {
