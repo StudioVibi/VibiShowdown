@@ -1,4 +1,5 @@
 node_modules/
+vibishowdown/dist/index.js
 
 # Internal docs/prompts (not needed for app runtime)
 prompt2.txt
