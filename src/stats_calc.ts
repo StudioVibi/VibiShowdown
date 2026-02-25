@@ -37,7 +37,7 @@ export const EV_TOTAL_MAX = 508;
 export const LEVEL_MIN = 1;
 export const LEVEL_MAX = 12;
 export const FORMULA_LEVEL_MIN = 1;
-export const FORMULA_LEVEL_MAX = 12;
+export const FORMULA_LEVEL_MAX = 100;
 
 export function empty_ev_spread(): EVSpread {
   return { hp: 0, atk: 0, def: 0, spe: 0 };

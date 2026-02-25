@@ -2497,6 +2497,14 @@ function has_forced_switch_target_for_current_turn(): boolean {
   );
 }
 
+function has_pending_forced_choice_for_current_turn(): boolean {
+  return has_pending_switch() && !has_forced_switch_target_for_current_turn();
+}
+
+function is_switch_modal_lock_active(): boolean {
+  return switch_modal_mode === "forced" && has_pending_forced_choice_for_current_turn();
+}
+
 function current_active_monster_for_intent(): MonsterState | null {
   if (!latest_state || !slot) {
     return null;
@@ -2626,7 +2634,7 @@ function send_switch_intent(targetIndex: number): void {
   if (has_pending_switch()) {
     if (relay_server_managed) {
       if (try_post({ $: "forced_switch", targetIndex, player_id })) {
-        close_switch_modal();
+        close_switch_modal(true);
       }
       return;
     }
@@ -2658,9 +2666,13 @@ function send_surrender(): void {
   try_post({ $: "surrender", player_id });
 }
 
-function close_switch_modal(): void {
+function close_switch_modal(force: boolean = false): void {
+  if (!force && is_switch_modal_lock_active()) {
+    return;
+  }
   switch_modal_mode = "intent";
   switch_target_move_index = null;
+  switch_close.disabled = false;
   if (switch_title) {
     switch_title.textContent = "Switch Pokemon";
   }
@@ -2689,6 +2701,9 @@ function open_switch_modal(mode: SwitchModalMode = "intent", move_index?: number
       switch_title.textContent = "Switch Pokemon";
     }
   }
+  const lock_modal = mode === "forced" && has_pending_forced_choice_for_current_turn();
+  switch_close.disabled = lock_modal;
+  switch_options.classList.add("switch-options-sovietico");
   switch_options.innerHTML = "";
   const player = latest_state.players[slot];
   const active_index = player.activeIndex;
@@ -2705,8 +2720,14 @@ function open_switch_modal(mode: SwitchModalMode = "intent", move_index?: number
     for (const entry of options) {
       const button = document.createElement("button");
       button.type = "button";
+      button.classList.add("switch-sovietico-option");
       button.disabled = false;
-      button.textContent = `${entry.mon.name}`;
+      const icon = document.createElement("img");
+      icon.src = icon_path(entry.mon.id);
+      icon.alt = monster_label(entry.mon.id);
+      const label = document.createElement("span");
+      label.textContent = monster_label(entry.mon.id);
+      button.append(icon, label);
       button.addEventListener("click", () => {
         if (switch_modal_mode === "bounce_kick") {
           if (!Number.isInteger(switch_target_move_index)) {
@@ -2874,7 +2895,7 @@ function reset_to_lobby_view(): void {
   selected_intent = null;
   selected_intent_turn = 0;
   clear_forced_switch_target();
-  close_switch_modal();
+  close_switch_modal(true);
   match_end.classList.remove("open");
   prematch.style.display = "";
   document.body.classList.add("prematch-open");
@@ -3092,7 +3113,8 @@ function update_side_panel(
   state: GameState,
   slot_id: PlayerSlot,
   skip_meta: boolean,
-  skip_bar: boolean
+  skip_bar: boolean,
+  force_hidden: boolean = false
 ): void {
   const player = state.players[slot_id];
   const active = player.team[player.activeIndex];
@@ -3110,7 +3132,7 @@ function update_side_panel(
   if (!skip_bar) {
     hp_bar.style.width = `${panel_hp_percent(active)}%`;
   }
-  if (pending_replacement) {
+  if (pending_replacement || force_hidden) {
     sprite.removeAttribute("src");
     sprite.alt = "";
     sprite.style.visibility = "hidden";
@@ -3130,8 +3152,27 @@ function update_panels(
   const viewer_slot = slot ?? (is_spectator ? "player1" : null);
   if (!viewer_slot) return;
   const enemy_slot = viewer_slot === "player1" ? "player2" : "player1";
-  update_side_panel("player", state, viewer_slot, !!opts?.skipMeta?.player, !!opts?.skipBar?.player);
-  update_side_panel("enemy", state, enemy_slot, !!opts?.skipMeta?.enemy, !!opts?.skipBar?.enemy);
+  const hide_panels_for_pending_choice =
+    !!slot &&
+    !is_spectator &&
+    state.pendingSwitch?.[slot] &&
+    !(typeof forced_switch_target_index === "number" && forced_switch_target_turn === current_turn);
+  update_side_panel(
+    "player",
+    state,
+    viewer_slot,
+    !!opts?.skipMeta?.player,
+    !!opts?.skipBar?.player,
+    hide_panels_for_pending_choice
+  );
+  update_side_panel(
+    "enemy",
+    state,
+    enemy_slot,
+    !!opts?.skipMeta?.enemy,
+    !!opts?.skipBar?.enemy,
+    hide_panels_for_pending_choice
+  );
   render_effects(state, viewer_slot, enemy_slot);
   update_bench(state, viewer_slot);
 }
@@ -3413,7 +3454,11 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
   } else {
     update_panels(data.state);
   }
-  close_switch_modal();
+  if (data.state.status === "ended") {
+    close_switch_modal(true);
+  } else {
+    close_switch_modal();
+  }
   if (data.log.length) {
     log_events(data.log);
   }

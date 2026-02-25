@@ -2085,7 +2085,7 @@ var EV_TOTAL_MAX = 508;
 var LEVEL_MIN = 1;
 var LEVEL_MAX = 12;
 var FORMULA_LEVEL_MIN = 1;
-var FORMULA_LEVEL_MAX = 12;
+var FORMULA_LEVEL_MAX = 100;
 function empty_ev_spread() {
   return { hp: 0, atk: 0, def: 0, spe: 0 };
 }
@@ -2575,6 +2575,12 @@ function empty_slot_record(player1, player2) {
   return { player1, player2 };
 }
 function empty_pending() {
+  return empty_slot_record(false, false);
+}
+function empty_pending_switch_reason() {
+  return empty_slot_record("none", "none");
+}
+function empty_pending_switch_resolved_this_turn() {
   return empty_slot_record(false, false);
 }
 function empty_rps_score() {
@@ -3098,6 +3104,8 @@ function clone_state(state) {
       player2: clone_player(state.players.player2)
     },
     pendingSwitch: empty_pending(),
+    pendingSwitchReason: empty_pending_switch_reason(),
+    pendingSwitchResolvedThisTurn: empty_pending_switch_resolved_this_turn(),
     pendingWish: empty_pending_wish(),
     tauntUntilTurn: empty_taunt_until_turn(),
     activeEffectsBySlot: empty_active_effects(),
@@ -3117,6 +3125,10 @@ function clone_state(state) {
   cloned.spikesArmedByTarget.player2 = !!state.spikesArmedByTarget?.player2;
   cloned.pendingSwitch.player1 = !!state.pendingSwitch?.player1;
   cloned.pendingSwitch.player2 = !!state.pendingSwitch?.player2;
+  cloned.pendingSwitchReason.player1 = state.pendingSwitchReason?.player1 ?? "none";
+  cloned.pendingSwitchReason.player2 = state.pendingSwitchReason?.player2 ?? "none";
+  cloned.pendingSwitchResolvedThisTurn.player1 = !!state.pendingSwitchResolvedThisTurn?.player1;
+  cloned.pendingSwitchResolvedThisTurn.player2 = !!state.pendingSwitchResolvedThisTurn?.player2;
   cloned.pendingWish.player1 = state.pendingWish?.player1 ?? null;
   cloned.pendingWish.player2 = state.pendingWish?.player2 ?? null;
   cloned.tauntUntilTurn.player1 = state.tauntUntilTurn?.player1 ?? 0;
@@ -3188,6 +3200,12 @@ function sync_all_players_shared_mSPE(state) {
 function ensure_state_runtime_defaults(state) {
   if (!state.pendingSwitch) {
     state.pendingSwitch = empty_pending();
+  }
+  if (!state.pendingSwitchReason) {
+    state.pendingSwitchReason = empty_pending_switch_reason();
+  }
+  if (!state.pendingSwitchResolvedThisTurn) {
+    state.pendingSwitchResolvedThisTurn = empty_pending_switch_resolved_this_turn();
   }
   if (!state.pendingWish) {
     state.pendingWish = empty_pending_wish();
@@ -3261,29 +3279,31 @@ function switch_target_type_for_slot(state, actions, slot) {
   }
   return team[action.targetIndex].type;
 }
-function award_mindgame_point(state, log, winner, loser, reason, context) {
+function award_mindgame_point(state, log, winner, loser, reason, context, score_delta = 1) {
   if (!state.rpsScore) {
     state.rpsScore = empty_rps_score();
   }
+  const normalized_delta = Math.max(1, normalize_int(score_delta, 1, 1));
   const player1_before = state.rpsScore.player1 ?? 0;
   const player2_before = state.rpsScore.player2 ?? 0;
-  state.rpsScore[winner] = (state.rpsScore[winner] ?? 0) + 1;
-  state.rpsScore[loser] = (state.rpsScore[loser] ?? 0) - 1;
+  state.rpsScore[winner] = (state.rpsScore[winner] ?? 0) + normalized_delta;
+  state.rpsScore[loser] = (state.rpsScore[loser] ?? 0) - normalized_delta;
   log.push({
     type: "mindgame_bonus_ready",
     turn: state.turn,
-    summary: `${winner} won mindgame (${reason})`,
+    summary: `${winner} won mindgame (${reason}${normalized_delta > 1 ? ` x${normalized_delta}` : ""})`,
     data: {
       winner,
       loser,
       reason,
+      scoreDelta: normalized_delta,
       ...context
     }
   });
   log.push({
     type: "rps_score_update",
     turn: state.turn,
-    summary: `rps score updated (${winner} +1, ${loser} -1)`,
+    summary: `rps score updated (${winner} +${normalized_delta}, ${loser} -${normalized_delta})`,
     data: {
       winner,
       loser,
@@ -3336,6 +3356,35 @@ function apply_mindgame_bonus_event(state, log, actions) {
     player1Type: p1_type,
     player2Type: p2_type
   });
+}
+function apply_switch_sovietico_predict_bonus(state, log, resolved_this_turn, hp_changed, took_damage_this_turn) {
+  if (!resolved_this_turn.player1 || !resolved_this_turn.player2) {
+    return false;
+  }
+  const p1_type = active_monster(state.players.player1).type;
+  const p2_type = active_monster(state.players.player2).type;
+  const type_cmp = compare_monster_type(p1_type, p2_type);
+  if (type_cmp === 0) {
+    log.push({
+      type: "mindgame_bonus_ready",
+      turn: state.turn,
+      summary: "Switch Sovietico predict resolved in tie (no score/passive bonus)",
+      data: {
+        reason: "switch_sovietico",
+        player1Type: p1_type,
+        player2Type: p2_type,
+        scoreDelta: 0
+      }
+    });
+    return true;
+  }
+  const winner = type_cmp > 0 ? "player1" : "player2";
+  const loser = winner === "player1" ? "player2" : "player1";
+  award_mindgame_point(state, log, winner, loser, "switch_sovietico", { player1Type: p1_type, player2Type: p2_type, passiveRepeats: 2 }, 2);
+  const switched = { player1: true, player2: true };
+  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn);
+  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn);
+  return true;
 }
 function apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn) {
   if (!(state.spikesArmedByTarget?.[slot] ?? false)) {
@@ -4029,11 +4078,12 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
     return;
   }
   const effective_attack = effective_attack_for_slot(state, player_slot, attacker);
-  const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * attacker.level;
+  const formula_level = scaled_level_for_formula(attacker.level);
+  const multiplier100 = spec.attackMultiplier100 + (spec.attackMultiplierPerLevel100 ?? 0) * formula_level;
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense_base = effective_defense_for_slot(state, opponent_slot, defender);
   const effective_defense = effective_defense_base <= 0 ? 1 : effective_defense_base;
-  const level_term = mul_div_floor(1, attacker.level, 1) + 30;
+  const level_term = mul_div_floor(2, formula_level, 5) + 2;
   let raw_damage = 0;
   if (spec.id === "throw") {
     const scaled_by_defense = mul_div_floor(level_term * THROW_FIXED_OFFENSE_TERM, 1, effective_defense);
@@ -4403,6 +4453,8 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       const switch_player = state.players[slot_id];
       if (first_available_switch_target(switch_player) === null) {
         state.pendingSwitch[slot_id] = false;
+        state.pendingSwitchReason[slot_id] = "none";
+        state.pendingSwitchResolvedThisTurn[slot_id] = false;
         log.push({
           type: "switch_invalid",
           turn: state.turn,
@@ -4417,6 +4469,8 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
         continue;
       }
       state.pendingSwitch[slot_id] = true;
+      state.pendingSwitchReason[slot_id] = "switch_sovietico";
+      state.pendingSwitchResolvedThisTurn[slot_id] = false;
       queued_slots.push(slot_id);
     }
     log.push({
@@ -5045,6 +5099,8 @@ function create_initial_state(teams, names) {
       player2: build_player("player2")
     },
     pendingSwitch: empty_pending(),
+    pendingSwitchReason: empty_pending_switch_reason(),
+    pendingSwitchResolvedThisTurn: empty_pending_switch_resolved_this_turn(),
     pendingWish: empty_pending_wish(),
     tauntUntilTurn: empty_taunt_until_turn(),
     activeEffectsBySlot: empty_active_effects(),
@@ -5073,7 +5129,13 @@ function resolve_turn(state, intents) {
     return { state: next, log };
   }
   ensure_state_runtime_defaults(next);
+  const switch_sovietico_resolved_this_turn = {
+    player1: !!next.pendingSwitchResolvedThisTurn.player1,
+    player2: !!next.pendingSwitchResolvedThisTurn.player2
+  };
   next.pendingSwitch = empty_pending();
+  next.pendingSwitchReason = empty_pending_switch_reason();
+  next.pendingSwitchResolvedThisTurn = empty_pending_switch_resolved_this_turn();
   const actions = build_actions(intents, next);
   reset_protect_flags(next);
   let progress = check_zero_hp_match_result(next, log);
@@ -5088,7 +5150,10 @@ function resolve_turn(state, intents) {
       if (progress !== "continue") {
         break;
       }
-      apply_mindgame_bonus_event(next, log, actions);
+      const sovietico_bonus_applied = apply_switch_sovietico_predict_bonus(next, log, switch_sovietico_resolved_this_turn, hp_changed_this_turn, took_damage_this_turn);
+      if (!sovietico_bonus_applied) {
+        apply_mindgame_bonus_event(next, log, actions);
+      }
       mindgame_checked = true;
       progress = check_zero_hp_match_result(next, log);
       if (progress !== "continue") {
@@ -5178,8 +5243,11 @@ function apply_forced_switch(state, slot, targetIndex) {
   if (error) {
     return { state: next, log, error };
   }
+  const switch_reason = next.pendingSwitchReason?.[slot] ?? "none";
   perform_switch(next, log, slot, targetIndex, "forced_switch");
   next.pendingSwitch[slot] = false;
+  next.pendingSwitchReason[slot] = "none";
+  next.pendingSwitchResolvedThisTurn[slot] = switch_reason === "switch_sovietico";
   refresh_mSPE_telemetry(next);
   return { state: next, log };
 }
@@ -7425,6 +7493,12 @@ function clear_forced_switch_target() {
 function has_forced_switch_target_for_current_turn() {
   return has_pending_switch() && typeof forced_switch_target_index === "number" && forced_switch_target_turn === current_turn;
 }
+function has_pending_forced_choice_for_current_turn() {
+  return has_pending_switch() && !has_forced_switch_target_for_current_turn();
+}
+function is_switch_modal_lock_active() {
+  return switch_modal_mode === "forced" && has_pending_forced_choice_for_current_turn();
+}
 function current_active_monster_for_intent() {
   if (!latest_state || !slot) {
     return null;
@@ -7543,7 +7617,7 @@ function send_switch_intent(targetIndex) {
   if (has_pending_switch()) {
     if (relay_server_managed) {
       if (try_post({ $: "forced_switch", targetIndex, player_id })) {
-        close_switch_modal();
+        close_switch_modal(true);
       }
       return;
     }
@@ -7574,9 +7648,13 @@ function send_surrender() {
     return;
   try_post({ $: "surrender", player_id });
 }
-function close_switch_modal() {
+function close_switch_modal(force = false) {
+  if (!force && is_switch_modal_lock_active()) {
+    return;
+  }
   switch_modal_mode = "intent";
   switch_target_move_index = null;
+  switch_close.disabled = false;
   if (switch_title) {
     switch_title.textContent = "Switch Pokemon";
   }
@@ -7606,6 +7684,9 @@ function open_switch_modal(mode = "intent", move_index) {
       switch_title.textContent = "Switch Pokemon";
     }
   }
+  const lock_modal = mode === "forced" && has_pending_forced_choice_for_current_turn();
+  switch_close.disabled = lock_modal;
+  switch_options.classList.add("switch-options-sovietico");
   switch_options.innerHTML = "";
   const player = latest_state.players[slot];
   const active_index = player.activeIndex;
@@ -7620,8 +7701,14 @@ function open_switch_modal(mode = "intent", move_index) {
     for (const entry of options) {
       const button = document.createElement("button");
       button.type = "button";
+      button.classList.add("switch-sovietico-option");
       button.disabled = false;
-      button.textContent = `${entry.mon.name}`;
+      const icon = document.createElement("img");
+      icon.src = icon_path(entry.mon.id);
+      icon.alt = monster_label(entry.mon.id);
+      const label = document.createElement("span");
+      label.textContent = monster_label(entry.mon.id);
+      button.append(icon, label);
       button.addEventListener("click", () => {
         if (switch_modal_mode === "bounce_kick") {
           if (!Number.isInteger(switch_target_move_index)) {
@@ -7779,7 +7866,7 @@ function reset_to_lobby_view() {
   selected_intent = null;
   selected_intent_turn = 0;
   clear_forced_switch_target();
-  close_switch_modal();
+  close_switch_modal(true);
   match_end.classList.remove("open");
   prematch.style.display = "";
   document.body.classList.add("prematch-open");
@@ -7968,7 +8055,7 @@ function render_effects(state, player_slot, enemy_slot) {
 function panel_hp_percent(mon) {
   return Math.max(0, Math.min(1, mon.hp / mon.maxHp)) * 100;
 }
-function update_side_panel(side, state, slot_id, skip_meta, skip_bar) {
+function update_side_panel(side, state, slot_id, skip_meta, skip_bar, force_hidden = false) {
   const player = state.players[slot_id];
   const active = player.team[player.activeIndex];
   const pending_replacement = !!state.pendingSwitch?.[slot_id] && active.hp <= 0;
@@ -7984,7 +8071,7 @@ function update_side_panel(side, state, slot_id, skip_meta, skip_bar) {
   if (!skip_bar) {
     hp_bar.style.width = `${panel_hp_percent(active)}%`;
   }
-  if (pending_replacement) {
+  if (pending_replacement || force_hidden) {
     sprite.removeAttribute("src");
     sprite.alt = "";
     sprite.style.visibility = "hidden";
@@ -8001,8 +8088,9 @@ function update_panels(state, opts) {
   if (!viewer_slot)
     return;
   const enemy_slot = viewer_slot === "player1" ? "player2" : "player1";
-  update_side_panel("player", state, viewer_slot, !!opts?.skipMeta?.player, !!opts?.skipBar?.player);
-  update_side_panel("enemy", state, enemy_slot, !!opts?.skipMeta?.enemy, !!opts?.skipBar?.enemy);
+  const hide_panels_for_pending_choice = !!slot && !is_spectator && state.pendingSwitch?.[slot] && !(typeof forced_switch_target_index === "number" && forced_switch_target_turn === current_turn);
+  update_side_panel("player", state, viewer_slot, !!opts?.skipMeta?.player, !!opts?.skipBar?.player, hide_panels_for_pending_choice);
+  update_side_panel("enemy", state, enemy_slot, !!opts?.skipMeta?.enemy, !!opts?.skipBar?.enemy, hide_panels_for_pending_choice);
   render_effects(state, viewer_slot, enemy_slot);
   update_bench(state, viewer_slot);
 }
@@ -8253,7 +8341,11 @@ function handle_state(data) {
   } else {
     update_panels(data.state);
   }
-  close_switch_modal();
+  if (data.state.status === "ended") {
+    close_switch_modal(true);
+  } else {
+    close_switch_modal();
+  }
   if (data.log.length) {
     log_events(data.log);
   }
