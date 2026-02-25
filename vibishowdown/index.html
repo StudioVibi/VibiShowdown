@@ -1787,6 +1787,13 @@
       </div>
       <div id="stat-tooltip" class="stat-tooltip" aria-hidden="true"></div>
     </div>
-    <script type="module" src="./dist/index.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "vibinet": "/node_modules/vibinet/dist/index.js"
+        }
+      }
+    </script>
+    <script type="module" src="./index.ts"></script>
   </body>
 </html>

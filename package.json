@@ -2,7 +2,7 @@
   "name": "vibi-showdown",
   "type": "module",
   "scripts": {
-    "setup": "npm install && npm run check && npm run check:stats && npm run check:integrity && npm run build:web",
+    "setup": "npm install && npm run check && npm run check:stats && npm run check:integrity",
     "setup:run": "npm run setup && npm run dev",
     "check": "tsc --target esnext --noEmit --skipLibCheck",
     "check:stats": "node --experimental-strip-types src/stats_calc-test.ts",
