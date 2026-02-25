@@ -17,7 +17,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     name: "Baby Dragon",
     role: "Snorlax",
     type: type_for_index(0),
-    stats: { level: 12, maxHp: 575, attack: 438, defense: 250, speed: 105 },
+    stats: { level: 12, maxHp: 100, attack: 110, defense: 130, speed: 30 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -28,7 +28,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     name: "Croni",
     role: "Ninjask",
     type: type_for_index(1),
-    stats: { level: 12, maxHp: 163, attack: 355, defense: 167, speed: 646 },
+    stats: { level: 12, maxHp: 100, attack: 35, defense: 60, speed: 160 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -105,10 +105,10 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     name: "Armoth",
     role: "Cloyster Template",
     type: "def",
-    stats: { level: 12, maxHp: 117, attack: 375, defense: 730, speed: 271 },
+    stats: { level: 12, maxHp: 117, attack: 50, defense: 160, speed: 70 },
     possibleMoves: ["bait", "seismic_toss", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["bait", "seismic_toss", "none"],
+    defaultMoves: ["bait", "seismic_toss", "run", "none"],
     defaultPassive: "none"
   },
   {
@@ -116,10 +116,10 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     name: "Kairus",
     role: "Absol Template",
     type: "atk",
-    stats: { level: 12, maxHp: 180, attack: 521, defense: 230, speed: 430 },
-    possibleMoves: ["kick", "throw", "none"],
+    stats: { level: 12, maxHp: 180, attack: 115, defense: 75, speed: 130 },
+    possibleMoves: ["kick", "throw", "run", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["kick", "throw", "none"],
+    defaultMoves: ["kick", "throw", "run", "none"],
     defaultPassive: "none"
   },
   {
@@ -127,10 +127,10 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     name: "Farien",
     role: "Celebi Template",
     type: "buf",
-    stats: { level: 12, maxHp: 325, attack: 396, defense: 396, speed: 396 },
-    possibleMoves: ["switch_sovietico", "team_cure", "none"],
+    stats: { level: 12, maxHp: 325, attack: 100, defense: 100, speed: 100 },
+    possibleMoves: ["switch_sovietico", "team_cure", "run", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["switch_sovietico", "team_cure", "none"],
+    defaultMoves: ["switch_sovietico", "team_cure", "run", "none"],
     defaultPassive: "none"
   }
 ];
