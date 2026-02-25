@@ -2156,7 +2156,7 @@ function apply_damage_move(
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense_base = effective_defense_for_slot(state, opponent_slot, defender);
   const effective_defense = effective_defense_base <= 0 ? 1 : effective_defense_base;
-  const level_term = mul_div_floor(2, attacker.level, 5) + 2;
+  const level_term = mul_div_floor(1, attacker.level, 1) + 30;
   let raw_damage = 0;
   if (spec.id === "throw") {
     const scaled_by_defense = mul_div_floor(level_term * THROW_FIXED_OFFENSE_TERM, 1, effective_defense);
