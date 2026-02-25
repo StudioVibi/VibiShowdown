@@ -1960,7 +1960,7 @@ var MONSTER_ROSTER = [
     name: "Baby Dragon",
     role: "Snorlax",
     type: type_for_index(0),
-    stats: { level: 12, maxHp: 575, attack: 438, defense: 250, speed: 105 },
+    stats: { level: 12, maxHp: 100, attack: 110, defense: 130, speed: 30 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -1971,7 +1971,7 @@ var MONSTER_ROSTER = [
     name: "Croni",
     role: "Ninjask",
     type: type_for_index(1),
-    stats: { level: 12, maxHp: 163, attack: 355, defense: 167, speed: 646 },
+    stats: { level: 12, maxHp: 100, attack: 35, defense: 60, speed: 160 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "agility"],
@@ -2048,10 +2048,10 @@ var MONSTER_ROSTER = [
     name: "Armoth",
     role: "Cloyster Template",
     type: "def",
-    stats: { level: 12, maxHp: 117, attack: 375, defense: 730, speed: 271 },
+    stats: { level: 12, maxHp: 117, attack: 50, defense: 160, speed: 70 },
     possibleMoves: ["bait", "seismic_toss", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["bait", "seismic_toss", "none"],
+    defaultMoves: ["bait", "seismic_toss", "run", "none"],
     defaultPassive: "none"
   },
   {
@@ -2059,10 +2059,10 @@ var MONSTER_ROSTER = [
     name: "Kairus",
     role: "Absol Template",
     type: "atk",
-    stats: { level: 12, maxHp: 180, attack: 521, defense: 230, speed: 430 },
-    possibleMoves: ["kick", "throw", "none"],
+    stats: { level: 12, maxHp: 180, attack: 115, defense: 75, speed: 130 },
+    possibleMoves: ["kick", "throw", "run", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["kick", "throw", "none"],
+    defaultMoves: ["kick", "throw", "run", "none"],
     defaultPassive: "none"
   },
   {
@@ -2070,10 +2070,10 @@ var MONSTER_ROSTER = [
     name: "Farien",
     role: "Celebi Template",
     type: "buf",
-    stats: { level: 12, maxHp: 325, attack: 396, defense: 396, speed: 396 },
-    possibleMoves: ["switch_sovietico", "team_cure", "none"],
+    stats: { level: 12, maxHp: 325, attack: 100, defense: 100, speed: 100 },
+    possibleMoves: ["switch_sovietico", "team_cure", "run", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["switch_sovietico", "team_cure", "none"],
+    defaultMoves: ["switch_sovietico", "team_cure", "run", "none"],
     defaultPassive: "none"
   }
 ];
@@ -2085,7 +2085,7 @@ var EV_TOTAL_MAX = 508;
 var LEVEL_MIN = 1;
 var LEVEL_MAX = 12;
 var FORMULA_LEVEL_MIN = 1;
-var FORMULA_LEVEL_MAX = 100;
+var FORMULA_LEVEL_MAX = 12;
 function empty_ev_spread() {
   return { hp: 0, atk: 0, def: 0, spe: 0 };
 }
@@ -4022,7 +4022,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense_base = effective_defense_for_slot(state, opponent_slot, defender);
   const effective_defense = effective_defense_base <= 0 ? 1 : effective_defense_base;
-  const level_term = mul_div_floor(2, attacker.level, 5) + 2;
+  const level_term = mul_div_floor(1, attacker.level, 1) + 30;
   let raw_damage = 0;
   if (spec.id === "throw") {
     const scaled_by_defense = mul_div_floor(level_term * THROW_FIXED_OFFENSE_TERM, 1, effective_defense);
