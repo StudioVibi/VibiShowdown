@@ -3,7 +3,7 @@ import type { MoveCatalogEntry } from "./types.ts";
 export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
   { id: "kick", label: "Kick", phaseId: "attack_01", attackMultiplier100: 120 },
-  { id: "throw", label: "Throw", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 90 },
+  { id: "throw", label: "Throw", phaseId: "attack_01", attackMultiplier100: 100 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "run", label: "Run", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "wish", label: "Wish", phaseId: "attack_01", attackMultiplier100: 0 },

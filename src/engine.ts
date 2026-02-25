@@ -89,6 +89,7 @@ const INITIATIVE_WITHOUT_SPEED: Phase["initiative"] = ["attack", "hp", "defense"
 const STAT_STAGE_MIN = -6;
 const STAT_STAGE_MAX = 6;
 const TYPE_PASSIVE_ATK_TRUE_DAMAGE = 10;
+const THROW_FIXED_OFFENSE_TERM = 90 * 90;
 const TYPE_PASSIVE_DEF_ARMOR_STACK_MAX = 5;
 const TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT = 10;
 const TYPE_PASSIVE_BUF_REGEN_PER_STACK = 5;
@@ -2108,7 +2109,10 @@ function apply_damage_move(
   const effective_defense = effective_defense_base <= 0 ? 1 : effective_defense_base;
   const level_term = mul_div_floor(2, attacker.level, 5) + 2;
   let raw_damage = 0;
-  if (damage_type === "flat") {
+  if (spec.id === "throw") {
+    const scaled_by_defense = mul_div_floor(level_term * THROW_FIXED_OFFENSE_TERM, 1, effective_defense);
+    raw_damage = mul_div_floor(scaled_by_defense, 1, 50) + 2;
+  } else if (damage_type === "flat") {
     raw_damage = spec.flatDamage ?? 0;
   } else {
     if (multiplier100 > 0 && effective_attack > 0) {
@@ -2222,6 +2226,17 @@ function apply_damage_move(
     });
   } else if (spec.id === "seismic_toss") {
     const detail = `Seismic Toss: dmg = flat ${spec.flatDamage ?? 0} (ignores defense); final=${final_damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: phase_id,
+      summary: detail,
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "throw") {
+    const detail = `Throw: dmg = floor(((((2*L)/5)+2)*(90*90)/D)/50)+2 = floor(((${level_term}*8100/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }`;
     log.push({
