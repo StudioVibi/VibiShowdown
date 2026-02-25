@@ -3382,8 +3382,7 @@ function apply_switch_sovietico_predict_bonus(state, log, resolved_this_turn, hp
   const loser = winner === "player1" ? "player2" : "player1";
   award_mindgame_point(state, log, winner, loser, "switch_sovietico", { player1Type: p1_type, player2Type: p2_type, passiveRepeats: 2 }, 2);
   const switched = { player1: true, player2: true };
-  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn);
-  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn);
+  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn, 2);
   return true;
 }
 function apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn) {

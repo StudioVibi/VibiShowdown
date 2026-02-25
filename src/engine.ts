@@ -1342,8 +1342,7 @@ function apply_switch_sovietico_predict_bonus(
   );
 
   const switched: Record<PlayerSlot, boolean> = { player1: true, player2: true };
-  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn);
-  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn);
+  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn, 2);
   return true;
 }
 

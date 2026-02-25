@@ -1,0 +1,160 @@
+MOVES - EXPLICACAO DO COMPORTAMENTO ATUAL
+
+Referencia de codigo:
+- Catalogo: src/data/moves.ts
+- Resolucao: src/engine.ts
+
+Ordem geral do turno
+1) switch
+2) guard
+3) attack_01
+
+Dentro da mesma fase:
+- Quick Attack tem prioridade sobre moves nao-quick.
+- Se ambos usam Quick Attack, o desempate ignora speed e usa: attack, hp, defense.
+- Sem Quick Attack, o desempate usa: speed, attack, hp, defense.
+
+Regra de dano base (moves escalados)
+- Dano = round((ATK_efetivo * multiplier100) / DEF_efetiva)
+- DEF_efetiva minima: 1.
+- Se o alvo estiver com Protect ativo, o dano final vira 0.
+
+ATK_efetivo
+- Normal: attack atual.
+- Com Choice Band: round(attack * 3 / 2).
+
+Move por move
+
+1) Quick Attack
+- Fase: attack_01
+- Multiplier: 66
+- Tipo: scaled
+- Formula pratica: round(ATK_efetivo * 66 / DEF)
+- Extra: ganha prioridade de ordem na fase attack_01.
+
+2) Return
+- Fase: attack_01
+- Multiplier: 72 + (4 * level)
+- Tipo: scaled
+- Formula pratica: round(ATK_efetivo * (72 + 4*level) / DEF)
+
+3) Double-Edge
+- Fase: attack_01
+- Multiplier: 120
+- Tipo: scaled
+- Formula pratica: round(ATK_efetivo * 120 / DEF)
+- Recoil: round(dano_final / 3) no atacante.
+
+4) Seismic Toss
+- Fase: attack_01
+- Tipo: flat
+- Dano fixo: 35
+- Ignora defesa no calculo de dano base.
+
+5) Screech
+- Fase: attack_01
+- Nao causa dano direto.
+- Efeito: DEF do alvo vira floor(DEF / 2), minimo 1.
+
+6) Agility
+- Fase: attack_01
+- Nao causa dano direto.
+- Efeito atual: entra como "pending" e aplica no fim do turno.
+- Se o usuario sobreviver ate a resolucao, SPE dobra (SPE * 2).
+- Se o usuario desmaiar antes da resolucao, o buff falha.
+
+7) Endure
+- Fase: guard
+- Nao causa dano direto.
+- Ativa estado de endure para o turno atual.
+- Se receber golpe letal no turno, sobrevive com piso de 1% do maxHp (minimo 1).
+- Ao disparar a sobrevivencia, ganha buff de speed: round(SPE * 3 / 2).
+- Cooldown interno: ao usar, vira 2; no fim de cada turno decrementa 1.
+- Na pratica: nao pode usar no turno seguinte, volta a poder no proximo.
+- Cooldown compartilhado com Protect (usar um trava o outro no turno seguinte).
+
+8) Protect
+- Fase: guard
+- Nao causa dano direto.
+- Ativa bloqueio de dano para o turno atual.
+- Cooldown interno: ao usar, vira 2; no fim de cada turno decrementa 1.
+- Na pratica: nao pode usar no turno seguinte, volta a poder no proximo.
+- Cooldown compartilhado com Endure (usar um trava o outro no turno seguinte).
+
+9) Wish
+- Fase de uso: attack_01.
+- Nao causa dano direto.
+- Ao usar, agenda cura para o turno seguinte.
+- Recebimento: no turno seguinte, a cura resolve automaticamente no inicio da fase end_turn.
+- O recebimento nao consome o move escolhido no turno de cura.
+- Cura no alvo ativo do mesmo lado no momento da resolucao (apos switch, se houver).
+- Valor da cura: +50% do maxHp do alvo no momento da resolucao (clamp no maxHp).
+
+10) none
+- Fase: attack_01
+- Nao faz acao (wait).
+
+11) Taunt
+- Fase: attack_01
+- Nao causa dano direto.
+- Efeito: o alvo fica em estado de Taunt no turno atual e no proximo.
+- Enquanto tauntado, so pode usar ataques; acoes nao-ataque (ex: switch, guard e status) sao anuladas.
+
+12) Pain Split
+- Fase: attack_01
+- Nao causa dano direto.
+- Efeito instantaneo: HP de usuario e alvo viram floor((HP_user + HP_target) / 2).
+- Se passar do maxHp individual, aplica clamp por unidade.
+- Respeita ordem de iniciativa da fase (se o usuario morrer antes de agir, nao acontece).
+
+13) Leech Life
+- Fase: attack_01
+- Nao causa dano direto imediato.
+- Aplica semente no alvo.
+- No fim de cada turno (fase end_turn): alvo perde 12.5% do HP maximo.
+- Ja proca no mesmo turno em que a semente foi aplicada.
+- O lado que aplicou recupera o mesmo valor drenado no mon ativo daquele lado.
+- O efeito some quando o alvo troca.
+- Se quem aplicou trocar, o efeito continua e a cura vai para o novo mon ativo daquele lado.
+- Se o alvo trocar e depois voltar, volta sem semente.
+
+15) Focus Punch
+- Fase de uso: attack_01.
+- Nao causa dano no momento da escolha; o usuario entra em concentracao.
+- Resolucao: no inicio da fase end_turn (antes de Wish/Leftovers/Leech Life).
+- Se o usuario tomou dano real antes de executar no turno, Focus Punch falha.
+- Se tentaram causar dano mas o dano aplicado foi 0, Focus Punch nao perde foco.
+- Dano do golpe quando executa: scaled com multiplicador 150.
+
+Notas importantes
+- O engine usa matematica inteira/deterministica para reduzir risco de dessync.
+- Alguns logs mostram formulas detalhadas em runtime (move_detail).
+- Regra global de combate: buffs/debuffs de unidade se perdem quando o mon troca.
+
+Atualizacao recente
+- Belly Drum agora usa maxHp como base para custo de HP:
+  paga 50% do maxHp (nao usa HP atual como base de multiplicacao).
+
+
+===========
+Return-
+Seismic Toss-
+Double-Edge-
+
+Focus Punch
+
+Quick Attack-
+
+Slash
+Ricochet
+Smash
+Hyper Beam
+Crush Claw
+
+não tenho 
+  - Slash
+  - Ricochet
+  - Smash
+  - Hyper Beam
+  - Crush Claw
+  ===============

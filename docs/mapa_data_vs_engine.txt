@@ -1,0 +1,89 @@
+MAPA: O que esta em src/data e o que ainda esta fora
+====================================================
+
+Objetivo deste arquivo
+----------------------
+Este arquivo documenta onde estao os numeros e regras de balanceamento.
+A ideia e facilitar edicao por pessoas nao programadoras.
+
+1) Ja centralizado em src/data
+------------------------------
+
+1.1 src/data/moves.ts
+- Catalogo de moves (id, label, fase).
+- Numeros de move como:
+  - attackMultiplier100
+  - attackMultiplierPerLevel100
+  - flatDamage
+  - recoilNumerator / recoilDenominator
+  - components (effect/curse/buff_debuff/instant)
+- Exemplos:
+  - Return: base + scaling por level de formula
+  - Seismic Toss: flatDamage
+  - Taunt: maxDurationTurns via components.effect
+
+1.2 src/data/pokemon.ts
+- Roster dos monstros.
+- Stats base por monstro:
+  - level
+  - maxHp
+  - attack
+  - defense
+  - speed
+- possibleMoves / defaultMoves / possiblePassives / defaultPassive.
+
+1.3 src/data/passives.ts
+- Catalogo de passivas disponiveis.
+- Exemplo atual: none e clear_body.
+
+1.4 src/data/integrity.ts
+- Regras de validacao dos dados de data/.
+- Exemplo: tamanho de defaultMoves, run no slot final, limites de level etc.
+
+2) Ainda fora de src/data (normal hoje)
+---------------------------------------
+
+2.1 src/engine.ts (regras de runtime e balance global)
+- Constantes globais que influenciam o jogo:
+  - TYPE_PASSIVE_ATK_TRUE_DAMAGE
+  - THROW_FIXED_OFFENSE_TERM
+  - TYPE_PASSIVE_DEF_ARMOR_STACK_MAX
+  - TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT
+  - TYPE_PASSIVE_BUF_REGEN_PER_STACK
+  - RUN_MSPE_GAIN_PERCENT
+  - limites/escala de mSPE e multiplicadores de stat
+
+- Regras hardcoded de comportamento:
+  - cooldown de Protect/Endure = 2
+  - Bait aplica Weakness por 2 turnos
+  - Wish cura 50% do HP max
+  - Recover cura 20% do HP max
+  - Leech Seed drena 1/8 do HP max
+  - Belly Drum paga metade do HP atual e aplica buff
+
+Obs:
+- Isso nao esta errado; engine concentra formula e fluxo de batalha.
+- data/ concentra catalogos e configuracao.
+
+2.2 src/stats_calc.ts
+- Formula de stats, EV, limite de level visivel e mapeamento level 12 -> formula 100.
+
+2.3 src/shared.ts
+- Constantes globais de partida:
+  - SHARED_HP_START
+  - SHARED_MSPE_START
+  - TURN_DURATION_MS
+  - BASE_TURN_LIMIT
+
+3) Sobre src/data/collateral.ts
+-------------------------------
+- Hoje funciona mais como taxonomia/documentacao de tipos de collateral.
+- O runtime principal usa os components definidos em src/data/moves.ts.
+- Entao, para mudar efeito real de move, hoje o ponto principal e moves.ts + engine.ts.
+
+4) Resumo pratico para seu colega
+---------------------------------
+- Se quiser mudar numeros de move/kit/roster: editar src/data/*.
+- Se quiser mudar formula global, cooldown, regras de turno, passivas de tipo: editar engine.ts.
+- Se quiser mudar formula de stats/level/EV: editar stats_calc.ts.
+
