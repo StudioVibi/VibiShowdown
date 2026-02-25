@@ -140,6 +140,7 @@ export type GameState = {
 
 export type PlayerIntent =
   | { action: "switch"; targetIndex: number }
+  | { action: "run" }
   | { action: "use_move"; moveIndex: number; selfSwitchTargetIndex?: number };
 
 export type EventLog = {

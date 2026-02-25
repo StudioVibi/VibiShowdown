@@ -52,7 +52,7 @@ export const EFFECT_COLLATERAL_TEMPLATES: readonly EffectCollateralTemplate[] = 
   { id: "frustration", label: "Frustration", rank: "B", summary: "Bloqueia o ultimo move utilizado." },
   { id: "nocaute", label: "Nocaute", rank: "C", summary: "Forca switch." },
   { id: "immobilize", label: "Immobilize", rank: "C", summary: "Impede switch." },
-  { id: "weakness", label: "Weakness", rank: "C", summary: "Remove strength." },
+  { id: "weakness", label: "Weakness", rank: "C", summary: "ATK -2 stages." },
   { id: "deterioration", label: "Deterioration", rank: "C", summary: "Remove defense." },
   { id: "paralyse", label: "Paralyse", rank: "C", summary: "Remove speed." },
   { id: "silence", label: "Silence", rank: "C", summary: "Impede skills." }

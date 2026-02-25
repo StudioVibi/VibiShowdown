@@ -49,6 +49,8 @@ type Profile = {
 
 type EVStatKey = keyof EVSpread;
 const EV_KEYS: EVStatKey[] = ["hp", "atk", "def", "spe"];
+const STAT_STAGE_MIN = -6;
+const STAT_STAGE_MAX = 6;
 
 type TooltipValueState = "up" | "down" | "neutral";
 
@@ -167,6 +169,7 @@ const move_buttons = [
   document.getElementById("move-btn-1") as HTMLButtonElement,
   document.getElementById("move-btn-2") as HTMLButtonElement
 ];
+const run_btn = document.getElementById("run-btn") as HTMLButtonElement | null;
 const switch_btn = document.getElementById("switch-btn") as HTMLButtonElement | null;
 const surrender_btn = document.getElementById("surrender-btn") as HTMLButtonElement;
 const switch_modal = document.getElementById("switch-modal") as HTMLDivElement;
@@ -639,6 +642,10 @@ function relay_default_intent(state: GameState, slot_id: PlayerSlot): PlayerInte
     if (!validate_intent(state, slot_id, candidate)) {
       return candidate;
     }
+  }
+  const run_intent: PlayerIntent = { action: "run" };
+  if (!validate_intent(state, slot_id, run_intent)) {
+    return run_intent;
   }
   const first_move_id = active.chosenMoves[0] ?? "none";
   const fallback_self_switch_target = relay_default_self_switch_target(state, slot_id, first_move_id);
@@ -1165,6 +1172,18 @@ function tooltip_stat_value_from_percent(base: number, total_percent: number): n
   return Math.max(0, mul_div_round(base, total_percent, 100));
 }
 
+function clamp_stage(value: number): number {
+  return Math.max(STAT_STAGE_MIN, Math.min(STAT_STAGE_MAX, Math.trunc(value)));
+}
+
+function attack_from_stage(base_attack: number, stage: number): number {
+  const normalized = clamp_stage(stage);
+  if (normalized >= 0) {
+    return Math.max(0, mul_div_round(base_attack, 2 + normalized, 2));
+  }
+  return Math.max(0, mul_div_round(base_attack, 2, 2 - normalized));
+}
+
 function tooltip_from_config(monster_id: string): MonsterTooltipPayload {
   const config = get_config(monster_id);
   const base = base_stats_for(monster_id, config.stats.level);
@@ -1195,16 +1214,21 @@ function tooltip_from_state(state: GameState, slot_id: PlayerSlot, mon: MonsterS
   const attack_total_percent = tooltip_total_percent_for_stat(state, slot_id, "attack", entries);
   const defense_total_percent = tooltip_total_percent_for_stat(state, slot_id, "defense", entries);
   const speed_total_percent = tooltip_total_percent_for_stat(state, slot_id, "speed", entries);
-  const attack_blocked = has_active_effect(state, slot_id, "weakness");
+  const weakness_active = has_active_effect(state, slot_id, "weakness");
   const defense_blocked = has_active_effect(state, slot_id, "deterioration");
   const speed_blocked = has_active_effect(state, slot_id, "paralyse");
+  const attack_value = tooltip_stat_value_from_percent(base.attack, attack_total_percent);
+  const weakened_attack_value = attack_from_stage(
+    Math.max(0, Number.isFinite(mon.baseAttack) ? Math.trunc(mon.baseAttack) : base.attack),
+    (Number.isFinite(mon.attackStage) ? mon.attackStage : 0) - 2
+  );
   return {
     id: mon.id,
     name: monster_label(mon.id),
     type: mon.type,
     moves: mon.chosenMoves.slice(0, LOBBY_MOVE_SLOTS),
     current: {
-      attack: attack_blocked ? 0 : tooltip_stat_value_from_percent(base.attack, attack_total_percent),
+      attack: weakness_active ? weakened_attack_value : attack_value,
       defense: defense_blocked ? 0 : tooltip_stat_value_from_percent(base.defense, defense_total_percent),
       speed: speed_blocked ? 0 : tooltip_stat_value_from_percent(base.speed, speed_total_percent)
     },
@@ -1618,7 +1642,7 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
   const base_stats = base_stats_from_spec(spec);
   const base_level = normalize_stat_value("level", base_stats.level, 1);
   const base_ev = empty_ev_spread();
-  const default_moves = spec.defaultMoves.slice(0, LOBBY_MOVE_SLOTS);
+  const default_moves = spec.defaultMoves.slice(0, LOBBY_MOVE_SLOTS).map((move_id) => (move_id === "run" ? "none" : move_id));
   while (default_moves.length < LOBBY_MOVE_SLOTS) {
     default_moves.push("none");
   }
@@ -1638,6 +1662,7 @@ function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): Monste
     moves.push("none");
   }
   const allowed = new Set(spec.possibleMoves);
+  allowed.delete("run");
   let had_disallowed_move = false;
   for (let i = 0; i < moves.length; i++) {
     if (moves[i] === "bells_drum") {
@@ -1857,6 +1882,11 @@ function render_config(): void {
       }
       continue;
     }
+    if (move === "run") {
+      config.moves[i] = "none";
+      changed = true;
+      continue;
+    }
     if (unique_moves.has(move)) {
       config.moves[i] = "none";
       changed = true;
@@ -1886,6 +1916,9 @@ function render_config(): void {
       config.moves.filter((move, idx) => idx !== i && move !== "none")
     );
     for (const move of spec.possibleMoves) {
+      if (move === "run") {
+        continue;
+      }
       if (move !== "none" && move !== current_move && used_by_others.has(move)) {
         continue;
       }
@@ -2268,11 +2301,14 @@ function is_slot_arena_trapped_for_ui(state: GameState, target_slot: PlayerSlot)
   return until_turn > 0 && until_turn >= state.turn;
 }
 
-type UiSwitchBlockReason = "arena trapped" | "immobilize" | "confuse";
+type UiSwitchBlockReason = "arena trapped" | "immobilize" | "confuse" | "taunt";
 
 function switch_block_reason_for_ui(state: GameState, target_slot: PlayerSlot): UiSwitchBlockReason | null {
   if (is_slot_arena_trapped_for_ui(state, target_slot)) {
     return "arena trapped";
+  }
+  if ((state.tauntUntilTurn?.[target_slot] ?? 0) >= state.turn || has_active_effect(state, target_slot, "taunt")) {
+    return "taunt";
   }
   if (has_active_effect(state, target_slot, "confuse")) {
     return "confuse";
@@ -2287,10 +2323,43 @@ function switch_block_label_for_ui(reason: UiSwitchBlockReason): string {
   if (reason === "arena trapped") {
     return "arena trapped";
   }
+  if (reason === "taunt") {
+    return "taunt";
+  }
   if (reason === "confuse") {
     return "confuse";
   }
   return "immobilize";
+}
+
+type UiRunBlockReason = "nocaute" | "sleep" | "silence" | "taunt";
+
+function has_available_switch_target_for_ui(state: GameState, target_slot: PlayerSlot): boolean {
+  const player = state.players[target_slot];
+  return player.team.some((mon, index) => index !== player.activeIndex && mon.hp > 0);
+}
+
+function run_block_reason_for_ui(state: GameState, target_slot: PlayerSlot): UiRunBlockReason | null {
+  if (has_available_switch_target_for_ui(state, target_slot) && has_active_effect(state, target_slot, "nocaute")) {
+    return "nocaute";
+  }
+  if (has_active_effect(state, target_slot, "sleep")) {
+    return "sleep";
+  }
+  if (has_active_effect(state, target_slot, "silence")) {
+    return "silence";
+  }
+  if ((state.tauntUntilTurn?.[target_slot] ?? 0) >= state.turn || has_active_effect(state, target_slot, "taunt")) {
+    return "taunt";
+  }
+  return null;
+}
+
+function run_block_label_for_ui(reason: UiRunBlockReason): string {
+  if (reason === "nocaute") return "nocaute";
+  if (reason === "sleep") return "sleep";
+  if (reason === "silence") return "silence";
+  return "taunt";
 }
 
 function update_bench(state: GameState, viewer_slot: PlayerSlot): void {
@@ -2334,7 +2403,15 @@ function update_action_controls(): void {
       btn.disabled = true;
       btn.classList.remove("selected-intent");
     });
-    if (switch_btn) switch_btn.disabled = true;
+    if (run_btn) {
+      run_btn.textContent = "Run(+10% M.SPE)";
+      run_btn.disabled = true;
+      run_btn.classList.remove("selected-intent");
+    }
+    if (switch_btn) {
+      switch_btn.disabled = true;
+      switch_btn.classList.remove("selected-intent");
+    }
     return;
   }
 
@@ -2344,6 +2421,7 @@ function update_action_controls(): void {
   let active_moves = config.moves;
   let self_switch_has_target = true;
   const switch_blocked_reason = latest_state && slot ? switch_block_reason_for_ui(latest_state, slot) : null;
+  const run_blocked_reason = latest_state && slot ? run_block_reason_for_ui(latest_state, slot) : null;
   if (latest_state && slot) {
     const player_state = latest_state.players[slot];
     const fallback_active = player_state.team[player_state.activeIndex];
@@ -2382,6 +2460,17 @@ function update_action_controls(): void {
       selected_intent_turn === current_turn && selected_intent?.action === "use_move" && selected_intent.moveIndex === index;
     btn.classList.toggle("selected-intent", is_selected_move && !btn.disabled);
   });
+  if (run_btn) {
+    const run_disabled = controls_disabled || !!run_blocked_reason;
+    if (run_blocked_reason) {
+      run_btn.textContent = `Run(+10% M.SPE) (${run_block_label_for_ui(run_blocked_reason)})`;
+    } else {
+      run_btn.textContent = "Run(+10% M.SPE)";
+    }
+    run_btn.disabled = run_disabled;
+    const is_selected_run = selected_intent_turn === current_turn && selected_intent?.action === "run";
+    run_btn.classList.toggle("selected-intent", is_selected_run && !run_btn.disabled);
+  }
   if (switch_btn) {
     const switch_disabled =
       !match_started ||
@@ -2393,6 +2482,8 @@ function update_action_controls(): void {
     if (switch_blocked_reason === "arena trapped") {
       const turns_left = arena_trap_remaining_turns(latest_state!, slot!);
       switch_btn.title = `Arena Trap active (${turns_left} turno${turns_left === 1 ? "" : "s"})`;
+    } else if (switch_blocked_reason === "taunt") {
+      switch_btn.title = "Taunt active (switch blocked)";
     } else if (switch_blocked_reason === "immobilize") {
       switch_btn.title = "Immobilize active (switch blocked)";
     } else if (switch_blocked_reason === "confuse") {
@@ -2400,6 +2491,8 @@ function update_action_controls(): void {
     } else {
       switch_btn.removeAttribute("title");
     }
+    const is_selected_switch = selected_intent_turn === current_turn && selected_intent?.action === "switch";
+    switch_btn.classList.toggle("selected-intent", is_selected_switch && !switch_btn.disabled);
   }
   const show_surrender = match_started && !!slot && !is_spectator;
   surrender_btn.classList.toggle("hidden", !show_surrender);
@@ -2491,8 +2584,23 @@ function can_send_intent(): boolean {
   return true;
 }
 
+function send_run_intent(): void {
+  if (!post_turn_intent({ action: "run" })) {
+    return;
+  }
+  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
+  selected_intent = { action: "run" };
+  selected_intent_turn = current_turn;
+  update_action_controls();
+  append_log(was_selected ? "intent updated (Run)" : "intent sent (Run)");
+}
+
 function send_move_intent(moveIndex: number): void {
   const move_id = active_move_id_for_index(moveIndex);
+  if (move_id === "run") {
+    send_run_intent();
+    return;
+  }
   if (move_id === "bounce_kick") {
     const bounce_block_reason = latest_state && slot ? switch_block_reason_for_ui(latest_state, slot) : null;
     if (bounce_block_reason) {
@@ -3520,6 +3628,12 @@ move_buttons.forEach((btn, index) => {
     send_move_intent(index);
   });
 });
+
+if (run_btn) {
+  run_btn.addEventListener("click", () => {
+    send_run_intent();
+  });
+}
 
 if (switch_btn) {
   switch_btn.addEventListener("click", () => {

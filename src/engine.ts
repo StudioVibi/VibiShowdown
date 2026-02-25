@@ -42,11 +42,13 @@ type Phase = {
 };
 
 const INITIATIVE_DEFAULT: Phase["initiative"] = ["speed", "attack", "hp", "defense"];
+const INITIATIVE_NONE: Phase["initiative"] = [];
 
 const PHASES: Phase[] = [
   { id: "switch", name: "Switch", order: 0, initiative: INITIATIVE_DEFAULT },
   { id: "guard", name: "Guard", order: 1, initiative: INITIATIVE_DEFAULT },
-  { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT }
+  { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT },
+  { id: "run", name: "Run", order: 3, initiative: INITIATIVE_NONE }
 ];
 
 const END_PHASE_ID = "end_turn";
@@ -74,6 +76,7 @@ const TAUNT_BLOCKED_MOVE_IDS = new Set([
 
 type Action =
   | { player: PlayerSlot; type: "switch"; phase: string; targetIndex: number }
+  | { player: PlayerSlot; type: "run"; phase: string }
   | {
       player: PlayerSlot;
       type: "move";
@@ -99,6 +102,7 @@ const STAT_MULTIPLIER_MIN_PERCENT = 25;
 const STAT_MULTIPLIER_MAX_PERCENT = 400;
 const MSPE_VALUE_GOAL = 500;
 const MSPE_GAP_GOAL_PERCENT = 33;
+const RUN_MSPE_GAIN_PERCENT = 10;
 const EFFECT_IDS: readonly EffectCollateralId[] = [
   "confuse",
   "sleep",
@@ -253,7 +257,8 @@ function compare_action_initiative(state: GameState, phase: Phase, a: Action, b:
 
 function action_type_order(action: Action): number {
   if (action.type === "move") return 0;
-  return 1;
+  if (action.type === "run") return 1;
+  return 2;
 }
 
 function compare_actions_for_phase(state: GameState, phase: Phase, a: Action, b: Action): number {
@@ -908,6 +913,23 @@ function move_block_reason(
   return null;
 }
 
+function run_block_reason(state: GameState, slot: PlayerSlot): string | null {
+  const player = state.players[slot];
+  if (has_available_switch_target(player) && has_effect(state, slot, "nocaute")) {
+    return "nocaute";
+  }
+  if (has_effect(state, slot, "sleep")) {
+    return "sleep";
+  }
+  if (has_effect(state, slot, "silence")) {
+    return "silence";
+  }
+  if (is_slot_taunted(state, slot)) {
+    return "taunt";
+  }
+  return null;
+}
+
 function move_block_summary(slot: PlayerSlot, reason: string, spec_label: string): string {
   if (reason === "nocaute") {
     return `${slot} cannot use ${spec_label} (Nocaute forces switch)`;
@@ -1146,7 +1168,13 @@ function action_kind_for_slot(actions: Action[], slot: PlayerSlot): TurnActionKi
   if (!action) {
     return "none";
   }
-  return action.type === "switch" ? "switch" : "attack";
+  if (action.type === "switch") {
+    return "switch";
+  }
+  if (action.type === "run") {
+    return "none";
+  }
+  return "attack";
 }
 
 function switch_target_type_for_slot(state: GameState, actions: Action[], slot: PlayerSlot): MonsterType {
@@ -2293,6 +2321,54 @@ function apply_damage_move(
 
 }
 
+function apply_run_action(state: GameState, log: EventLog[], player_slot: PlayerSlot): void {
+  const player = state.players[player_slot];
+  const actor = active_monster(player);
+  if (!is_alive(actor)) {
+    log.push({
+      type: "action_skipped",
+      turn: state.turn,
+      phase: "run",
+      summary: `${player_slot} run skipped (fainted)`,
+      data: { slot: player_slot, action: "run" }
+    });
+    return;
+  }
+  const before_mSPE = Math.max(0, player.sharedMSPE);
+  const gain = Math.max(1, mul_div_round(before_mSPE, RUN_MSPE_GAIN_PERCENT, 100));
+  const after_mSPE = sync_player_shared_mSPE(state, player_slot, before_mSPE + gain);
+  log.push({
+    type: "stat_mod",
+    turn: state.turn,
+    phase: "run",
+    summary: `${player_slot} used Run (+${RUN_MSPE_GAIN_PERCENT}% M.SPE: ${before_mSPE} -> ${after_mSPE})`,
+    data: {
+      slot: player_slot,
+      target: actor.id,
+      stat: "mSPE",
+      amountPercent: RUN_MSPE_GAIN_PERCENT,
+      amount: gain,
+      before: before_mSPE,
+      after: after_mSPE
+    }
+  });
+  log.push({
+    type: "move_detail",
+    turn: state.turn,
+    phase: "run",
+    summary: `Run(+${RUN_MSPE_GAIN_PERCENT}% M.SPE): +${gain} (${before_mSPE} -> ${after_mSPE})`,
+    data: {
+      action: "run",
+      slot: player_slot,
+      target: actor.id,
+      amountPercent: RUN_MSPE_GAIN_PERCENT,
+      amount: gain,
+      before: before_mSPE,
+      after: after_mSPE
+    }
+  });
+}
+
 function apply_move(
   state: GameState,
   log: EventLog[],
@@ -2658,29 +2734,7 @@ function apply_move(
   }
 
   if (spec.id === "run") {
-    const before_mSPE = player.sharedMSPE;
-    const after_mSPE = sync_player_shared_mSPE(state, player_slot, before_mSPE + 32);
-    log.push({
-      type: "stat_mod",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${player_slot} used Run (${before_mSPE} -> ${after_mSPE} mSPE)`,
-      data: {
-        slot: player_slot,
-        target: attacker.id,
-        stat: "mSPE",
-        amount: 32,
-        before: before_mSPE,
-        after: after_mSPE
-      }
-    });
-    log.push({
-      type: "move_detail",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `Run: user mSPE +32 (${before_mSPE} -> ${after_mSPE})`,
-      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_mSPE, after: after_mSPE }
-    });
+    apply_run_action(state, log, player_slot);
     finalize_move_success();
     return;
   }
@@ -3213,10 +3267,16 @@ function build_actions(intents: Record<PlayerSlot, PlayerIntent | null>, state: 
     if (!intent) continue;
     if (intent.action === "switch") {
       actions.push({ player: slot, type: "switch", phase: "switch", targetIndex: intent.targetIndex });
+    } else if (intent.action === "run") {
+      actions.push({ player: slot, type: "run", phase: "run" });
     } else {
       const player = state.players[slot];
       const active = active_monster(player);
       const moveId = active.chosenMoves[intent.moveIndex] ?? "none";
+      if (moveId === "run") {
+        actions.push({ player: slot, type: "run", phase: "run" });
+        continue;
+      }
       const spec = move_spec(moveId);
       actions.push({
         player: slot,
@@ -3469,7 +3529,7 @@ export function resolve_turn(
             }
           });
         }
-      } else {
+      } else if (action.type === "move") {
         apply_move(
           next,
           log,
@@ -3482,6 +3542,8 @@ export function resolve_turn(
           focus_punch_pending,
           took_damage_this_turn
         );
+      } else {
+        apply_run_action(next, log, action.player);
       }
       progress = check_zero_hp_match_result(next, log);
       if (progress !== "continue") {
@@ -3491,6 +3553,8 @@ export function resolve_turn(
     if (phase.id === "switch" && progress === "continue") {
       apply_simultaneous_switch_passives(next, log, switched_this_turn, hp_changed_this_turn, took_damage_this_turn);
       progress = check_zero_hp_match_result(next, log);
+    } else if (phase.id === "run" && progress === "continue") {
+      progress = check_mSPE_match_result(next, log);
     }
   }
 
@@ -3557,6 +3621,19 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
     }
     return null;
   }
+  if (intent.action === "run") {
+    const blocked_run = run_block_reason(state, slot);
+    if (blocked_run === "nocaute") {
+      return "nocaute: must switch";
+    }
+    if (blocked_run === "taunt") {
+      return "taunted: must use attack";
+    }
+    if (blocked_run) {
+      return blocked_run;
+    }
+    return null;
+  }
 
   const active = active_monster(player);
   if (intent.moveIndex < 0 || intent.moveIndex >= active.chosenMoves.length) {
@@ -3564,6 +3641,19 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
   }
 
   const moveId = active.chosenMoves[intent.moveIndex] ?? "none";
+  if (moveId === "run") {
+    const blocked_run = run_block_reason(state, slot);
+    if (blocked_run === "nocaute") {
+      return "nocaute: must switch";
+    }
+    if (blocked_run === "taunt") {
+      return "taunted: must use attack";
+    }
+    if (blocked_run) {
+      return blocked_run;
+    }
+    return null;
+  }
   const spec = move_spec(moveId);
   const blocked_move = move_block_reason(state, slot, intent.moveIndex, spec);
   if (blocked_move === "nocaute") {
