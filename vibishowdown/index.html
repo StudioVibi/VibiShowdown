@@ -426,11 +426,11 @@
         color: var(--accent);
       }
 
-      #status-evade {
+      #status-mSPE {
         color: var(--accent-2);
       }
 
-      #status-evade.ready {
+      #status-mSPE.ready {
         color: var(--ok);
         font-weight: 700;
       }
@@ -850,6 +850,11 @@
         gap: 6px;
       }
 
+      .switch-options.switch-options-sovietico {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
       .switch-options button {
         border: none;
         border-radius: 10px;
@@ -863,6 +868,27 @@
       .switch-options button:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+      }
+
+      .switch-options .switch-sovietico-option {
+        min-height: 88px;
+        padding: 8px 6px;
+        display: grid;
+        justify-items: center;
+        align-content: center;
+        gap: 6px;
+      }
+
+      .switch-options .switch-sovietico-option img {
+        width: 40px;
+        height: 40px;
+        object-fit: contain;
+        filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.35));
+      }
+
+      .switch-options .switch-sovietico-option span {
+        font-size: 11px;
+        line-height: 1;
       }
 
       .switch-close {
@@ -1634,7 +1660,7 @@
                   <span>Turn <span id="status-turn">0</span></span>
                   <span id="status-deadline">--:--</span>
                   <span id="status-rps">PTS -- | --</span>
-                  <span id="status-evade">EVA --</span>
+                  <span id="status-mSPE">mSPE --</span>
                 </div>
               </div>
               <div class="action-pad" id="action-pad">

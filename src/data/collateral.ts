@@ -87,7 +87,7 @@ export const BUFF_DEBUFF_COLLATERAL_TEMPLATES: readonly BuffDebuffCollateralTemp
     label: "Speed Up",
     stat: "speed",
     deltaPercent: 100,
-    summary: "SPE x2 (+100%). Remove ao trocar."
+    summary: "DEX x2 (+100%). Remove ao trocar."
   }
 ] as const;
 

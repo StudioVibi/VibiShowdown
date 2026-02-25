@@ -1,6 +1,6 @@
 import {
   BASE_TURN_LIMIT,
-  SHARED_EVADE_START,
+  SHARED_MSPE_START,
   SHARED_HP_START,
 } from "./shared.ts";
 import type {
@@ -8,7 +8,7 @@ import type {
   ActiveCurseState,
   ActiveEffectState,
   BuffDebuffStat,
-  EvadeTelemetry,
+  MSPETelemetry,
   EVSpread,
   EventLog,
   GameState,
@@ -83,6 +83,8 @@ type Action =
       selfSwitchTargetIndex?: number;
     };
 
+type SelfSwitchTargetsBySlot = Record<PlayerSlot, number | undefined>;
+
 type MatchProgress = "continue" | "stop_turn" | "ended";
 
 const INITIATIVE_WITHOUT_SPEED: Phase["initiative"] = ["attack", "hp", "defense"];
@@ -95,8 +97,8 @@ const TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT = 10;
 const TYPE_PASSIVE_BUF_REGEN_PER_STACK = 5;
 const STAT_MULTIPLIER_MIN_PERCENT = 25;
 const STAT_MULTIPLIER_MAX_PERCENT = 400;
-const EVADE_VALUE_GOAL = 500;
-const EVADE_GAP_GOAL_PERCENT = 33;
+const MSPE_VALUE_GOAL = 500;
+const MSPE_GAP_GOAL_PERCENT = 33;
 const EFFECT_IDS: readonly EffectCollateralId[] = [
   "confuse",
   "sleep",
@@ -292,7 +294,7 @@ function clone_monster(monster: MonsterState): MonsterState {
     type: monster.type,
     hp: monster.hp,
     maxHp: monster.maxHp,
-    evade: Math.max(0, normalize_int(monster.evade, SHARED_EVADE_START, 0)),
+    mSPE: Math.max(0, normalize_int(monster.mSPE, SHARED_MSPE_START, 0)),
     level: monster.level,
     baseAttack: base_attack,
     baseDefense: base_defense,
@@ -357,15 +359,15 @@ function empty_last_move_index(): Record<PlayerSlot, number | null> {
   return empty_slot_record<number | null>(null, null);
 }
 
-function empty_evade_telemetry(): Record<PlayerSlot, EvadeTelemetry> {
-  const empty_entry = (): EvadeTelemetry => ({
-    effectiveEvade: SHARED_EVADE_START,
-    evadeGoal: EVADE_VALUE_GOAL,
-    evadeReady: false,
+function empty_mSPE_telemetry(): Record<PlayerSlot, MSPETelemetry> {
+  const empty_entry = (): MSPETelemetry => ({
+    effectiveMSPE: SHARED_MSPE_START,
+    mSPEGoal: MSPE_VALUE_GOAL,
+    mSPEReady: false,
     gapPercent: 0,
-    gapGoalPercent: EVADE_GAP_GOAL_PERCENT,
+    gapGoalPercent: MSPE_GAP_GOAL_PERCENT,
     gapReady: false,
-    canEvade: false
+    canMSPE: false
   });
   return empty_slot_record(empty_entry(), empty_entry());
 }
@@ -669,7 +671,7 @@ function apply_move_curses_from_collateral(
 function stat_label_for_buff(stat: BuffDebuffStat): string {
   if (stat === "attack") return "ATK";
   if (stat === "defense") return "DEF";
-  return "SPE";
+  return "DEX";
 }
 
 function stat_value_for_active_monster(monster: MonsterState, stat: BuffDebuffStat): number {
@@ -945,14 +947,14 @@ function clone_player(player: PlayerState): PlayerState {
   const shared_hp_max = Math.max(1, normalize_int(player.sharedHpMax, fallback_max_hp, 1));
   const fallback_shared_hp = active ? normalize_int(active.hp, shared_hp_max, 0) : shared_hp_max;
   const shared_hp = Math.max(0, Math.min(shared_hp_max, normalize_int(player.sharedHp, fallback_shared_hp, 0)));
-  const fallback_shared_evade = active ? normalize_int(active.evade, SHARED_EVADE_START, 0) : SHARED_EVADE_START;
-  const shared_evade = Math.max(0, normalize_int(player.sharedEvade, fallback_shared_evade, 0));
+  const fallback_shared_mSPE = active ? normalize_int(active.mSPE, SHARED_MSPE_START, 0) : SHARED_MSPE_START;
+  const shared_mSPE = Math.max(0, normalize_int(player.sharedMSPE, fallback_shared_mSPE, 0));
   return {
     slot: player.slot,
     name: player.name,
     sharedHp: shared_hp,
     sharedHpMax: shared_hp_max,
-    sharedEvade: shared_evade,
+    sharedMSPE: shared_mSPE,
     team: player.team.map(clone_monster),
     activeIndex: player.activeIndex
   };
@@ -964,10 +966,10 @@ export function clone_state(state: GameState): GameState {
     status: state.status,
     winner: state.winner,
     endReason: state.endReason,
-    evadedSlots: Array.isArray(state.evadedSlots) ? state.evadedSlots.slice() : undefined,
+    mSPESlots: Array.isArray(state.mSPESlots) ? state.mSPESlots.slice() : undefined,
     baseTurnLimit: Math.max(1, normalize_int(state.baseTurnLimit, BASE_TURN_LIMIT, 1)),
     rpsScore: empty_rps_score(),
-    evadeTelemetry: empty_evade_telemetry(),
+    mSPETelemetry: empty_mSPE_telemetry(),
     typePassiveArmorStacks: empty_type_passive_armor_stacks(),
     typePassiveRegenStacks: empty_type_passive_regen_stacks(),
     arenaTrapUntilTurn: empty_arena_trap_until_turn(),
@@ -1023,9 +1025,9 @@ export function clone_state(state: GameState): GameState {
   cloned.lastMoveIndexBySlot.player2 =
     typeof last_move_p2 === "number" && Number.isInteger(last_move_p2) ? Math.max(0, last_move_p2) : null;
   sync_all_players_shared_hp(cloned);
-  sync_all_players_shared_evade(cloned);
+  sync_all_players_shared_mSPE(cloned);
   refresh_active_monster_stats(cloned);
-  refresh_evade_telemetry(cloned);
+  refresh_mSPE_telemetry(cloned);
   return cloned;
 }
 
@@ -1050,12 +1052,12 @@ function sync_player_shared_hp(state: GameState, slot: PlayerSlot, next_hp: numb
   return clamped;
 }
 
-function sync_player_shared_evade(state: GameState, slot: PlayerSlot, next_evade: number): number {
+function sync_player_shared_mSPE(state: GameState, slot: PlayerSlot, next_mSPE: number): number {
   const player = state.players[slot];
-  const clamped = Math.max(0, normalize_int(next_evade, SHARED_EVADE_START, 0));
-  player.sharedEvade = clamped;
+  const clamped = Math.max(0, normalize_int(next_mSPE, SHARED_MSPE_START, 0));
+  player.sharedMSPE = clamped;
   for (const monster of player.team) {
-    monster.evade = clamped;
+    monster.mSPE = clamped;
   }
   return clamped;
 }
@@ -1073,13 +1075,13 @@ function sync_all_players_shared_hp(state: GameState): void {
   }
 }
 
-function sync_all_players_shared_evade(state: GameState): void {
+function sync_all_players_shared_mSPE(state: GameState): void {
   for (const slot of SLOT_ORDER) {
     const player = state.players[slot];
     const active = player.team[player.activeIndex] ?? player.team[0];
-    const fallback_shared_evade = active ? normalize_int(active.evade, SHARED_EVADE_START, 0) : SHARED_EVADE_START;
-    const shared_evade = Math.max(0, normalize_int(player.sharedEvade, fallback_shared_evade, 0));
-    sync_player_shared_evade(state, slot, shared_evade);
+    const fallback_shared_mSPE = active ? normalize_int(active.mSPE, SHARED_MSPE_START, 0) : SHARED_MSPE_START;
+    const shared_mSPE = Math.max(0, normalize_int(player.sharedMSPE, fallback_shared_mSPE, 0));
+    sync_player_shared_mSPE(state, slot, shared_mSPE);
   }
 }
 
@@ -1108,8 +1110,8 @@ function ensure_state_runtime_defaults(state: GameState): void {
   if (!state.rpsScore) {
     state.rpsScore = empty_rps_score();
   }
-  if (!state.evadeTelemetry) {
-    state.evadeTelemetry = empty_evade_telemetry();
+  if (!state.mSPETelemetry) {
+    state.mSPETelemetry = empty_mSPE_telemetry();
   }
   if (!state.typePassiveArmorStacks) {
     state.typePassiveArmorStacks = empty_type_passive_armor_stacks();
@@ -1123,7 +1125,7 @@ function ensure_state_runtime_defaults(state: GameState): void {
   if (!state.spikesArmedByTarget) {
     state.spikesArmedByTarget = empty_spikes_armed_by_target();
   }
-  sync_all_players_shared_evade(state);
+  sync_all_players_shared_mSPE(state);
   refresh_active_monster_stats(state);
 }
 
@@ -1429,7 +1431,7 @@ function end_match_with_winner(
   if (end_reason) {
     state.endReason = end_reason;
   }
-  delete state.evadedSlots;
+  delete state.mSPESlots;
   log.push({
     type: "match_end",
     turn: state.turn,
@@ -1450,7 +1452,7 @@ function end_match_draw(
   if (end_reason) {
     state.endReason = end_reason;
   }
-  delete state.evadedSlots;
+  delete state.mSPESlots;
   log.push({
     type: "match_end",
     turn: state.turn,
@@ -1511,63 +1513,63 @@ function effective_speed_for_slot(state: GameState, slot: PlayerSlot, monster: M
   return monster.speed;
 }
 
-function build_evade_telemetry_entry(state: GameState, slot: PlayerSlot): EvadeTelemetry {
+function build_mSPE_telemetry_entry(state: GameState, slot: PlayerSlot): MSPETelemetry {
   const enemy_slot = other_slot(slot);
-  const effective_evade = Math.max(0, normalize_int(state.players[slot].sharedEvade, SHARED_EVADE_START, 0));
-  const enemy_effective_evade = Math.max(
+  const effective_mSPE = Math.max(0, normalize_int(state.players[slot].sharedMSPE, SHARED_MSPE_START, 0));
+  const enemy_effective_mSPE = Math.max(
     0,
-    normalize_int(state.players[enemy_slot].sharedEvade, SHARED_EVADE_START, 0)
+    normalize_int(state.players[enemy_slot].sharedMSPE, SHARED_MSPE_START, 0)
   );
-  const divisor = Math.max(1, enemy_effective_evade);
-  const gap_percent = mul_div_round(effective_evade - enemy_effective_evade, 100, divisor);
-  const evade_ready = effective_evade >= EVADE_VALUE_GOAL;
-  const gap_ready = gap_percent >= EVADE_GAP_GOAL_PERCENT;
+  const divisor = Math.max(1, enemy_effective_mSPE);
+  const gap_percent = mul_div_round(effective_mSPE - enemy_effective_mSPE, 100, divisor);
+  const evade_ready = effective_mSPE >= MSPE_VALUE_GOAL;
+  const gap_ready = gap_percent >= MSPE_GAP_GOAL_PERCENT;
   return {
-    effectiveEvade: effective_evade,
-    evadeGoal: EVADE_VALUE_GOAL,
-    evadeReady: evade_ready,
+    effectiveMSPE: effective_mSPE,
+    mSPEGoal: MSPE_VALUE_GOAL,
+    mSPEReady: evade_ready,
     gapPercent: gap_percent,
-    gapGoalPercent: EVADE_GAP_GOAL_PERCENT,
+    gapGoalPercent: MSPE_GAP_GOAL_PERCENT,
     gapReady: gap_ready,
-    canEvade: evade_ready || gap_ready
+    canMSPE: evade_ready || gap_ready
   };
 }
 
-function refresh_evade_telemetry(state: GameState): void {
+function refresh_mSPE_telemetry(state: GameState): void {
   ensure_state_runtime_defaults(state);
-  state.evadeTelemetry.player1 = build_evade_telemetry_entry(state, "player1");
-  state.evadeTelemetry.player2 = build_evade_telemetry_entry(state, "player2");
+  state.mSPETelemetry.player1 = build_mSPE_telemetry_entry(state, "player1");
+  state.mSPETelemetry.player2 = build_mSPE_telemetry_entry(state, "player2");
 }
 
-function check_evade_match_result(state: GameState, log: EventLog[]): MatchProgress {
-  refresh_evade_telemetry(state);
+function check_mSPE_match_result(state: GameState, log: EventLog[]): MatchProgress {
+  refresh_mSPE_telemetry(state);
   if (state.status !== "running") {
     return state.status === "ended" ? "ended" : "continue";
   }
-  const evaded_slots = SLOT_ORDER.filter((slot) => state.evadeTelemetry[slot].canEvade);
-  if (evaded_slots.length === 0) {
+  const mSPE_slots = SLOT_ORDER.filter((slot) => state.mSPETelemetry[slot].canMSPE);
+  if (mSPE_slots.length === 0) {
     return "continue";
   }
 
   state.status = "ended";
-  state.endReason = "evade_escape";
-  state.evadedSlots = evaded_slots.slice();
+  state.endReason = "mSPE_escape";
+  state.mSPESlots = mSPE_slots.slice();
   delete state.winner;
 
   const summary =
-    evaded_slots.length >= 2
-      ? "double technical escape (both players satisfied EVADE condition)"
-      : `${evaded_slots[0]} escaped technically (EVADE condition met)`;
+    mSPE_slots.length >= 2
+      ? "double technical escape (both players satisfied mSPE condition)"
+      : `${mSPE_slots[0]} escaped technically (mSPE condition met)`;
   log.push({
     type: "match_end",
     turn: state.turn,
     summary,
     data: {
-      reason: "evade_escape",
-      evadedSlots: evaded_slots.slice(),
+      reason: "mSPE_escape",
+      mSPESlots: mSPE_slots.slice(),
       telemetry: {
-        player1: { ...state.evadeTelemetry.player1 },
-        player2: { ...state.evadeTelemetry.player2 }
+        player1: { ...state.mSPETelemetry.player1 },
+        player2: { ...state.mSPETelemetry.player2 }
       }
     }
   });
@@ -2059,7 +2061,7 @@ function apply_damage_with_endure(
         type: "move_detail",
         turn: state.turn,
         phase,
-        summary: `Endure: immortal trigger (HP floor 1% => ${after}); dmg capped ${attempted_damage} -> ${capped_damage}; SPE x1.5 (${speed_before} -> ${speed_after})`,
+        summary: `Endure: immortal trigger (HP floor 1% => ${after}); dmg capped ${attempted_damage} -> ${capped_damage}; DEX x1.5 (${speed_before} -> ${speed_after})`,
         data: {
           move: "endure",
           slot,
@@ -2298,6 +2300,7 @@ function apply_move(
   move_id: MoveId,
   move_index: number,
   self_switch_target_index: number | undefined,
+  self_switch_targets_by_slot: SelfSwitchTargetsBySlot,
   hp_changed: WeakSet<MonsterState>,
   focus_punch_pending: Record<PlayerSlot, boolean>,
   took_damage_this_turn: Record<PlayerSlot, boolean>
@@ -2424,7 +2427,7 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Endure: HP floor this turn = ${floor_hp} (1% do maxHp); on trigger gain SPE x1.5`,
+      summary: `Endure: HP floor this turn = ${floor_hp} (1% do maxHp); on trigger gain DEX x1.5`,
       data: { move: spec.id, slot: player_slot, target: attacker.id, floorHp: floor_hp }
     });
     finalize_move_success();
@@ -2494,7 +2497,7 @@ function apply_move(
       type: "stat_mod",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `${player_slot} Agility success on ${attacker.name} (SPE ${before_speed} -> ${after_speed})`,
+      summary: `${player_slot} Agility success on ${attacker.name} (DEX ${before_speed} -> ${after_speed})`,
       data: {
         slot: player_slot,
         target: attacker.id,
@@ -2508,7 +2511,7 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Agility: user SPE x2 (${before_speed} -> ${after_speed})`,
+      summary: `Agility: user DEX x2 (${before_speed} -> ${after_speed})`,
       data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_speed, after: after_speed }
     });
     finalize_move_success();
@@ -2518,8 +2521,39 @@ function apply_move(
   if (spec.id === "switch_sovietico") {
     const switched: Record<PlayerSlot, boolean> = { player1: false, player2: false };
     for (const slot_id of SLOT_ORDER) {
+      const blocked_switch_reason = switch_block_reason(state, slot_id);
+      if (blocked_switch_reason && blocked_switch_reason !== "taunt") {
+        log.push({
+          type: "switch_blocked",
+          turn: state.turn,
+          phase: spec.phaseId,
+          summary:
+            blocked_switch_reason === "arena trapped"
+              ? `${slot_id} could not switch (arena trapped)`
+              : `${slot_id} could not switch (${effect_label(blocked_switch_reason)})`,
+          data: {
+            slot: slot_id,
+            move: spec.id,
+            reason: blocked_switch_reason,
+            turnsRemaining:
+              blocked_switch_reason === "arena trapped"
+                ? Math.max(0, (state.arenaTrapUntilTurn?.[slot_id] ?? 0) - state.turn + 1)
+                : EFFECT_ID_SET.has(blocked_switch_reason)
+                  ? effect_turns_remaining(state, slot_id, blocked_switch_reason as EffectCollateralId)
+                  : 0
+          }
+        });
+        continue;
+      }
       const switch_player = state.players[slot_id];
-      const target_index = first_available_switch_target(switch_player);
+      const preferred_target_raw = self_switch_targets_by_slot[slot_id];
+      const preferred_target =
+        typeof preferred_target_raw === "number" && Number.isInteger(preferred_target_raw)
+          ? Number(preferred_target_raw)
+          : null;
+      const preferred_valid =
+        preferred_target !== null ? validate_switch_target(switch_player, preferred_target) === null : false;
+      const target_index = preferred_valid ? preferred_target : first_available_switch_target(switch_player);
       if (target_index === null) {
         log.push({
           type: "switch_invalid",
@@ -2582,7 +2616,7 @@ function apply_move(
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Switch Sovietico: both sides switched; switch mindgame bonus applied with x2 value",
+      summary: "Switch Sovietico: both sides attempted switch using selected targets; switch mindgame bonus applied with x2 value",
       data: {
         move: spec.id,
         switchedPlayer1: switched.player1,
@@ -2624,28 +2658,28 @@ function apply_move(
   }
 
   if (spec.id === "run") {
-    const before_evade = player.sharedEvade;
-    const after_evade = sync_player_shared_evade(state, player_slot, before_evade + 32);
+    const before_mSPE = player.sharedMSPE;
+    const after_mSPE = sync_player_shared_mSPE(state, player_slot, before_mSPE + 32);
     log.push({
       type: "stat_mod",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `${player_slot} used Run (${before_evade} -> ${after_evade} EVADE)`,
+      summary: `${player_slot} used Run (${before_mSPE} -> ${after_mSPE} mSPE)`,
       data: {
         slot: player_slot,
         target: attacker.id,
-        stat: "evade",
+        stat: "mSPE",
         amount: 32,
-        before: before_evade,
-        after: after_evade
+        before: before_mSPE,
+        after: after_mSPE
       }
     });
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Run: user EVADE +32 (${before_evade} -> ${after_evade})`,
-      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_evade, after: after_evade }
+      summary: `Run: user mSPE +32 (${before_mSPE} -> ${after_mSPE})`,
+      data: { move: spec.id, slot: player_slot, target: attacker.id, before: before_mSPE, after: after_mSPE }
     });
     finalize_move_success();
     return;
@@ -3132,7 +3166,7 @@ function perform_switch(
   clear_buff_debuffs_on_target_switch(state, log, slot);
   player.activeIndex = target_index;
   sync_player_shared_hp(state, slot, player.sharedHp);
-  sync_player_shared_evade(state, slot, player.sharedEvade);
+  sync_player_shared_mSPE(state, slot, player.sharedMSPE);
   refresh_active_monster_stats_for_slot(state, slot);
   apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn);
   log.push({
@@ -3222,7 +3256,7 @@ export function create_initial_state(
   const build_player = (slot: PlayerSlot): PlayerState => {
     const selection = teams[slot];
     const shared_hp = SHARED_HP_START;
-    const shared_evade = SHARED_EVADE_START;
+    const shared_mSPE = SHARED_MSPE_START;
     const team = selection.monsters.map((monster) => {
       const spec = MONSTER_BY_ID.get(monster.id);
       if (!spec) {
@@ -3254,7 +3288,7 @@ export function create_initial_state(
         type: resolved_type,
         hp: shared_hp,
         maxHp: shared_hp,
-        evade: shared_evade,
+        mSPE: shared_mSPE,
         level,
         baseAttack: final_stats.atk,
         baseDefense: final_stats.def,
@@ -3283,7 +3317,7 @@ export function create_initial_state(
       name: names[slot],
       sharedHp: shared_hp,
       sharedHpMax: shared_hp,
-      sharedEvade: shared_evade,
+      sharedMSPE: shared_mSPE,
       team,
       activeIndex: Math.min(Math.max(selection.activeIndex, 0), team.length - 1)
     };
@@ -3293,10 +3327,10 @@ export function create_initial_state(
     turn: 0,
     status: "setup",
     endReason: undefined,
-    evadedSlots: undefined,
+    mSPESlots: undefined,
     baseTurnLimit: BASE_TURN_LIMIT,
     rpsScore: empty_rps_score(),
-    evadeTelemetry: empty_evade_telemetry(),
+    mSPETelemetry: empty_mSPE_telemetry(),
     typePassiveArmorStacks: empty_type_passive_armor_stacks(),
     typePassiveRegenStacks: empty_type_passive_regen_stacks(),
     arenaTrapUntilTurn: empty_arena_trap_until_turn(),
@@ -3314,9 +3348,9 @@ export function create_initial_state(
     lastMoveIndexBySlot: empty_last_move_index(),
   };
   sync_all_players_shared_hp(initial_state);
-  sync_all_players_shared_evade(initial_state);
+  sync_all_players_shared_mSPE(initial_state);
   refresh_active_monster_stats(initial_state);
-  refresh_evade_telemetry(initial_state);
+  refresh_mSPE_telemetry(initial_state);
   return initial_state;
 }
 
@@ -3331,7 +3365,7 @@ export function resolve_turn(
   const took_damage_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   const switched_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
-  sync_all_players_shared_evade(next);
+  sync_all_players_shared_mSPE(next);
   refresh_active_monster_stats(next);
   next.baseTurnLimit = Math.max(1, normalize_int(next.baseTurnLimit, BASE_TURN_LIMIT, 1));
 
@@ -3343,6 +3377,19 @@ export function resolve_turn(
   next.pendingSwitch = empty_pending();
 
   const actions = build_actions(intents, next);
+  const self_switch_targets_by_slot: SelfSwitchTargetsBySlot = { player1: undefined, player2: undefined };
+  for (const action of actions) {
+    if (action.type !== "move") {
+      continue;
+    }
+    if (action.moveId !== "switch_sovietico") {
+      continue;
+    }
+    if (!Number.isInteger(action.selfSwitchTargetIndex)) {
+      continue;
+    }
+    self_switch_targets_by_slot[action.player] = Number(action.selfSwitchTargetIndex);
+  }
   reset_protect_flags(next);
   let progress = check_zero_hp_match_result(next, log);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
@@ -3353,7 +3400,7 @@ export function resolve_turn(
       break;
     }
     if (phase.id === "switch" && !mindgame_checked) {
-      progress = check_evade_match_result(next, log);
+      progress = check_mSPE_match_result(next, log);
       if (progress !== "continue") {
         break;
       }
@@ -3430,6 +3477,7 @@ export function resolve_turn(
           action.moveId,
           action.moveIndex,
           action.selfSwitchTargetIndex,
+          self_switch_targets_by_slot,
           hp_changed_this_turn,
           focus_punch_pending,
           took_damage_this_turn
@@ -3460,7 +3508,7 @@ export function resolve_turn(
   if (next.status === "running") {
     maybe_end_match_by_turn_limit(next, log);
   }
-  refresh_evade_telemetry(next);
+  refresh_mSPE_telemetry(next);
 
   return { state: next, log };
 }
@@ -3483,7 +3531,7 @@ export function apply_forced_switch(
   }
   perform_switch(next, log, slot, targetIndex, "forced_switch");
   next.pendingSwitch[slot] = false;
-  refresh_evade_telemetry(next);
+  refresh_mSPE_telemetry(next);
   return { state: next, log };
 }
 
@@ -3553,6 +3601,22 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
     }
     if (switch_error === "target fainted") {
       return "bounce kick target fainted";
+    }
+  }
+  if (moveId === "switch_sovietico") {
+    if (!Number.isInteger(intent.selfSwitchTargetIndex)) {
+      return "switch sovietico requires switch target";
+    }
+    const target_index = Number(intent.selfSwitchTargetIndex);
+    const switch_error = validate_switch_target(player, target_index);
+    if (switch_error === "invalid switch target") {
+      return "invalid switch sovietico target";
+    }
+    if (switch_error === "already active") {
+      return "switch sovietico target already active";
+    }
+    if (switch_error === "target fainted") {
+      return "switch sovietico target fainted";
     }
   }
 

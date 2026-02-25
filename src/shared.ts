@@ -3,7 +3,7 @@ export type RoomId = string;
 export type PlayerSlot = "player1" | "player2";
 
 export const SHARED_HP_START = 600;
-export const SHARED_EVADE_START = 100;
+export const SHARED_MSPE_START = 100;
 export const TURN_DURATION_MS = 50_000;
 export const BASE_TURN_LIMIT = 12;
 
@@ -46,7 +46,7 @@ export type MonsterState = {
   type: MonsterType;
   hp: number;
   maxHp: number;
-  evade: number;
+  mSPE: number;
   level: number;
   baseAttack: number;
   baseDefense: number;
@@ -75,7 +75,7 @@ export type PlayerState = {
   name: string;
   sharedHp: number;
   sharedHpMax: number;
-  sharedEvade: number;
+  sharedMSPE: number;
   team: MonsterState[];
   activeIndex: number;
 };
@@ -103,16 +103,16 @@ export type ActiveBuffDebuffState = {
   clearsOnSwitch: true;
 };
 
-export type MatchEndReason = "hp_zero" | "turn_limit" | "surrender" | "evade_escape";
+export type MatchEndReason = "hp_zero" | "turn_limit" | "surrender" | "mSPE_escape";
 
-export type EvadeTelemetry = {
-  effectiveEvade: number;
-  evadeGoal: number;
-  evadeReady: boolean;
+export type MSPETelemetry = {
+  effectiveMSPE: number;
+  mSPEGoal: number;
+  mSPEReady: boolean;
   gapPercent: number;
   gapGoalPercent: number;
   gapReady: boolean;
-  canEvade: boolean;
+  canMSPE: boolean;
 };
 
 export type GameState = {
@@ -120,10 +120,10 @@ export type GameState = {
   status: "setup" | "running" | "ended";
   winner?: PlayerSlot;
   endReason?: MatchEndReason;
-  evadedSlots?: PlayerSlot[];
+  mSPESlots?: PlayerSlot[];
   baseTurnLimit: number;
   rpsScore: Record<PlayerSlot, number>;
-  evadeTelemetry: Record<PlayerSlot, EvadeTelemetry>;
+  mSPETelemetry: Record<PlayerSlot, MSPETelemetry>;
   typePassiveArmorStacks: Record<PlayerSlot, number>;
   typePassiveRegenStacks: Record<PlayerSlot, number>;
   arenaTrapUntilTurn: Record<PlayerSlot, number>;

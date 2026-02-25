@@ -35,7 +35,9 @@ export type FinalStats = {
 export const EV_PER_STAT_MAX = 252;
 export const EV_TOTAL_MAX = 508;
 export const LEVEL_MIN = 1;
-export const LEVEL_MAX = 100;
+export const LEVEL_MAX = 12;
+export const FORMULA_LEVEL_MIN = 1;
+export const FORMULA_LEVEL_MAX = 100;
 
 export function empty_ev_spread(): EVSpread {
   return { hp: 0, atk: 0, def: 0, spe: 0 };
@@ -51,6 +53,27 @@ export function neutral_nature(): NatureSpread {
 
 export function ev_bonus(ev: number): number {
   return Math.floor(ev / 4);
+}
+
+function clamp_input_level(level: number): number {
+  if (!Number.isFinite(level)) {
+    return LEVEL_MIN;
+  }
+  const normalized = Math.trunc(level);
+  return Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, normalized));
+}
+
+// Map user-visible level range (1..12) to canonical formula level (1..100).
+export function scaled_level_for_formula(level: number): number {
+  const normalized = clamp_input_level(level);
+  if (LEVEL_MAX <= LEVEL_MIN) {
+    return FORMULA_LEVEL_MAX;
+  }
+  const source_span = LEVEL_MAX - LEVEL_MIN;
+  const target_span = FORMULA_LEVEL_MAX - FORMULA_LEVEL_MIN;
+  const offset = normalized - LEVEL_MIN;
+  const scaled_offset = Math.round((offset * target_span) / source_span);
+  return FORMULA_LEVEL_MIN + scaled_offset;
 }
 
 export function validate_ev_spread(ev: EVSpread): string | null {
@@ -76,11 +99,13 @@ export function validate_ev_spread(ev: EVSpread): string | null {
 }
 
 export function calc_hp_max(base_hp: number, level: number, ev_hp: number, iv_hp: number): number {
-  return Math.floor(((2 * base_hp + iv_hp + ev_bonus(ev_hp)) * level) / 100) + level + 10;
+  const effective_level = scaled_level_for_formula(level);
+  return Math.floor(((2 * base_hp + iv_hp + ev_bonus(ev_hp)) * effective_level) / 100) + effective_level + 10;
 }
 
 export function calc_non_hp_stat(base: number, level: number, ev: number, iv: number, nature: number): number {
-  const term = Math.floor(((2 * base + iv + ev_bonus(ev)) * level) / 100) + 5;
+  const effective_level = scaled_level_for_formula(level);
+  const term = Math.floor(((2 * base + iv + ev_bonus(ev)) * effective_level) / 100) + 5;
   return Math.floor(term * nature);
 }
 
