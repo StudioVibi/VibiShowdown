@@ -5136,7 +5136,26 @@ function resolve_turn(state, intents) {
   next.pendingSwitch = empty_pending();
   next.pendingSwitchReason = empty_pending_switch_reason();
   next.pendingSwitchResolvedThisTurn = empty_pending_switch_resolved_this_turn();
-  const actions = build_actions(intents, next);
+  const intents_after_forced_switch = {
+    player1: intents.player1,
+    player2: intents.player2
+  };
+  for (const slot_id of SLOT_ORDER) {
+    if (!switch_sovietico_resolved_this_turn[slot_id]) {
+      continue;
+    }
+    if (intents_after_forced_switch[slot_id] !== null) {
+      log.push({
+        type: "action_skipped",
+        turn: next.turn,
+        phase: "switch",
+        summary: `${slot_id} cannot act this turn after Switch Sovietico forced switch`,
+        data: { slot: slot_id, reason: "switch_sovietico_forced_switch" }
+      });
+    }
+    intents_after_forced_switch[slot_id] = null;
+  }
+  const actions = build_actions(intents_after_forced_switch, next);
   reset_protect_flags(next);
   let progress = check_zero_hp_match_result(next, log);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
@@ -7409,8 +7428,7 @@ function update_bench(state, viewer_slot) {
 function update_action_controls() {
   const has_team = selected.length === 3;
   const pending_switch = has_pending_switch();
-  const forced_switch_ready = !relay_server_managed && has_forced_switch_target_for_current_turn();
-  const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || pending_switch && !forced_switch_ready;
+  const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || pending_switch;
   if (!has_team) {
     move_buttons.forEach((btn, index) => {
       btn.textContent = `Move ${index + 1}`;
@@ -7531,10 +7549,6 @@ function post_turn_intent(intent) {
     player_id
   };
   if (has_pending_switch()) {
-    if (relay_server_managed) {
-      append_log("pending switch");
-      return false;
-    }
     if (!has_forced_switch_target_for_current_turn()) {
       append_log("choose replacement first");
       return false;
@@ -7615,22 +7629,26 @@ function send_bounce_kick_intent(moveIndex, selfSwitchTargetIndex) {
 }
 function send_switch_intent(targetIndex) {
   if (has_pending_switch()) {
-    if (relay_server_managed) {
-      if (try_post({ $: "forced_switch", targetIndex, player_id })) {
-        close_switch_modal(true);
-      }
-      return;
-    }
     forced_switch_target_index = targetIndex;
     forced_switch_target_turn = current_turn;
-    append_log("replacement selected (hidden until turn resolves)");
-    close_switch_modal();
-    if (selected_intent_turn === current_turn && selected_intent) {
-      const reposted = post_turn_intent(selected_intent);
-      if (reposted) {
-        append_log("intent updated");
+    if (relay_server_managed && !try_post({ $: "forced_switch", targetIndex, player_id })) {
+      clear_forced_switch_target();
+      return;
+    }
+    let lock_intent_sent = false;
+    if (latest_state && slot) {
+      const forced_preview = apply_forced_switch(latest_state, slot, targetIndex);
+      if (!forced_preview.error) {
+        const lock_intent = relay_default_intent(forced_preview.state, slot);
+        if (post_turn_intent(lock_intent)) {
+          selected_intent = lock_intent;
+          selected_intent_turn = current_turn;
+          lock_intent_sent = true;
+        }
       }
     }
+    close_switch_modal();
+    append_log(lock_intent_sent ? "replacement selected; action locked (no move this turn)" : "replacement selected (no move this turn)");
     update_action_controls();
     return;
   }

@@ -2397,8 +2397,7 @@ function update_bench(state: GameState, viewer_slot: PlayerSlot): void {
 function update_action_controls(): void {
   const has_team = selected.length === 3;
   const pending_switch = has_pending_switch();
-  const forced_switch_ready = !relay_server_managed && has_forced_switch_target_for_current_turn();
-  const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || (pending_switch && !forced_switch_ready);
+  const controls_disabled = !match_started || !slot || is_spectator || current_turn <= 0 || pending_switch;
   if (!has_team) {
     move_buttons.forEach((btn, index) => {
       btn.textContent = `Move ${index + 1}`;
@@ -2539,10 +2538,6 @@ function post_turn_intent(intent: PlayerIntent): boolean {
     player_id
   };
   if (has_pending_switch()) {
-    if (relay_server_managed) {
-      append_log("pending switch");
-      return false;
-    }
     if (!has_forced_switch_target_for_current_turn()) {
       append_log("choose replacement first");
       return false;
@@ -2632,22 +2627,32 @@ function send_bounce_kick_intent(moveIndex: number, selfSwitchTargetIndex: numbe
 
 function send_switch_intent(targetIndex: number): void {
   if (has_pending_switch()) {
-    if (relay_server_managed) {
-      if (try_post({ $: "forced_switch", targetIndex, player_id })) {
-        close_switch_modal(true);
-      }
-      return;
-    }
     forced_switch_target_index = targetIndex;
     forced_switch_target_turn = current_turn;
-    append_log("replacement selected (hidden until turn resolves)");
-    close_switch_modal();
-    if (selected_intent_turn === current_turn && selected_intent) {
-      const reposted = post_turn_intent(selected_intent);
-      if (reposted) {
-        append_log("intent updated");
+    if (relay_server_managed && !try_post({ $: "forced_switch", targetIndex, player_id })) {
+      clear_forced_switch_target();
+      return;
+    }
+
+    let lock_intent_sent = false;
+    if (latest_state && slot) {
+      const forced_preview = apply_forced_switch(latest_state, slot, targetIndex);
+      if (!forced_preview.error) {
+        const lock_intent = relay_default_intent(forced_preview.state, slot);
+        if (post_turn_intent(lock_intent)) {
+          selected_intent = lock_intent;
+          selected_intent_turn = current_turn;
+          lock_intent_sent = true;
+        }
       }
     }
+
+    close_switch_modal();
+    append_log(
+      lock_intent_sent
+        ? "replacement selected; action locked (no move this turn)"
+        : "replacement selected (no move this turn)"
+    );
     update_action_controls();
     return;
   }
