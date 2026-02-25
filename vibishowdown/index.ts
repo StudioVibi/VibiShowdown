@@ -170,7 +170,6 @@ const move_buttons = [
   document.getElementById("move-btn-2") as HTMLButtonElement
 ];
 const run_btn = document.getElementById("run-btn") as HTMLButtonElement | null;
-const switch_btn = document.getElementById("switch-btn") as HTMLButtonElement | null;
 const surrender_btn = document.getElementById("surrender-btn") as HTMLButtonElement;
 const switch_modal = document.getElementById("switch-modal") as HTMLDivElement;
 const switch_title = switch_modal.querySelector(".switch-title") as HTMLDivElement | null;
@@ -2404,13 +2403,9 @@ function update_action_controls(): void {
       btn.classList.remove("selected-intent");
     });
     if (run_btn) {
-      run_btn.textContent = "Run(+10% M.SPE)";
+      run_btn.textContent = "4. Run(+10% M.SPE)";
       run_btn.disabled = true;
       run_btn.classList.remove("selected-intent");
-    }
-    if (switch_btn) {
-      switch_btn.disabled = true;
-      switch_btn.classList.remove("selected-intent");
     }
     return;
   }
@@ -2463,36 +2458,13 @@ function update_action_controls(): void {
   if (run_btn) {
     const run_disabled = controls_disabled || !!run_blocked_reason;
     if (run_blocked_reason) {
-      run_btn.textContent = `Run(+10% M.SPE) (${run_block_label_for_ui(run_blocked_reason)})`;
+      run_btn.textContent = `4. Run(+10% M.SPE) (${run_block_label_for_ui(run_blocked_reason)})`;
     } else {
-      run_btn.textContent = "Run(+10% M.SPE)";
+      run_btn.textContent = "4. Run(+10% M.SPE)";
     }
     run_btn.disabled = run_disabled;
     const is_selected_run = selected_intent_turn === current_turn && selected_intent?.action === "run";
     run_btn.classList.toggle("selected-intent", is_selected_run && !run_btn.disabled);
-  }
-  if (switch_btn) {
-    const switch_disabled =
-      !match_started ||
-      !slot ||
-      is_spectator ||
-      current_turn <= 0 ||
-      !!switch_blocked_reason;
-    switch_btn.disabled = switch_disabled;
-    if (switch_blocked_reason === "arena trapped") {
-      const turns_left = arena_trap_remaining_turns(latest_state!, slot!);
-      switch_btn.title = `Arena Trap active (${turns_left} turno${turns_left === 1 ? "" : "s"})`;
-    } else if (switch_blocked_reason === "taunt") {
-      switch_btn.title = "Taunt active (switch blocked)";
-    } else if (switch_blocked_reason === "immobilize") {
-      switch_btn.title = "Immobilize active (switch blocked)";
-    } else if (switch_blocked_reason === "confuse") {
-      switch_btn.title = "Confuse active (switch blocked)";
-    } else {
-      switch_btn.removeAttribute("title");
-    }
-    const is_selected_switch = selected_intent_turn === current_turn && selected_intent?.action === "switch";
-    switch_btn.classList.toggle("selected-intent", is_selected_switch && !switch_btn.disabled);
   }
   const show_surrender = match_started && !!slot && !is_spectator;
   surrender_btn.classList.toggle("hidden", !show_surrender);
@@ -3632,12 +3604,6 @@ move_buttons.forEach((btn, index) => {
 if (run_btn) {
   run_btn.addEventListener("click", () => {
     send_run_intent();
-  });
-}
-
-if (switch_btn) {
-  switch_btn.addEventListener("click", () => {
-    open_switch_modal(has_pending_switch() ? "forced" : "intent");
   });
 }
 
