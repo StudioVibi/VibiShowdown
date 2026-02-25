@@ -83,6 +83,7 @@ export type PlayerState = {
 export type ActiveEffectState = {
   id: string;
   remainingTurns: number;
+  appliedTurn?: number;
 };
 
 export type ActiveCurseState = {

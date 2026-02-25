@@ -405,13 +405,17 @@ function normalize_active_effects(input: unknown): ActiveEffectState[] {
     if (!item || typeof item !== "object") {
       continue;
     }
-    const row = item as { id?: unknown; remainingTurns?: unknown };
+    const row = item as { id?: unknown; remainingTurns?: unknown; appliedTurn?: unknown };
     if (typeof row.id !== "string" || !EFFECT_ID_SET.has(row.id)) {
       continue;
     }
     const remaining_raw = typeof row.remainingTurns === "number" ? row.remainingTurns : 1;
     const remaining = Math.max(1, normalize_int(remaining_raw, 1, 1));
-    normalized.push({ id: row.id, remainingTurns: remaining });
+    const applied_turn =
+      typeof row.appliedTurn === "number" && Number.isFinite(row.appliedTurn)
+        ? normalize_int(row.appliedTurn, 0, -1000000)
+        : undefined;
+    normalized.push({ id: row.id, remainingTurns: remaining, appliedTurn: applied_turn });
   }
   return normalized;
 }
@@ -557,8 +561,9 @@ function upsert_effect(
   const before_remaining = existing?.remainingTurns ?? 0;
   if (existing) {
     existing.remainingTurns = Math.max(existing.remainingTurns, duration);
+    existing.appliedTurn = state.turn;
   } else {
-    effects.push({ id: effect_id, remainingTurns: duration });
+    effects.push({ id: effect_id, remainingTurns: duration, appliedTurn: state.turn });
   }
   const after_remaining = existing?.remainingTurns ?? duration;
   log.push({
@@ -768,6 +773,10 @@ function decay_effects_end_turn(state: GameState, log: EventLog[]): void {
     }
     const next: ActiveEffectState[] = [];
     for (const effect of current) {
+      if ((effect.appliedTurn ?? -1) === state.turn) {
+        next.push({ id: effect.id, remainingTurns: Math.max(1, normalize_int(effect.remainingTurns, 1, 1)) });
+        continue;
+      }
       const remaining = Math.max(0, normalize_int(effect.remainingTurns, 1, 0) - 1);
       if (remaining > 0) {
         next.push({ id: effect.id, remainingTurns: remaining });
