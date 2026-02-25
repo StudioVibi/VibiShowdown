@@ -86,8 +86,6 @@ type Action =
       selfSwitchTargetIndex?: number;
     };
 
-type SelfSwitchTargetsBySlot = Record<PlayerSlot, number | undefined>;
-
 type MatchProgress = "continue" | "stop_turn" | "ended";
 
 const INITIATIVE_WITHOUT_SPEED: Phase["initiative"] = ["attack", "hp", "defense"];
@@ -2376,7 +2374,6 @@ function apply_move(
   move_id: MoveId,
   move_index: number,
   self_switch_target_index: number | undefined,
-  self_switch_targets_by_slot: SelfSwitchTargetsBySlot,
   hp_changed: WeakSet<MonsterState>,
   focus_punch_pending: Record<PlayerSlot, boolean>,
   took_damage_this_turn: Record<PlayerSlot, boolean>
@@ -2595,108 +2592,43 @@ function apply_move(
   }
 
   if (spec.id === "switch_sovietico") {
-    const switched: Record<PlayerSlot, boolean> = { player1: false, player2: false };
+    ensure_state_runtime_defaults(state);
+    const queued_slots: PlayerSlot[] = [];
     for (const slot_id of SLOT_ORDER) {
-      const blocked_switch_reason = switch_block_reason(state, slot_id);
-      if (blocked_switch_reason && blocked_switch_reason !== "taunt") {
-        log.push({
-          type: "switch_blocked",
-          turn: state.turn,
-          phase: spec.phaseId,
-          summary:
-            blocked_switch_reason === "arena trapped"
-              ? `${slot_id} could not switch (arena trapped)`
-              : `${slot_id} could not switch (${effect_label(blocked_switch_reason)})`,
-          data: {
-            slot: slot_id,
-            move: spec.id,
-            reason: blocked_switch_reason,
-            turnsRemaining:
-              blocked_switch_reason === "arena trapped"
-                ? Math.max(0, (state.arenaTrapUntilTurn?.[slot_id] ?? 0) - state.turn + 1)
-                : EFFECT_ID_SET.has(blocked_switch_reason)
-                  ? effect_turns_remaining(state, slot_id, blocked_switch_reason as EffectCollateralId)
-                  : 0
-          }
-        });
-        continue;
-      }
       const switch_player = state.players[slot_id];
-      const preferred_target_raw = self_switch_targets_by_slot[slot_id];
-      const preferred_target =
-        typeof preferred_target_raw === "number" && Number.isInteger(preferred_target_raw)
-          ? Number(preferred_target_raw)
-          : null;
-      const preferred_valid =
-        preferred_target !== null ? validate_switch_target(switch_player, preferred_target) === null : false;
-      const target_index = preferred_valid ? preferred_target : first_available_switch_target(switch_player);
-      if (target_index === null) {
+      if (first_available_switch_target(switch_player) === null) {
+        state.pendingSwitch[slot_id] = false;
         log.push({
           type: "switch_invalid",
           turn: state.turn,
           phase: spec.phaseId,
           summary: `${slot_id} could not switch (no available target)`,
-          data: { slot: slot_id, move: spec.id, reason: "no_available_target" }
+          data: {
+            slot: slot_id,
+            move: spec.id,
+            reason: "no_available_target"
+          }
         });
         continue;
       }
-      const switched_ok = apply_switch(state, log, slot_id, target_index, hp_changed, took_damage_this_turn);
-      switched[slot_id] = switched_ok;
-    }
-
-    if (switched.player1 && switched.player2) {
-      const p1_type = active_monster(state.players.player1).type;
-      const p2_type = active_monster(state.players.player2).type;
-      const type_cmp = compare_monster_type(p1_type, p2_type);
-      if (type_cmp !== 0) {
-        if (!state.rpsScore) {
-          state.rpsScore = empty_rps_score();
-        }
-        const winner: PlayerSlot = type_cmp > 0 ? "player1" : "player2";
-        const loser: PlayerSlot = winner === "player1" ? "player2" : "player1";
-        const player1_before = state.rpsScore.player1 ?? 0;
-        const player2_before = state.rpsScore.player2 ?? 0;
-        state.rpsScore[winner] = (state.rpsScore[winner] ?? 0) + 2;
-        state.rpsScore[loser] = (state.rpsScore[loser] ?? 0) - 2;
-        log.push({
-          type: "mindgame_bonus_ready",
-          turn: state.turn,
-          summary: `${winner} won mindgame (switch_sovietico x2)`,
-          data: {
-            winner,
-            loser,
-            reason: "switch_sovietico",
-            multiplier: 2,
-            player1Type: p1_type,
-            player2Type: p2_type
-          }
-        });
-        log.push({
-          type: "rps_score_update",
-          turn: state.turn,
-          summary: `rps score updated (${winner} +2, ${loser} -2)`,
-          data: {
-            winner,
-            loser,
-            player1Before: player1_before,
-            player1After: state.rpsScore.player1,
-            player2Before: player2_before,
-            player2After: state.rpsScore.player2
-          }
-        });
-      }
-      apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn, 2);
+      state.pendingSwitch[slot_id] = true;
+      queued_slots.push(slot_id);
     }
 
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Switch Sovietico: both sides attempted switch using selected targets; switch mindgame bonus applied with x2 value",
+      summary:
+        queued_slots.length === 2
+          ? "Switch Sovietico armed: both players must choose switch at next turn start"
+          : queued_slots.length === 1
+            ? `Switch Sovietico armed: ${queued_slots[0]} must choose switch at next turn start`
+            : "Switch Sovietico armed: no available switch targets",
       data: {
         move: spec.id,
-        switchedPlayer1: switched.player1,
-        switchedPlayer2: switched.player2
+        pendingSwitchPlayer1: !!state.pendingSwitch.player1,
+        pendingSwitchPlayer2: !!state.pendingSwitch.player2
       }
     });
     finalize_move_success();
@@ -3437,19 +3369,6 @@ export function resolve_turn(
   next.pendingSwitch = empty_pending();
 
   const actions = build_actions(intents, next);
-  const self_switch_targets_by_slot: SelfSwitchTargetsBySlot = { player1: undefined, player2: undefined };
-  for (const action of actions) {
-    if (action.type !== "move") {
-      continue;
-    }
-    if (action.moveId !== "switch_sovietico") {
-      continue;
-    }
-    if (!Number.isInteger(action.selfSwitchTargetIndex)) {
-      continue;
-    }
-    self_switch_targets_by_slot[action.player] = Number(action.selfSwitchTargetIndex);
-  }
   reset_protect_flags(next);
   let progress = check_zero_hp_match_result(next, log);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
@@ -3537,7 +3456,6 @@ export function resolve_turn(
           action.moveId,
           action.moveIndex,
           action.selfSwitchTargetIndex,
-          self_switch_targets_by_slot,
           hp_changed_this_turn,
           focus_punch_pending,
           took_damage_this_turn
@@ -3694,19 +3612,8 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
     }
   }
   if (moveId === "switch_sovietico") {
-    if (!Number.isInteger(intent.selfSwitchTargetIndex)) {
-      return "switch sovietico requires switch target";
-    }
-    const target_index = Number(intent.selfSwitchTargetIndex);
-    const switch_error = validate_switch_target(player, target_index);
-    if (switch_error === "invalid switch target") {
-      return "invalid switch sovietico target";
-    }
-    if (switch_error === "already active") {
-      return "switch sovietico target already active";
-    }
-    if (switch_error === "target fainted") {
-      return "switch sovietico target fainted";
+    if (!has_available_switch_target(player)) {
+      return "switch sovietico requires available switch target";
     }
   }
 
