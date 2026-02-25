@@ -88,7 +88,7 @@ type MatchProgress = "continue" | "stop_turn" | "ended";
 const INITIATIVE_WITHOUT_SPEED: Phase["initiative"] = ["attack", "hp", "defense"];
 const STAT_STAGE_MIN = -6;
 const STAT_STAGE_MAX = 6;
-const TYPE_PASSIVE_ATK_TRUE_DAMAGE = 10;
+const TYPE_PASSIVE_ATK_TRUE_DAMAGE = 50;
 const THROW_FIXED_OFFENSE_TERM = 90 * 90;
 const TYPE_PASSIVE_DEF_ARMOR_STACK_MAX = 5;
 const TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT = 10;
@@ -1298,11 +1298,13 @@ function apply_simultaneous_switch_passives(
   log: EventLog[],
   switched_this_turn: Record<PlayerSlot, boolean>,
   hp_changed: WeakSet<MonsterState>,
-  took_damage_this_turn: Record<PlayerSlot, boolean>
+  took_damage_this_turn: Record<PlayerSlot, boolean>,
+  passive_multiplier: number = 1
 ): void {
   if (!switched_this_turn.player1 || !switched_this_turn.player2) {
     return;
   }
+  const passive_mult = Math.max(1, normalize_int(passive_multiplier, 1, 1));
   const p1_type = active_monster(state.players.player1).type;
   const p2_type = active_monster(state.players.player2).type;
   const type_cmp = compare_monster_type(p1_type, p2_type);
@@ -1322,13 +1324,14 @@ function apply_simultaneous_switch_passives(
   const loser_mon = active_monster(loser_player);
 
   if (winner_mon.type === "atk") {
+    const true_damage = TYPE_PASSIVE_ATK_TRUE_DAMAGE * passive_mult;
     const damage_result = apply_damage_with_endure(
       state,
       log,
       "switch",
       loser,
       loser_mon,
-      TYPE_PASSIVE_ATK_TRUE_DAMAGE,
+      true_damage,
       hp_changed,
       took_damage_this_turn,
       { ignoreArmor: true, source: "type_passive_atk" }
@@ -1337,14 +1340,15 @@ function apply_simultaneous_switch_passives(
       type: "passive_trigger",
       turn: state.turn,
       phase: "switch",
-      summary: `${winner_mon.name} activated ATK passive (true damage ${damage_result.applied})`,
+      summary: `${winner_mon.name} activated ATK passive (true damage ${damage_result.applied}${passive_mult > 1 ? `, x${passive_mult}` : ""})`,
       data: {
         slot: winner,
         targetSlot: loser,
         source: winner_mon.id,
         target: loser_mon.id,
         passive: "type_atk_true_damage",
-        damage: damage_result.applied
+        damage: damage_result.applied,
+        passiveMultiplier: passive_mult
       }
     });
     log.push({
@@ -1368,40 +1372,46 @@ function apply_simultaneous_switch_passives(
 
   if (winner_mon.type === "def") {
     const before_stack = type_passive_armor_stack(state, winner);
-    const after_stack = Math.min(TYPE_PASSIVE_DEF_ARMOR_STACK_MAX, before_stack + 1);
+    const after_stack = Math.min(TYPE_PASSIVE_DEF_ARMOR_STACK_MAX, before_stack + passive_mult);
     state.typePassiveArmorStacks[winner] = after_stack;
     log.push({
       type: "passive_trigger",
       turn: state.turn,
       phase: "switch",
-      summary: `${winner_mon.name} activated DEF passive (Clear Body [Instant] + Armor ${after_stack * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT}%)`,
+      summary: `${winner_mon.name} activated DEF passive (Clear Body [Instant] + Armor ${after_stack * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT}%${
+        passive_mult > 1 ? `, x${passive_mult} stack gain` : ""
+      })`,
       data: {
         slot: winner,
         source: winner_mon.id,
         passive: "type_def_armor_stack",
         stackBefore: before_stack,
         stackAfter: after_stack,
-        armorReductionPercent: after_stack * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT
+        armorReductionPercent: after_stack * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT,
+        passiveMultiplier: passive_mult
       }
     });
     return;
   }
 
   const before_stack = type_passive_regen_stack(state, winner);
-  const after_stack = before_stack + 1;
+  const after_stack = before_stack + passive_mult;
   state.typePassiveRegenStacks[winner] = after_stack;
   log.push({
     type: "passive_trigger",
     turn: state.turn,
     phase: "switch",
-    summary: `${winner_mon.name} activated BUF passive (regen stack ${after_stack})`,
+    summary: `${winner_mon.name} activated BUF passive (regen stack ${after_stack}${
+      passive_mult > 1 ? `, x${passive_mult} stack gain` : ""
+    })`,
     data: {
       slot: winner,
       source: winner_mon.id,
       passive: "type_buf_regen_stack",
       stackBefore: before_stack,
       stackAfter: after_stack,
-      healPerTurn: TYPE_PASSIVE_BUF_REGEN_PER_STACK * after_stack
+      healPerTurn: TYPE_PASSIVE_BUF_REGEN_PER_STACK * after_stack,
+      passiveMultiplier: passive_mult
     }
   });
 }
@@ -2565,7 +2575,7 @@ function apply_move(
           }
         });
       }
-      apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn);
+      apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn, 2);
     }
 
     log.push({
