@@ -4207,7 +4207,7 @@ function apply_run_action(state, log, player_slot) {
     }
   });
 }
-function apply_move(state, log, player_slot, move_id, move_index, self_switch_target_index, self_switch_targets_by_slot, hp_changed, focus_punch_pending, took_damage_this_turn) {
+function apply_move(state, log, player_slot, move_id, move_index, self_switch_target_index, hp_changed, focus_punch_pending, took_damage_this_turn) {
   const player = state.players[player_slot];
   const opponent = state.players[other_slot(player_slot)];
   const attacker = active_monster(player);
@@ -4397,94 +4397,37 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     return;
   }
   if (spec.id === "switch_sovietico") {
-    const switched = { player1: false, player2: false };
+    ensure_state_runtime_defaults(state);
+    const queued_slots = [];
     for (const slot_id of SLOT_ORDER) {
-      const blocked_switch_reason = switch_block_reason(state, slot_id);
-      if (blocked_switch_reason && blocked_switch_reason !== "taunt") {
-        log.push({
-          type: "switch_blocked",
-          turn: state.turn,
-          phase: spec.phaseId,
-          summary: blocked_switch_reason === "arena trapped" ? `${slot_id} could not switch (arena trapped)` : `${slot_id} could not switch (${effect_label(blocked_switch_reason)})`,
-          data: {
-            slot: slot_id,
-            move: spec.id,
-            reason: blocked_switch_reason,
-            turnsRemaining: blocked_switch_reason === "arena trapped" ? Math.max(0, (state.arenaTrapUntilTurn?.[slot_id] ?? 0) - state.turn + 1) : EFFECT_ID_SET.has(blocked_switch_reason) ? effect_turns_remaining(state, slot_id, blocked_switch_reason) : 0
-          }
-        });
-        continue;
-      }
       const switch_player = state.players[slot_id];
-      const preferred_target_raw = self_switch_targets_by_slot[slot_id];
-      const preferred_target = typeof preferred_target_raw === "number" && Number.isInteger(preferred_target_raw) ? Number(preferred_target_raw) : null;
-      const preferred_valid = preferred_target !== null ? validate_switch_target(switch_player, preferred_target) === null : false;
-      const target_index = preferred_valid ? preferred_target : first_available_switch_target(switch_player);
-      if (target_index === null) {
+      if (first_available_switch_target(switch_player) === null) {
+        state.pendingSwitch[slot_id] = false;
         log.push({
           type: "switch_invalid",
           turn: state.turn,
           phase: spec.phaseId,
           summary: `${slot_id} could not switch (no available target)`,
-          data: { slot: slot_id, move: spec.id, reason: "no_available_target" }
+          data: {
+            slot: slot_id,
+            move: spec.id,
+            reason: "no_available_target"
+          }
         });
         continue;
       }
-      const switched_ok = apply_switch(state, log, slot_id, target_index, hp_changed, took_damage_this_turn);
-      switched[slot_id] = switched_ok;
-    }
-    if (switched.player1 && switched.player2) {
-      const p1_type = active_monster(state.players.player1).type;
-      const p2_type = active_monster(state.players.player2).type;
-      const type_cmp = compare_monster_type(p1_type, p2_type);
-      if (type_cmp !== 0) {
-        if (!state.rpsScore) {
-          state.rpsScore = empty_rps_score();
-        }
-        const winner = type_cmp > 0 ? "player1" : "player2";
-        const loser = winner === "player1" ? "player2" : "player1";
-        const player1_before = state.rpsScore.player1 ?? 0;
-        const player2_before = state.rpsScore.player2 ?? 0;
-        state.rpsScore[winner] = (state.rpsScore[winner] ?? 0) + 2;
-        state.rpsScore[loser] = (state.rpsScore[loser] ?? 0) - 2;
-        log.push({
-          type: "mindgame_bonus_ready",
-          turn: state.turn,
-          summary: `${winner} won mindgame (switch_sovietico x2)`,
-          data: {
-            winner,
-            loser,
-            reason: "switch_sovietico",
-            multiplier: 2,
-            player1Type: p1_type,
-            player2Type: p2_type
-          }
-        });
-        log.push({
-          type: "rps_score_update",
-          turn: state.turn,
-          summary: `rps score updated (${winner} +2, ${loser} -2)`,
-          data: {
-            winner,
-            loser,
-            player1Before: player1_before,
-            player1After: state.rpsScore.player1,
-            player2Before: player2_before,
-            player2After: state.rpsScore.player2
-          }
-        });
-      }
-      apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn, 2);
+      state.pendingSwitch[slot_id] = true;
+      queued_slots.push(slot_id);
     }
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Switch Sovietico: both sides attempted switch using selected targets; switch mindgame bonus applied with x2 value",
+      summary: queued_slots.length === 2 ? "Switch Sovietico armed: both players must choose switch at next turn start" : queued_slots.length === 1 ? `Switch Sovietico armed: ${queued_slots[0]} must choose switch at next turn start` : "Switch Sovietico armed: no available switch targets",
       data: {
         move: spec.id,
-        switchedPlayer1: switched.player1,
-        switchedPlayer2: switched.player2
+        pendingSwitchPlayer1: !!state.pendingSwitch.player1,
+        pendingSwitchPlayer2: !!state.pendingSwitch.player2
       }
     });
     finalize_move_success();
@@ -5132,19 +5075,6 @@ function resolve_turn(state, intents) {
   ensure_state_runtime_defaults(next);
   next.pendingSwitch = empty_pending();
   const actions = build_actions(intents, next);
-  const self_switch_targets_by_slot = { player1: undefined, player2: undefined };
-  for (const action of actions) {
-    if (action.type !== "move") {
-      continue;
-    }
-    if (action.moveId !== "switch_sovietico") {
-      continue;
-    }
-    if (!Number.isInteger(action.selfSwitchTargetIndex)) {
-      continue;
-    }
-    self_switch_targets_by_slot[action.player] = Number(action.selfSwitchTargetIndex);
-  }
   reset_protect_flags(next);
   let progress = check_zero_hp_match_result(next, log);
   const phases = [...PHASES].sort((a, b) => a.order - b.order);
@@ -5205,7 +5135,7 @@ function resolve_turn(state, intents) {
           });
         }
       } else if (action.type === "move") {
-        apply_move(next, log, action.player, action.moveId, action.moveIndex, action.selfSwitchTargetIndex, self_switch_targets_by_slot, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
+        apply_move(next, log, action.player, action.moveId, action.moveIndex, action.selfSwitchTargetIndex, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
       } else {
         apply_run_action(next, log, action.player);
       }
@@ -5345,19 +5275,8 @@ function validate_intent(state, slot, intent) {
     }
   }
   if (moveId === "switch_sovietico") {
-    if (!Number.isInteger(intent.selfSwitchTargetIndex)) {
-      return "switch sovietico requires switch target";
-    }
-    const target_index = Number(intent.selfSwitchTargetIndex);
-    const switch_error = validate_switch_target(player, target_index);
-    if (switch_error === "invalid switch target") {
-      return "invalid switch sovietico target";
-    }
-    if (switch_error === "already active") {
-      return "switch sovietico target already active";
-    }
-    if (switch_error === "target fainted") {
-      return "switch sovietico target fainted";
+    if (!has_available_switch_target(player)) {
+      return "switch sovietico requires available switch target";
     }
   }
   return null;
@@ -5821,6 +5740,9 @@ function relay_default_forced_switch_target(state, slot_id) {
     if (index === player.activeIndex) {
       continue;
     }
+    if (player.team[index].hp <= 0) {
+      continue;
+    }
     return index;
   }
   return null;
@@ -5839,7 +5761,7 @@ function relay_default_switch_target(state, slot_id) {
   return null;
 }
 function relay_default_self_switch_target(state, slot_id, move_id) {
-  if (move_id !== "bounce_kick" && move_id !== "switch_sovietico") {
+  if (move_id !== "bounce_kick") {
     return null;
   }
   return relay_default_switch_target(state, slot_id);
@@ -7589,19 +7511,6 @@ function send_move_intent(moveIndex) {
     }
     return;
   }
-  if (move_id === "switch_sovietico") {
-    const default_target = latest_state && slot ? relay_default_switch_target(latest_state, slot) : null;
-    if (!Number.isInteger(default_target)) {
-      append_log("Switch Sovietico unavailable: no switch target");
-      return;
-    }
-    send_switch_sovietico_intent(moveIndex, Number(default_target));
-    open_switch_modal("switch_sovietico", moveIndex);
-    if (switch_modal.classList.contains("open")) {
-      append_log("Switch Sovietico: choose your replacement monster (default target already set)");
-    }
-    return;
-  }
   if (!post_turn_intent({ action: "use_move", moveIndex })) {
     return;
   }
@@ -7609,6 +7518,10 @@ function send_move_intent(moveIndex) {
   selected_intent = { action: "use_move", moveIndex };
   selected_intent_turn = current_turn;
   update_action_controls();
+  if (move_id === "switch_sovietico") {
+    append_log(was_selected ? "intent updated (Switch Sovietico armed)" : "intent sent (Switch Sovietico armed)");
+    return;
+  }
   append_log(was_selected ? "intent updated" : "intent sent");
 }
 function send_bounce_kick_intent(moveIndex, selfSwitchTargetIndex) {
@@ -7625,21 +7538,6 @@ function send_bounce_kick_intent(moveIndex, selfSwitchTargetIndex) {
   selected_intent_turn = current_turn;
   update_action_controls();
   append_log(was_selected ? `intent updated (Bounce Kick -> switch ${selfSwitchTargetIndex})` : `intent sent (Bounce Kick -> switch ${selfSwitchTargetIndex})`);
-}
-function send_switch_sovietico_intent(moveIndex, selfSwitchTargetIndex) {
-  const intent = {
-    action: "use_move",
-    moveIndex,
-    selfSwitchTargetIndex
-  };
-  if (!post_turn_intent(intent)) {
-    return;
-  }
-  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
-  selected_intent = intent;
-  selected_intent_turn = current_turn;
-  update_action_controls();
-  append_log(was_selected ? `intent updated (Switch Sovietico -> switch ${selfSwitchTargetIndex})` : `intent sent (Switch Sovietico -> switch ${selfSwitchTargetIndex})`);
 }
 function send_switch_intent(targetIndex) {
   if (has_pending_switch()) {
@@ -7679,7 +7577,6 @@ function send_surrender() {
 function close_switch_modal() {
   switch_modal_mode = "intent";
   switch_target_move_index = null;
-  switch_options.classList.remove("switch-options-sovietico");
   if (switch_title) {
     switch_title.textContent = "Switch Pokemon";
   }
@@ -7688,11 +7585,11 @@ function close_switch_modal() {
 function open_switch_modal(mode = "intent", move_index) {
   if (!latest_state || !slot)
     return;
-  if ((mode === "intent" || mode === "bounce_kick" || mode === "switch_sovietico") && !can_send_intent())
+  if ((mode === "intent" || mode === "bounce_kick") && !can_send_intent())
     return;
-  if (mode === "bounce_kick" || mode === "switch_sovietico") {
+  if (mode === "bounce_kick") {
     if (!Number.isInteger(move_index)) {
-      append_log(`${mode === "bounce_kick" ? "Bounce Kick" : "Switch Sovietico"} unavailable: missing move index`);
+      append_log("Bounce Kick unavailable: missing move index");
       return;
     }
     switch_target_move_index = move_index;
@@ -7703,15 +7600,12 @@ function open_switch_modal(mode = "intent", move_index) {
   if (switch_title) {
     if (mode === "bounce_kick") {
       switch_title.textContent = "Bounce Kick - Choose Switch";
-    } else if (mode === "switch_sovietico") {
-      switch_title.textContent = "Switch Sovietico - Choose Switch";
     } else if (mode === "forced") {
       switch_title.textContent = "Forced Switch";
     } else {
       switch_title.textContent = "Switch Pokemon";
     }
   }
-  switch_options.classList.toggle("switch-options-sovietico", mode === "switch_sovietico");
   switch_options.innerHTML = "";
   const player = latest_state.players[slot];
   const active_index = player.activeIndex;
@@ -7727,17 +7621,7 @@ function open_switch_modal(mode = "intent", move_index) {
       const button = document.createElement("button");
       button.type = "button";
       button.disabled = false;
-      if (mode === "switch_sovietico") {
-        button.classList.add("switch-sovietico-option");
-        const icon = document.createElement("img");
-        icon.src = icon_path(entry.mon.id);
-        icon.alt = monster_label(entry.mon.id);
-        const label = document.createElement("span");
-        label.textContent = monster_label(entry.mon.id);
-        button.append(icon, label);
-      } else {
-        button.textContent = `${entry.mon.name}`;
-      }
+      button.textContent = `${entry.mon.name}`;
       button.addEventListener("click", () => {
         if (switch_modal_mode === "bounce_kick") {
           if (!Number.isInteger(switch_target_move_index)) {
@@ -7745,15 +7629,6 @@ function open_switch_modal(mode = "intent", move_index) {
             return;
           }
           send_bounce_kick_intent(switch_target_move_index, entry.index);
-          close_switch_modal();
-          return;
-        }
-        if (switch_modal_mode === "switch_sovietico") {
-          if (!Number.isInteger(switch_target_move_index)) {
-            append_log("Switch Sovietico unavailable: missing move index");
-            return;
-          }
-          send_switch_sovietico_intent(switch_target_move_index, entry.index);
           close_switch_modal();
           return;
         }
@@ -8388,9 +8263,6 @@ function handle_state(data) {
   }
   if (data.state.status === "ended") {
     show_match_end(data.state);
-  }
-  if (slot && data.state.pendingSwitch?.[slot] && !switch_modal.classList.contains("open")) {
-    open_switch_modal("forced");
   }
 }
 function handle_post(message) {
