@@ -5375,6 +5375,36 @@ var STAT_STAGE_MIN2 = -6;
 var STAT_STAGE_MAX2 = 6;
 var LOBBY_MOVE_SLOTS = 3;
 var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien"]);
+var MOVE_TOOLTIP_DELAY_MS = 2000;
+var MOVE_TOOLTIP_DESCRIPTIONS = {
+  quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
+  kick: "Golpe fisico forte de dano escalado.",
+  throw: "Golpe com formula fixa (90x90) escalada pelo nivel de formula.",
+  agility: "Buff de DEX (x2) ate trocar.",
+  run: "Acao da fase Run (ultima): +10% de M.SPE sem reset por switch.",
+  wish: "No proximo turno, no comeco do end_turn, cura 50% do HP maximo do ativo.",
+  switch_sovietico: "Arma switch obrigatorio para ambos no proximo turno.",
+  team_cure: "Remove efeitos negativos e debuffs negativos do seu lado.",
+  bait: "So funciona se tomou dano antes no turno; aplica Weakness por 2 turnos.",
+  belly_drum: "Se HP atual > 50%, paga metade do HP atual e aumenta muito o ATK.",
+  return: "Dano escalado; o poder sobe com nivel de formula (Lv12 = formula Lv100).",
+  double_edge: "Golpe forte com recoil de 1/3 do dano final causado.",
+  seismic_toss: "Dano flat fixo de 50, ignorando DEF.",
+  leech_life: "Aplica Leech Seed (dreno no end_turn) ate o alvo trocar.",
+  focus_punch: "Carrega e resolve no inicio do end_turn; falha se tomar dano real antes.",
+  pain_split: "Ambos ficam com floor((HP_user + HP_target)/2), respeitando clamp de HP.",
+  screech: "Reduz DEF do alvo em 50% ate trocar.",
+  taunt: "Forca o alvo a usar moves de ataque por 2 turnos.",
+  spikes: "Arma Spikes no lado inimigo para causar dano em switches futuros.",
+  recover: "Cura 20% do HP compartilhado maximo.",
+  mega_punch: "Golpe de dano flat 20.",
+  bounce_kick: "Da dano flat 5 e tenta fazer auto-switch para o aliado escolhido.",
+  meditate: "Aumenta o ATK por estagios (stackavel).",
+  ki_blast: "Golpe de dano flat 20.",
+  endure: "Sobrevive ao dano letal no turno (minimo 1% HP) e ganha DEX ao ativar.",
+  protect: "Bloqueia dano no turno. Compartilha cooldown com Endure.",
+  none: "Nao faz acao neste turno."
+};
 var PLAYER_SLOTS = ["player1", "player2"];
 var LAST_ROOM_KEY = "vibi_showdown_last_room";
 var LAST_PLAYER_NAME_KEY = "vibi_showdown_last_player_name";
@@ -5438,6 +5468,7 @@ var chat_input = document.getElementById("chat-input");
 var chat_send = document.getElementById("chat-send");
 var participants_list = document.getElementById("participants-list");
 var stat_tooltip = document.getElementById("stat-tooltip");
+var move_tooltip = document.getElementById("move-tooltip");
 var player_title = document.getElementById("player-name");
 var player_meta = document.getElementById("player-meta");
 var enemy_title = document.getElementById("enemy-name");
@@ -5529,6 +5560,11 @@ var selected = [];
 var active_tab = null;
 var tooltip_payload_by_element = new WeakMap;
 var active_tooltip_target = null;
+var move_tooltip_target = null;
+var move_tooltip_pending_target = null;
+var move_tooltip_delay_timer = null;
+var move_tooltip_mouse_x = 0;
+var move_tooltip_mouse_y = 0;
 var relay_server_managed = false;
 var relay_ended = false;
 var relay_turn = 0;
@@ -6539,6 +6575,113 @@ function close_tooltip() {
   stat_tooltip.classList.remove("is-open");
   stat_tooltip.setAttribute("aria-hidden", "true");
 }
+function move_description(move_id) {
+  return MOVE_TOOLTIP_DESCRIPTIONS[move_id] ?? "Sem descricao disponivel.";
+}
+function clear_move_tooltip_delay() {
+  if (move_tooltip_delay_timer === null) {
+    return;
+  }
+  window.clearTimeout(move_tooltip_delay_timer);
+  move_tooltip_delay_timer = null;
+}
+function position_move_tooltip(client_x, client_y) {
+  if (!move_tooltip)
+    return;
+  const offset = 14;
+  const margin = 10;
+  const rect = move_tooltip.getBoundingClientRect();
+  let left = client_x + offset;
+  let top = client_y + offset;
+  if (left + rect.width > window.innerWidth - margin) {
+    left = client_x - rect.width - offset;
+  }
+  if (top + rect.height > window.innerHeight - margin) {
+    top = client_y - rect.height - offset;
+  }
+  left = Math.max(margin, left);
+  top = Math.max(margin, top);
+  move_tooltip.style.left = `${left}px`;
+  move_tooltip.style.top = `${top}px`;
+}
+function open_move_tooltip(target) {
+  if (!move_tooltip)
+    return;
+  const move_id = target.dataset.moveId;
+  if (!move_id)
+    return;
+  const label = target.dataset.moveLabel || MOVE_LABELS[move_id] || move_id;
+  move_tooltip.innerHTML = "";
+  const title = document.createElement("div");
+  title.className = "move-tooltip-title";
+  title.textContent = label;
+  const desc = document.createElement("div");
+  desc.className = "move-tooltip-desc";
+  desc.textContent = move_description(move_id);
+  move_tooltip.append(title, desc);
+  move_tooltip_target = target;
+  move_tooltip.classList.add("is-open");
+  move_tooltip.setAttribute("aria-hidden", "false");
+  position_move_tooltip(move_tooltip_mouse_x, move_tooltip_mouse_y);
+}
+function close_move_tooltip() {
+  clear_move_tooltip_delay();
+  move_tooltip_pending_target = null;
+  move_tooltip_target = null;
+  if (!move_tooltip)
+    return;
+  move_tooltip.classList.remove("is-open");
+  move_tooltip.setAttribute("aria-hidden", "true");
+}
+function schedule_move_tooltip(target, event) {
+  if (!match_started) {
+    return;
+  }
+  const move_id = target.dataset.moveId;
+  if (!move_id) {
+    return;
+  }
+  move_tooltip_mouse_x = event.clientX;
+  move_tooltip_mouse_y = event.clientY;
+  move_tooltip_pending_target = target;
+  clear_move_tooltip_delay();
+  move_tooltip_delay_timer = window.setTimeout(() => {
+    move_tooltip_delay_timer = null;
+    if (move_tooltip_pending_target !== target) {
+      return;
+    }
+    open_move_tooltip(target);
+  }, MOVE_TOOLTIP_DELAY_MS);
+}
+function handle_move_button_hover_position(target, event) {
+  move_tooltip_mouse_x = event.clientX;
+  move_tooltip_mouse_y = event.clientY;
+  if (move_tooltip_target === target) {
+    position_move_tooltip(event.clientX, event.clientY);
+  }
+}
+function bind_move_button_tooltip(target) {
+  target.addEventListener("mouseenter", (event) => {
+    schedule_move_tooltip(target, event);
+  });
+  target.addEventListener("mousemove", (event) => {
+    handle_move_button_hover_position(target, event);
+  });
+  target.addEventListener("mouseleave", () => {
+    if (move_tooltip_pending_target === target) {
+      move_tooltip_pending_target = null;
+      clear_move_tooltip_delay();
+    }
+    if (move_tooltip_target === target) {
+      close_move_tooltip();
+    }
+  });
+  target.addEventListener("mousedown", () => {
+    if (move_tooltip_target === target || move_tooltip_pending_target === target) {
+      close_move_tooltip();
+    }
+  });
+}
 function append_log(line) {
   append_line(log_list, compact_slot_labels(line));
 }
@@ -7434,12 +7577,17 @@ function update_action_controls() {
       btn.textContent = `Move ${index + 1}`;
       btn.disabled = true;
       btn.classList.remove("selected-intent");
+      delete btn.dataset.moveId;
+      delete btn.dataset.moveLabel;
     });
     if (run_btn) {
       run_btn.textContent = "4. Run(+10% M.SPE)";
       run_btn.disabled = true;
       run_btn.classList.remove("selected-intent");
+      delete run_btn.dataset.moveId;
+      delete run_btn.dataset.moveLabel;
     }
+    close_move_tooltip();
     return;
   }
   const active_id = selected[0];
@@ -7461,6 +7609,8 @@ function update_action_controls() {
   move_buttons.forEach((btn, index) => {
     const move = active_moves[index] ?? "none";
     const label = MOVE_LABELS[move] || move;
+    btn.dataset.moveId = move;
+    btn.dataset.moveLabel = label;
     if (move === "protect" && guard_on_cooldown) {
       btn.textContent = `${index + 1}. Protect (cooldown)`;
       btn.disabled = true;
@@ -7482,6 +7632,8 @@ function update_action_controls() {
   });
   if (run_btn) {
     const run_disabled = controls_disabled || !!run_blocked_reason;
+    run_btn.dataset.moveId = "run";
+    run_btn.dataset.moveLabel = "Run";
     if (run_blocked_reason) {
       run_btn.textContent = `4. Run(+10% M.SPE) (${run_block_label_for_ui(run_blocked_reason)})`;
     } else {
@@ -7683,6 +7835,7 @@ function open_switch_modal(mode = "intent", move_index) {
     return;
   if ((mode === "intent" || mode === "bounce_kick") && !can_send_intent())
     return;
+  close_move_tooltip();
   if (mode === "bounce_kick") {
     if (!Number.isInteger(move_index)) {
       append_log("Bounce Kick unavailable: missing move index");
@@ -7885,6 +8038,7 @@ function reset_to_lobby_view() {
   selected_intent_turn = 0;
   clear_forced_switch_target();
   close_switch_modal(true);
+  close_move_tooltip();
   match_end.classList.remove("open");
   prematch.style.display = "";
   document.body.classList.add("prematch-open");
@@ -7899,6 +8053,7 @@ function handle_turn_start(data) {
   selected_intent = null;
   selected_intent_turn = 0;
   clear_forced_switch_target();
+  close_move_tooltip();
   status_turn.textContent = `${current_turn}`;
   update_deadline();
   if (current_turn === 1) {
@@ -8498,11 +8653,13 @@ move_buttons.forEach((btn, index) => {
   btn.addEventListener("click", () => {
     send_move_intent(index);
   });
+  bind_move_button_tooltip(btn);
 });
 if (run_btn) {
   run_btn.addEventListener("click", () => {
     send_run_intent();
   });
+  bind_move_button_tooltip(run_btn);
 }
 surrender_btn.addEventListener("click", () => {
   send_surrender();
@@ -8593,6 +8750,7 @@ document.addEventListener("mouseout", (event) => {
 });
 window.addEventListener("blur", () => {
   close_tooltip();
+  close_move_tooltip();
 });
 setInterval(update_deadline, 1000);
 setInterval(() => {
