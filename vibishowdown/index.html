@@ -743,6 +743,44 @@
         color: #c6d0ec;
       }
 
+      .move-tooltip {
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 85;
+        min-width: 220px;
+        max-width: 300px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(7, 10, 15, 0.96);
+        box-shadow: 0 16px 30px rgba(0, 0, 0, 0.45);
+        padding: 10px;
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(4px);
+        transition: opacity 0.12s ease, transform 0.12s ease;
+      }
+
+      .move-tooltip.is-open {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .move-tooltip-title {
+        font-family: "Sora", system-ui, sans-serif;
+        font-size: 13px;
+        font-weight: 700;
+        color: #f5f7ff;
+      }
+
+      .move-tooltip-desc {
+        margin-top: 6px;
+        font-family: "Space Mono", monospace;
+        font-size: 11px;
+        line-height: 1.35;
+        color: #d6def6;
+      }
+
       .side-panel {
         width: var(--side-chat-width);
         height: min(var(--game-size), 780px);
@@ -1781,6 +1819,7 @@
         </div>
       </div>
       <div id="stat-tooltip" class="stat-tooltip" aria-hidden="true"></div>
+      <div id="move-tooltip" class="move-tooltip" aria-hidden="true"></div>
     </div>
     <script type="module" src="./dist/index.js"></script>
   </body>
