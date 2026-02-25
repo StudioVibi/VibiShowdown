@@ -1218,8 +1218,7 @@
         display: grid;
         gap: 10px;
         min-height: 0;
-        --moves-h: 170px;
-        grid-template-rows: auto minmax(0, var(--moves-h)) minmax(0, 1fr) auto;
+        grid-template-rows: auto minmax(0, 2fr) minmax(0, 3fr) auto;
         overflow: hidden;
       }
 
@@ -1596,10 +1595,6 @@
         .setup-grid {
           grid-template-columns: 1fr;
           overflow: hidden;
-        }
-
-        .config {
-          --moves-h: 190px;
         }
 
         .stat-alloc-header,
