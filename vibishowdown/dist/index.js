@@ -1963,7 +1963,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 100, attack: 110, defense: 130, speed: 30 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultMoves: ["return", "seismic_toss", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -1974,7 +1974,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 100, attack: 35, defense: 60, speed: 160 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultMoves: ["return", "seismic_toss", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -1985,7 +1985,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 180, attack: 521, defense: 230, speed: 292 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultMoves: ["return", "seismic_toss", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -1996,7 +1996,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 950, attack: 0, defense: 0, speed: 188 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultMoves: ["return", "seismic_toss", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -2007,7 +2007,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 242, attack: 542, defense: 521, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultMoves: ["return", "seismic_toss", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -2018,7 +2018,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 325, attack: 396, defense: 396, speed: 396 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultMoves: ["return", "seismic_toss", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -2029,7 +2029,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 117, attack: 375, defense: 730, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultMoves: ["return", "seismic_toss", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -2040,7 +2040,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 242, attack: 417, defense: 250, speed: 521 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "seismic_toss", "agility"],
+    defaultMoves: ["return", "seismic_toss", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -2049,9 +2049,9 @@ var MONSTER_ROSTER = [
     role: "Cloyster Template",
     type: "def",
     stats: { level: 12, maxHp: 117, attack: 50, defense: 160, speed: 70 },
-    possibleMoves: ["bait", "seismic_toss", "none"],
+    possibleMoves: ["bait", "seismic_toss", "run", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["bait", "seismic_toss", "run", "none"],
+    defaultMoves: ["bait", "seismic_toss", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -2062,7 +2062,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 180, attack: 115, defense: 75, speed: 130 },
     possibleMoves: ["kick", "throw", "run", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["kick", "throw", "run", "none"],
+    defaultMoves: ["kick", "throw", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -2073,7 +2073,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 325, attack: 100, defense: 100, speed: 100 },
     possibleMoves: ["switch_sovietico", "team_cure", "run", "none"],
     possiblePassives: ["none"],
-    defaultMoves: ["switch_sovietico", "team_cure", "run", "none"],
+    defaultMoves: ["switch_sovietico", "team_cure", "none", "run"],
     defaultPassive: "none"
   }
 ];
@@ -2167,6 +2167,8 @@ function ensure_int(value, message) {
 function ensure_valid_type(monster) {
   ensure(monster.type === "buf" || monster.type === "def" || monster.type === "atk", `${monster.id}: invalid type ${monster.type}`);
 }
+var DEFAULT_MOVE_SLOTS = 4;
+var ACTIVE_MOVE_SLOTS = 3;
 function assert_monster_integrity(monsters) {
   for (const move of MOVE_CATALOG) {
     const components = move.components ?? move.collateral ?? [];
@@ -2200,22 +2202,31 @@ function assert_monster_integrity(monsters) {
     ensure(monster.id.length > 0, "monster id is required");
     ensure(!monster_ids.has(monster.id), `duplicate monster id: ${monster.id}`);
     monster_ids.add(monster.id);
-    ensure(monster.defaultMoves.length === 3, `${monster.id}: defaultMoves must contain exactly 3 entries`);
+    ensure(monster.defaultMoves.length === DEFAULT_MOVE_SLOTS, `${monster.id}: defaultMoves must contain exactly ${DEFAULT_MOVE_SLOTS} entries`);
     ensure_valid_type(monster);
     const possible_moves = new Set(monster.possibleMoves);
     ensure(possible_moves.size > 0, `${monster.id}: possibleMoves cannot be empty`);
+    ensure(possible_moves.has("run"), `${monster.id}: possibleMoves must include run`);
     for (const move_id of monster.possibleMoves) {
       ensure(MOVE_BY_ID.has(move_id), `${monster.id}: unknown move in possibleMoves: ${move_id}`);
     }
     const move_dedup = new Set;
-    for (const move_id of monster.defaultMoves) {
+    for (let i = 0;i < monster.defaultMoves.length; i++) {
+      const move_id = monster.defaultMoves[i];
       ensure(MOVE_BY_ID.has(move_id), `${monster.id}: unknown move in defaultMoves: ${move_id}`);
       ensure(possible_moves.has(move_id), `${monster.id}: default move not allowed: ${move_id}`);
+      if (i === DEFAULT_MOVE_SLOTS - 1) {
+        ensure(move_id === "run", `${monster.id}: last default move must be run`);
+        continue;
+      }
+      ensure(move_id !== "run", `${monster.id}: run is only allowed in last default move slot`);
       if (move_id !== "none") {
         ensure(!move_dedup.has(move_id), `${monster.id}: duplicate default move: ${move_id}`);
         move_dedup.add(move_id);
       }
     }
+    const active_default_moves = monster.defaultMoves.slice(0, ACTIVE_MOVE_SLOTS).filter((move_id) => move_id !== "none");
+    ensure(active_default_moves.length === 2, `${monster.id}: defaultMoves must contain exactly 2 active abilities in first ${ACTIVE_MOVE_SLOTS} slots`);
     ensure(monster.possiblePassives.length > 0, `${monster.id}: possiblePassives cannot be empty`);
     const possible_passives = new Set;
     for (const passive_id of monster.possiblePassives) {
