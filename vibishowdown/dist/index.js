@@ -1833,6 +1833,8 @@ function ping() {
 // src/data/moves.ts
 var MOVE_CATALOG = [
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
+  { id: "punch", label: "Punch", phaseId: "attack_01", attackMultiplier100: 0, damageType: "flat", flatDamage: 93 },
+  { id: "power", label: "Power", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "kick", label: "Kick", phaseId: "attack_01", attackMultiplier100: 120 },
   { id: "throw", label: "Throw", phaseId: "attack_01", attackMultiplier100: 100 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
@@ -1892,6 +1894,7 @@ var MOVE_CATALOG = [
   },
   { id: "spikes", label: "Spikes", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "recover", label: "Recover", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "heal", label: "Heal", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "mega_punch", label: "Mega Punch", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 20 },
   {
     id: "bounce_kick",
@@ -1902,7 +1905,7 @@ var MOVE_CATALOG = [
     flatDamage: 5
   },
   { id: "meditate", label: "Meditate", phaseId: "attack_01", attackMultiplier100: 0 },
-  { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 20 },
+  { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 0, damageType: "flat", flatDamage: 72 },
   { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },
   { id: "protect", label: "Protect", phaseId: "guard", attackMultiplier100: 100 },
   { id: "none", label: "none", phaseId: "attack_01", attackMultiplier100: 100 }
@@ -2011,11 +2014,11 @@ var MONSTER_ROSTER = [
     id: "knight",
     name: "Knight",
     role: "Metagross",
-    type: type_for_index(4),
+    type: "def",
     stats: { level: 12, maxHp: 242, attack: 542, defense: 521, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "seismic_toss", "none", "run"],
+    defaultMoves: ["return", "rejuvenation", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -2060,6 +2063,28 @@ var MONSTER_ROSTER = [
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "none", "run"],
+    defaultPassive: "none"
+  },
+  {
+    id: "vealkiria",
+    name: "Vealkiria",
+    role: "Valkyria ATK Template",
+    type: "atk",
+    stats: { level: 12, maxHp: 242, attack: 417, defense: 250, speed: 521 },
+    possibleMoves: ["punch", "heal", "run", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["punch", "heal", "none", "run"],
+    defaultPassive: "none"
+  },
+  {
+    id: "babydragonbuf",
+    name: "Baby Dragon Buff",
+    role: "Baby Dragon BUF Template",
+    type: "buf",
+    stats: { level: 12, maxHp: 100, attack: 110, defense: 130, speed: 30 },
+    possibleMoves: ["power", "ki_blast", "run", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["power", "ki_blast", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -2379,8 +2404,10 @@ var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "bait",
   "wish",
   "rejuvenation",
+  "power",
   "spikes",
   "recover",
+  "heal",
   "meditate",
   "belly_drum",
   "screech",
@@ -4296,7 +4323,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       data: { slot: opponent_slot }
     });
   }
-  const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn, { source: spec.id, ignoreArmor: spec.id === "seismic_toss" }, damage_taken_this_turn);
+  const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn, { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "punch" }, damage_taken_this_turn);
   const final_damage = defender_result.applied;
   log.push({
     type: "damage",
@@ -4357,6 +4384,24 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
     });
   } else if (spec.id === "seismic_toss") {
     const detail = `Seismic Toss: dmg = flat ${spec.flatDamage ?? 0} (ignores defense); final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: phase_id,
+      summary: detail,
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "punch") {
+    const detail = `Punch: true dmg = flat ${spec.flatDamage ?? 0} (ignores defense/armor); final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: phase_id,
+      summary: detail,
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "ki_blast") {
+    const detail = `Ki Blast: dmg = flat ${spec.flatDamage ?? 0}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -4629,6 +4674,54 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     finalize_move_success();
     return;
   }
+  if (spec.id === "power") {
+    ensure_state_runtime_defaults(state);
+    state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter((entry) => entry.id !== "power_speed_down");
+    refresh_active_monster_stats_for_slot(state, player_slot);
+    const before_stage = attacker.attackStage;
+    const before_attack = attacker.attack;
+    const before_speed = attacker.speed;
+    if (before_stage < STAT_STAGE_MAX) {
+      apply_buff_debuff_component(state, log, player_slot, {
+        kind: "buff_debuff",
+        id: "power_attack_up",
+        target: "self",
+        stat: "attack",
+        deltaPercent: 50,
+        clearsOnSwitch: true
+      }, player_slot, spec.id);
+    }
+    apply_buff_debuff_component(state, log, player_slot, {
+      kind: "buff_debuff",
+      id: "power_speed_down",
+      target: "self",
+      stat: "speed",
+      deltaPercent: -10,
+      clearsOnSwitch: true
+    }, player_slot, spec.id);
+    const after_stage = attacker.attackStage;
+    const after_attack = attacker.attack;
+    const after_speed = attacker.speed;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Power: ATK stage ${before_stage} -> ${after_stage} (${before_attack} -> ${after_attack}) e DEX -10% do base (${before_speed} -> ${after_speed})`,
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        target: attacker.id,
+        stageBefore: before_stage,
+        stageAfter: after_stage,
+        attackBefore: before_attack,
+        attackAfter: after_attack,
+        speedBefore: before_speed,
+        speedAfter: after_speed
+      }
+    });
+    finalize_move_success();
+    return;
+  }
   if (spec.id === "switch_sovietico") {
     ensure_state_runtime_defaults(state);
     const queued_slots = [];
@@ -4772,6 +4865,31 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       turn: state.turn,
       phase: spec.phaseId,
       summary: `${attacker.name} healed ${Math.max(0, after_hp - before_hp)} with Recover`,
+      data: {
+        slot: player_slot,
+        source: attacker.id,
+        target: attacker.id,
+        amount: Math.max(0, after_hp - before_hp),
+        before: before_hp,
+        after: after_hp
+      }
+    });
+    finalize_move_success();
+    return;
+  }
+  if (spec.id === "heal") {
+    const before_hp = player.sharedHp;
+    const heal_amount = Math.max(0, mul_div_round(player.sharedHpMax, 1, 5));
+    const after_hp = Math.min(player.sharedHpMax, before_hp + heal_amount);
+    if (after_hp !== before_hp) {
+      sync_player_shared_hp(state, player_slot, after_hp);
+      hp_changed.add(attacker);
+    }
+    log.push({
+      type: "passive_heal",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${attacker.name} healed ${Math.max(0, after_hp - before_hp)} with Heal`,
       data: {
         slot: player_slot,
         source: attacker.id,
@@ -5607,10 +5725,12 @@ var EV_KEYS = ["hp", "atk", "def", "spe"];
 var STAT_STAGE_MIN2 = -6;
 var STAT_STAGE_MAX2 = 6;
 var LOBBY_MOVE_SLOTS = 3;
-var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien", "night"]);
+var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien", "night", "vealkiria", "babydragonbuf"]);
 var MOVE_TOOLTIP_DELAY_MS = 2000;
 var MOVE_TOOLTIP_DESCRIPTIONS = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
+  punch: "Soco de dano verdadeiro fixo 93.",
+  power: "Aumenta ATK em +1 stage e reduz DEX em 10% do base.",
   kick: "Golpe fisico forte de dano escalado.",
   throw: "Golpe com formula fixa (90x90) escalada pelo nivel de formula.",
   agility: "Buff de DEX (x2) ate trocar.",
@@ -5632,10 +5752,11 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   taunt: "Forca o alvo a usar moves de ataque por 2 turnos.",
   spikes: "Arma Spikes no lado inimigo para causar dano em switches futuros.",
   recover: "Cura 20% do HP compartilhado maximo.",
+  heal: "Cura 20% do HP compartilhado maximo.",
   mega_punch: "Golpe de dano flat 20.",
   bounce_kick: "Da dano flat 5 e tenta fazer auto-switch para o aliado escolhido.",
   meditate: "Aumenta o ATK por estagios (stackavel).",
-  ki_blast: "Golpe de dano flat 20.",
+  ki_blast: "Golpe de dano flat 72.",
   endure: "Sobrevive ao dano letal no turno (minimo 1% HP) e ganha DEX ao ativar.",
   protect: "Bloqueia dano no turno. Compartilha cooldown com Endure.",
   none: "Nao faz acao neste turno."
@@ -5830,7 +5951,9 @@ var ICON_ALIASES = {
   armoth: "panda",
   kairus: "harpy",
   farien: "miren",
-  night: "knight"
+  night: "knight",
+  vealkiria: "valkyria",
+  babydragonbuf: "babydragon"
 };
 function icon_path(id) {
   const resolved = ICON_ALIASES[id] ?? id;
