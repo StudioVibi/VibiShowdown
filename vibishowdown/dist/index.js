@@ -1905,7 +1905,7 @@ var MOVE_CATALOG = [
     flatDamage: 5
   },
   { id: "meditate", label: "Meditate", phaseId: "attack_01", attackMultiplier100: 0 },
-  { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 0, damageType: "flat", flatDamage: 72 },
+  { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },
   { id: "protect", label: "Protect", phaseId: "guard", attackMultiplier100: 100 },
   { id: "none", label: "none", phaseId: "attack_01", attackMultiplier100: 100 }
@@ -4614,7 +4614,9 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
   const effective_defense = effective_defense_base <= 0 ? 1 : effective_defense_base;
   const level_term = mul_div_floor(2, formula_level, 5) + 2;
   let raw_damage = 0;
-  if (spec.id === "throw") {
+  if (spec.id === "ki_blast") {
+    raw_damage = Math.max(0, mul_div_floor(effective_attack, 75, 100));
+  } else if (spec.id === "throw") {
     const scaled_by_defense = mul_div_floor(level_term * THROW_FIXED_OFFENSE_TERM, 1, effective_defense);
     raw_damage = mul_div_floor(scaled_by_defense, 1, 50) + 2;
   } else if (damage_type === "flat") {
@@ -4642,7 +4644,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       data: { slot: opponent_slot }
     });
   }
-  const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn, { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "punch" }, damage_taken_this_turn);
+  const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn, { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "punch" || spec.id === "ki_blast" }, damage_taken_this_turn);
   const final_damage = defender_result.applied;
   log.push({
     type: "damage",
@@ -4720,7 +4722,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "ki_blast") {
-    const detail = `Ki Blast: dmg = flat ${spec.flatDamage ?? 0}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}`;
+    const detail = `Ki Blast: true dmg = floor(75% STR) = floor(0.75*${effective_attack}) = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -6079,7 +6081,7 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   mega_punch: "Golpe de dano flat 20.",
   bounce_kick: "Da dano flat 5 e tenta fazer auto-switch para o aliado escolhido.",
   meditate: "Aumenta o ATK por estagios (stackavel).",
-  ki_blast: "Golpe de dano flat 72.",
+  ki_blast: "Dano verdadeiro baseado na STR efetiva: 75% da STR (ignora DEF/armor).",
   endure: "Sobrevive ao dano letal no turno (minimo 1% HP) e ganha DEX ao ativar.",
   protect: "Bloqueia dano no turno. Compartilha cooldown com Endure.",
   none: "Nao faz acao neste turno."

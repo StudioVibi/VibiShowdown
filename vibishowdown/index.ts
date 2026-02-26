@@ -100,7 +100,7 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   mega_punch: "Golpe de dano flat 20.",
   bounce_kick: "Da dano flat 5 e tenta fazer auto-switch para o aliado escolhido.",
   meditate: "Aumenta o ATK por estagios (stackavel).",
-  ki_blast: "Golpe de dano flat 72.",
+  ki_blast: "Dano verdadeiro baseado na STR efetiva: 75% da STR (ignora DEF/armor).",
   endure: "Sobrevive ao dano letal no turno (minimo 1% HP) e ganha DEX ao ativar.",
   protect: "Bloqueia dano no turno. Compartilha cooldown com Endure.",
   none: "Nao faz acao neste turno."

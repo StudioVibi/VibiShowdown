@@ -2863,7 +2863,9 @@ function apply_damage_move(
   const effective_defense = effective_defense_base <= 0 ? 1 : effective_defense_base;
   const level_term = mul_div_floor(2, formula_level, 5) + 2;
   let raw_damage = 0;
-  if (spec.id === "throw") {
+  if (spec.id === "ki_blast") {
+    raw_damage = Math.max(0, mul_div_floor(effective_attack, 75, 100));
+  } else if (spec.id === "throw") {
     const scaled_by_defense = mul_div_floor(level_term * THROW_FIXED_OFFENSE_TERM, 1, effective_defense);
     raw_damage = mul_div_floor(scaled_by_defense, 1, 50) + 2;
   } else if (damage_type === "flat") {
@@ -2901,7 +2903,7 @@ function apply_damage_move(
     damage,
     hp_changed,
     took_damage_this_turn,
-    { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "punch" },
+    { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "punch" || spec.id === "ki_blast" },
     damage_taken_this_turn
   );
   const final_damage = defender_result.applied;
@@ -3003,7 +3005,7 @@ function apply_damage_move(
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "ki_blast") {
-    const detail = `Ki Blast: dmg = flat ${spec.flatDamage ?? 0}; final=${final_damage}${
+    const detail = `Ki Blast: true dmg = floor(75% STR) = floor(0.75*${effective_attack}) = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }`;
     log.push({

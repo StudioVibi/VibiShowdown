@@ -74,7 +74,7 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
     flatDamage: 5
   },
   { id: "meditate", label: "Meditate", phaseId: "attack_01", attackMultiplier100: 0 },
-  { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 0, damageType: "flat", flatDamage: 72 },
+  { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },
   { id: "protect", label: "Protect", phaseId: "guard", attackMultiplier100: 100 },
   { id: "none", label: "none", phaseId: "attack_01", attackMultiplier100: 100 }
