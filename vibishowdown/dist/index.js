@@ -2012,7 +2012,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "knight",
-    name: "Knight",
+    name: "Mon1",
     role: "Metagross",
     type: "def",
     stats: { level: 12, maxHp: 242, attack: 80, defense: 160, speed: 75 },
@@ -2023,7 +2023,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "night_sekyps",
-    name: "Night Sekyps",
+    name: "Knight",
     role: "Metagross Sekyps",
     type: "atk",
     stats: { level: 12, maxHp: 242, attack: 542, defense: 521, speed: 271 },

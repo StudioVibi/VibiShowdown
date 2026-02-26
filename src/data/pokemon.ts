@@ -58,7 +58,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
   },
   {
     id: "knight",
-    name: "Knight2",
+    name: "Mon1",
     role: "Metagross",
     type: "def",
     stats: { level: 12, maxHp: 242, attack: 80, defense: 160, speed: 85 },
@@ -69,7 +69,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
   },
   {
     id: "night_sekyps",
-    name: "Night Sekyps",
+    name: "Knight",
     role: "Metagross Sekyps",
     type: "atk",
     stats: { level: 12, maxHp: 242, attack: 115, defense: 75, speed: 120 },
