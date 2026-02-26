@@ -2,6 +2,8 @@ import type { MoveCatalogEntry } from "./types.ts";
 
 export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
+  { id: "punch", label: "Punch", phaseId: "attack_01", attackMultiplier100: 0, damageType: "flat", flatDamage: 93 },
+  { id: "power", label: "Power", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "kick", label: "Kick", phaseId: "attack_01", attackMultiplier100: 120 },
   { id: "throw", label: "Throw", phaseId: "attack_01", attackMultiplier100: 100 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
@@ -61,6 +63,7 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
   },
   { id: "spikes", label: "Spikes", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "recover", label: "Recover", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "heal", label: "Heal", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "mega_punch", label: "Mega Punch", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 20 },
   {
     id: "bounce_kick",
@@ -71,7 +74,7 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
     flatDamage: 5
   },
   { id: "meditate", label: "Meditate", phaseId: "attack_01", attackMultiplier100: 0 },
-  { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 20 },
+  { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 0, damageType: "flat", flatDamage: 72 },
   { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },
   { id: "protect", label: "Protect", phaseId: "guard", attackMultiplier100: 100 },
   { id: "none", label: "none", phaseId: "attack_01", attackMultiplier100: 100 }

@@ -73,8 +73,10 @@ const TAUNT_BLOCKED_MOVE_IDS = new Set([
   "bait",
   "wish",
   "rejuvenation",
+  "power",
   "spikes",
   "recover",
+  "heal",
   "meditate",
   "belly_drum",
   "screech",
@@ -2512,7 +2514,7 @@ function apply_damage_move(
     damage,
     hp_changed,
     took_damage_this_turn,
-    { source: spec.id, ignoreArmor: spec.id === "seismic_toss" },
+    { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "punch" },
     damage_taken_this_turn
   );
   const final_damage = defender_result.applied;
@@ -2593,6 +2595,28 @@ function apply_damage_move(
     });
   } else if (spec.id === "seismic_toss") {
     const detail = `Seismic Toss: dmg = flat ${spec.flatDamage ?? 0} (ignores defense); final=${final_damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: phase_id,
+      summary: detail,
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "punch") {
+    const detail = `Punch: true dmg = flat ${spec.flatDamage ?? 0} (ignores defense/armor); final=${final_damage}${
+      was_blocked ? " (blocked by Protect)" : ""
+    }`;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: phase_id,
+      summary: detail,
+      data: { move: spec.id, damage: final_damage, blocked: was_blocked }
+    });
+  } else if (spec.id === "ki_blast") {
+    const detail = `Ki Blast: dmg = flat ${spec.flatDamage ?? 0}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }`;
     log.push({
@@ -2913,6 +2937,71 @@ function apply_move(
     return;
   }
 
+  if (spec.id === "power") {
+    ensure_state_runtime_defaults(state);
+    state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter(
+      (entry) => entry.id !== "power_speed_down"
+    );
+    refresh_active_monster_stats_for_slot(state, player_slot);
+    const before_stage = attacker.attackStage;
+    const before_attack = attacker.attack;
+    const before_speed = attacker.speed;
+    if (before_stage < STAT_STAGE_MAX) {
+      apply_buff_debuff_component(
+        state,
+        log,
+        player_slot,
+        {
+          kind: "buff_debuff",
+          id: "power_attack_up",
+          target: "self",
+          stat: "attack",
+          deltaPercent: 50,
+          clearsOnSwitch: true
+        },
+        player_slot,
+        spec.id
+      );
+    }
+    apply_buff_debuff_component(
+      state,
+      log,
+      player_slot,
+      {
+        kind: "buff_debuff",
+        id: "power_speed_down",
+        target: "self",
+        stat: "speed",
+        deltaPercent: -10,
+        clearsOnSwitch: true
+      },
+      player_slot,
+      spec.id
+    );
+    const after_stage = attacker.attackStage;
+    const after_attack = attacker.attack;
+    const after_speed = attacker.speed;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Power: ATK stage ${before_stage} -> ${after_stage} (${before_attack} -> ${after_attack}) e DEX -10% do base (${before_speed} -> ${after_speed})`,
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        target: attacker.id,
+        stageBefore: before_stage,
+        stageAfter: after_stage,
+        attackBefore: before_attack,
+        attackAfter: after_attack,
+        speedBefore: before_speed,
+        speedAfter: after_speed
+      }
+    });
+    finalize_move_success();
+    return;
+  }
+
   if (spec.id === "switch_sovietico") {
     ensure_state_runtime_defaults(state);
     const queued_slots: PlayerSlot[] = [];
@@ -3076,6 +3165,32 @@ function apply_move(
       turn: state.turn,
       phase: spec.phaseId,
       summary: `${attacker.name} healed ${Math.max(0, after_hp - before_hp)} with Recover`,
+      data: {
+        slot: player_slot,
+        source: attacker.id,
+        target: attacker.id,
+        amount: Math.max(0, after_hp - before_hp),
+        before: before_hp,
+        after: after_hp
+      }
+    });
+    finalize_move_success();
+    return;
+  }
+
+  if (spec.id === "heal") {
+    const before_hp = player.sharedHp;
+    const heal_amount = Math.max(0, mul_div_round(player.sharedHpMax, 1, 5));
+    const after_hp = Math.min(player.sharedHpMax, before_hp + heal_amount);
+    if (after_hp !== before_hp) {
+      sync_player_shared_hp(state, player_slot, after_hp);
+      hp_changed.add(attacker);
+    }
+    log.push({
+      type: "passive_heal",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${attacker.name} healed ${Math.max(0, after_hp - before_hp)} with Heal`,
       data: {
         slot: player_slot,
         source: attacker.id,
