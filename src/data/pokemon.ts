@@ -61,7 +61,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     name: "Knight",
     role: "Metagross",
     type: "def",
-    stats: { level: 12, maxHp: 242, attack: 542, defense: 521, speed: 271 },
+    stats: { level: 12, maxHp: 242, attack: 120, defense: 521, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "rejuvenation", "none", "run"],
