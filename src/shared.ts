@@ -103,6 +103,17 @@ export type ActiveBuffDebuffState = {
   clearsOnSwitch: true;
 };
 
+export type ActiveHealBuffState = {
+  id: string;
+  sourceSlot: PlayerSlot | null;
+  source: string;
+  healPerTurn: number;
+  growthPerTurn: number;
+  startTurn: number;
+  remainingTicks: number | null;
+  clearsOnSwitch: boolean;
+};
+
 export type MatchEndReason = "hp_zero" | "turn_limit" | "surrender" | "mSPE_escape";
 
 export type PendingSwitchReason = "none" | "switch_sovietico";
@@ -141,6 +152,7 @@ export type GameState = {
   activeEffectsBySlot: Record<PlayerSlot, ActiveEffectState[]>;
   activeCursesBySlot: Record<PlayerSlot, ActiveCurseState[]>;
   activeBuffDebuffsBySlot: Record<PlayerSlot, ActiveBuffDebuffState[]>;
+  activeHealBuffsBySlot: Record<PlayerSlot, ActiveHealBuffState[]>;
   lastMoveIndexBySlot: Record<PlayerSlot, number | null>;
 };
 

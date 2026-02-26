@@ -7,6 +7,7 @@ import type {
   ActiveBuffDebuffState,
   ActiveCurseState,
   ActiveEffectState,
+  ActiveHealBuffState,
   BuffDebuffStat,
   MSPETelemetry,
   PendingSwitchReason,
@@ -115,6 +116,10 @@ const MSPE_GAP_GOAL_PERCENT = 33;
 const RUN_MSPE_GAIN_PERCENT = 10;
 const SEKYPS_DAMAGE_PER_STACK = 24;
 const REJUVENATION_REGEN_PERCENT_PER_STACK = 5;
+const TYPE_BUF_REGEN_HEAL_BUFF_ID = "type_buf_regen";
+const REJUVENATION_REGEN_HEAL_BUFF_ID = "rejuvenation_regen";
+const HEAL_MOVE_HEAL_BUFF_ID = "heal_move";
+const RECOVER_MOVE_HEAL_BUFF_ID = "recover_move";
 const EFFECT_IDS: readonly EffectCollateralId[] = [
   "confuse",
   "sleep",
@@ -392,6 +397,10 @@ function empty_active_buff_debuffs(): Record<PlayerSlot, ActiveBuffDebuffState[]
   return empty_slot_record([], []);
 }
 
+function empty_active_heal_buffs(): Record<PlayerSlot, ActiveHealBuffState[]> {
+  return empty_slot_record([], []);
+}
+
 function empty_last_move_index(): Record<PlayerSlot, number | null> {
   return empty_slot_record<number | null>(null, null);
 }
@@ -529,6 +538,61 @@ function normalize_active_buff_debuffs(input: unknown): ActiveBuffDebuffState[] 
   return normalized;
 }
 
+function normalize_active_heal_buffs(input: unknown): ActiveHealBuffState[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const normalized: ActiveHealBuffState[] = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const row = item as {
+      id?: unknown;
+      sourceSlot?: unknown;
+      source?: unknown;
+      healPerTurn?: unknown;
+      growthPerTurn?: unknown;
+      startTurn?: unknown;
+      remainingTicks?: unknown;
+      clearsOnSwitch?: unknown;
+    };
+    if (typeof row.id !== "string" || row.id.trim().length === 0) {
+      continue;
+    }
+    const source_slot: PlayerSlot | null =
+      row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null;
+    const source = typeof row.source === "string" && row.source.trim().length > 0 ? row.source : "unknown";
+    const heal_per_turn = Math.max(
+      0,
+      normalize_int(typeof row.healPerTurn === "number" ? row.healPerTurn : 0, 0, 0)
+    );
+    const growth_per_turn = normalize_int(
+      typeof row.growthPerTurn === "number" ? row.growthPerTurn : 0,
+      0,
+      -1000000
+    );
+    const start_turn = Math.max(0, normalize_int(typeof row.startTurn === "number" ? row.startTurn : 0, 0, 0));
+    const remaining_ticks_raw = row.remainingTicks;
+    const remaining_ticks =
+      typeof remaining_ticks_raw === "number" && Number.isFinite(remaining_ticks_raw)
+        ? Math.max(1, normalize_int(remaining_ticks_raw, 1, 1))
+        : null;
+    const clears_on_switch = row.clearsOnSwitch === true;
+    normalized.push({
+      id: row.id,
+      sourceSlot: source_slot,
+      source,
+      healPerTurn: heal_per_turn,
+      growthPerTurn: growth_per_turn,
+      startTurn: start_turn,
+      remainingTicks: remaining_ticks,
+      clearsOnSwitch: clears_on_switch
+    });
+  }
+  return normalized;
+}
+
 function effect_list(state: GameState, slot: PlayerSlot): ActiveEffectState[] {
   return state.activeEffectsBySlot?.[slot] ?? [];
 }
@@ -539,6 +603,10 @@ function curse_list(state: GameState, slot: PlayerSlot): ActiveCurseState[] {
 
 function buff_debuff_list(state: GameState, slot: PlayerSlot): ActiveBuffDebuffState[] {
   return state.activeBuffDebuffsBySlot?.[slot] ?? [];
+}
+
+function heal_buff_list(state: GameState, slot: PlayerSlot): ActiveHealBuffState[] {
+  return state.activeHealBuffsBySlot?.[slot] ?? [];
 }
 
 function effect_state(state: GameState, slot: PlayerSlot, effect_id: EffectCollateralId): ActiveEffectState | null {
@@ -554,6 +622,15 @@ function curse_state(state: GameState, slot: PlayerSlot, curse_id: CurseCollater
   for (const curse of curse_list(state, slot)) {
     if (curse.id === curse_id) {
       return curse;
+    }
+  }
+  return null;
+}
+
+function heal_buff_state(state: GameState, slot: PlayerSlot, heal_buff_id: string): ActiveHealBuffState | null {
+  for (const buff of heal_buff_list(state, slot)) {
+    if (buff.id === heal_buff_id) {
+      return buff;
     }
   }
   return null;
@@ -709,6 +786,281 @@ function upsert_curse(
       alreadyActive: false
     }
   });
+}
+
+type HealBuffUpsertOptions = {
+  id: string;
+  source: string;
+  healPerTurn: number;
+  growthPerTurn?: number;
+  startTurn?: number;
+  remainingTicks?: number | null;
+  clearsOnSwitch?: boolean;
+};
+
+function upsert_heal_buff(
+  state: GameState,
+  log: EventLog[],
+  target_slot: PlayerSlot,
+  source_slot: PlayerSlot | null,
+  source_move_id: string,
+  options: HealBuffUpsertOptions
+): ActiveHealBuffState {
+  ensure_state_runtime_defaults(state);
+  const heal_per_turn = Math.max(0, normalize_int(options.healPerTurn, 0, 0));
+  const growth_per_turn = normalize_int(options.growthPerTurn ?? 0, 0, -1000000);
+  const start_turn = Math.max(0, normalize_int(options.startTurn ?? state.turn, state.turn, 0));
+  const remaining_ticks =
+    typeof options.remainingTicks === "number" && Number.isFinite(options.remainingTicks)
+      ? Math.max(1, normalize_int(options.remainingTicks, 1, 1))
+      : null;
+  const clears_on_switch = options.clearsOnSwitch === true;
+
+  const buffs = state.activeHealBuffsBySlot[target_slot];
+  const existing = buffs.find((entry) => entry.id === options.id) ?? null;
+  if (existing) {
+    const before_heal_per_turn = existing.healPerTurn;
+    const before_growth_per_turn = existing.growthPerTurn;
+    existing.healPerTurn = Math.max(0, existing.healPerTurn + heal_per_turn);
+    existing.growthPerTurn = normalize_int(existing.growthPerTurn + growth_per_turn, existing.growthPerTurn, -1000000);
+    existing.startTurn = Math.min(existing.startTurn, start_turn);
+    if (existing.remainingTicks === null || remaining_ticks === null) {
+      existing.remainingTicks = null;
+    } else {
+      existing.remainingTicks = Math.max(existing.remainingTicks, remaining_ticks);
+    }
+    existing.clearsOnSwitch = existing.clearsOnSwitch || clears_on_switch;
+    existing.source = options.source;
+    existing.sourceSlot = source_slot;
+    log.push({
+      type: "heal_buff_apply",
+      turn: state.turn,
+      summary: `Heal buff ${options.id} updated on ${target_slot} (${before_heal_per_turn} -> ${existing.healPerTurn}/turn)`,
+      data: {
+        slot: source_slot,
+        targetSlot: target_slot,
+        move: source_move_id,
+        buff: options.id,
+        source: options.source,
+        healPerTurnBefore: before_heal_per_turn,
+        healPerTurnAfter: existing.healPerTurn,
+        growthPerTurnBefore: before_growth_per_turn,
+        growthPerTurnAfter: existing.growthPerTurn,
+        startTurn: existing.startTurn,
+        remainingTicks: existing.remainingTicks,
+        clearsOnSwitch: existing.clearsOnSwitch
+      }
+    });
+    return existing;
+  }
+
+  const created: ActiveHealBuffState = {
+    id: options.id,
+    sourceSlot: source_slot,
+    source: options.source,
+    healPerTurn: heal_per_turn,
+    growthPerTurn: growth_per_turn,
+    startTurn: start_turn,
+    remainingTicks: remaining_ticks,
+    clearsOnSwitch: clears_on_switch
+  };
+  buffs.push(created);
+  log.push({
+    type: "heal_buff_apply",
+    turn: state.turn,
+    summary: `Heal buff ${options.id} applied on ${target_slot} (+${heal_per_turn}/turn)`,
+    data: {
+      slot: source_slot,
+      targetSlot: target_slot,
+      move: source_move_id,
+      buff: options.id,
+      source: options.source,
+      healPerTurn: created.healPerTurn,
+      growthPerTurn: created.growthPerTurn,
+      startTurn: created.startTurn,
+      remainingTicks: created.remainingTicks,
+      clearsOnSwitch: created.clearsOnSwitch
+    }
+  });
+  return created;
+}
+
+function apply_heal_amount(
+  state: GameState,
+  slot: PlayerSlot,
+  hp_changed: WeakSet<MonsterState>,
+  heal_amount: number
+): { before: number; after: number; healed: number } {
+  const player = state.players[slot];
+  const target = active_monster(player);
+  const before_hp = player.sharedHp;
+  const heal_attempt = Math.max(0, normalize_int(heal_amount, 0, 0));
+  const after_hp = Math.min(player.sharedHpMax, before_hp + heal_attempt);
+  const healed = Math.max(0, after_hp - before_hp);
+  if (healed > 0) {
+    sync_player_shared_hp(state, slot, after_hp);
+    hp_changed.add(target);
+  }
+  return { before: before_hp, after: after_hp, healed };
+}
+
+function apply_heal_buff_tick(
+  state: GameState,
+  log: EventLog[],
+  slot: PlayerSlot,
+  hp_changed: WeakSet<MonsterState>,
+  buff: ActiveHealBuffState,
+  phase: string = END_PHASE_ID
+): boolean {
+  const player = state.players[slot];
+  const target = active_monster(player);
+  const heal_per_turn = Math.max(0, normalize_int(buff.healPerTurn, 0, 0));
+  const next_heal_per_turn = Math.max(0, normalize_int(buff.healPerTurn + buff.growthPerTurn, buff.healPerTurn, 0));
+  const result = apply_heal_amount(state, slot, hp_changed, heal_per_turn);
+
+  if (buff.id === TYPE_BUF_REGEN_HEAL_BUFF_ID) {
+    const regen_stack = Math.max(0, Math.floor(heal_per_turn / TYPE_PASSIVE_BUF_REGEN_PER_STACK));
+    state.typePassiveRegenStacks[slot] = regen_stack;
+    log.push({
+      type: "type_passive_regen",
+      turn: state.turn,
+      phase,
+      summary: `${target.name} healed ${result.healed} from BUF passive (${regen_stack} stack)`,
+      data: {
+        slot,
+        target: target.id,
+        regenStack: regen_stack,
+        healPerStack: TYPE_PASSIVE_BUF_REGEN_PER_STACK,
+        healAttempted: heal_per_turn,
+        healApplied: result.healed,
+        before: result.before,
+        after: result.after
+      }
+    });
+  } else if (buff.id === REJUVENATION_REGEN_HEAL_BUFF_ID) {
+    const growth = Math.max(1, Math.max(0, normalize_int(buff.growthPerTurn, 0, 0)));
+    const stack = Math.max(1, Math.floor(Math.max(1, heal_per_turn) / growth));
+    const next_stack = Math.max(1, Math.floor(Math.max(1, next_heal_per_turn) / growth));
+    state.rejuvenationStacks[slot] = next_stack;
+    state.rejuvenationStartTurn[slot] = buff.startTurn;
+    log.push({
+      type: "rejuvenation_regen",
+      turn: state.turn,
+      phase,
+      summary: `${target.name} healed ${result.healed} from Rejuvenation regen (${stack * REJUVENATION_REGEN_PERCENT_PER_STACK}%)`,
+      data: {
+        slot,
+        target: target.id,
+        stack,
+        nextStack: next_stack,
+        healPercent: stack * REJUVENATION_REGEN_PERCENT_PER_STACK,
+        nextHealPercent: next_stack * REJUVENATION_REGEN_PERCENT_PER_STACK,
+        healAttempted: heal_per_turn,
+        healApplied: result.healed,
+        before: result.before,
+        after: result.after
+      }
+    });
+  } else if (buff.id === HEAL_MOVE_HEAL_BUFF_ID) {
+    log.push({
+      type: "passive_heal",
+      turn: state.turn,
+      phase,
+      summary: `${target.name} healed ${result.healed} with Heal`,
+      data: {
+        slot,
+        source: target.id,
+        target: target.id,
+        amount: result.healed,
+        before: result.before,
+        after: result.after
+      }
+    });
+  } else if (buff.id === RECOVER_MOVE_HEAL_BUFF_ID) {
+    log.push({
+      type: "passive_heal",
+      turn: state.turn,
+      phase,
+      summary: `${target.name} healed ${result.healed} with Recover`,
+      data: {
+        slot,
+        source: target.id,
+        target: target.id,
+        amount: result.healed,
+        before: result.before,
+        after: result.after
+      }
+    });
+  } else {
+    log.push({
+      type: "heal_buff_tick",
+      turn: state.turn,
+      phase,
+      summary: `${target.name} healed ${result.healed} from ${buff.source}`,
+      data: {
+        slot,
+        sourceSlot: buff.sourceSlot,
+        source: buff.source,
+        buff: buff.id,
+        healAttempted: heal_per_turn,
+        healApplied: result.healed,
+        before: result.before,
+        after: result.after
+      }
+    });
+  }
+
+  buff.healPerTurn = next_heal_per_turn;
+  if (buff.remainingTicks !== null) {
+    buff.remainingTicks = Math.max(0, buff.remainingTicks - 1);
+  }
+  return buff.remainingTicks === null || buff.remainingTicks > 0;
+}
+
+function apply_heal_buffs_end_turn_by_id(
+  state: GameState,
+  log: EventLog[],
+  slot: PlayerSlot,
+  hp_changed: WeakSet<MonsterState>,
+  heal_buff_id: string
+): void {
+  ensure_state_runtime_defaults(state);
+  const buffs = state.activeHealBuffsBySlot[slot];
+  if (!Array.isArray(buffs) || buffs.length === 0) {
+    return;
+  }
+
+  const next: ActiveHealBuffState[] = [];
+  for (const buff of buffs) {
+    if (buff.id !== heal_buff_id) {
+      next.push(buff);
+      continue;
+    }
+    if (state.turn < buff.startTurn) {
+      next.push(buff);
+      continue;
+    }
+    const keep = apply_heal_buff_tick(state, log, slot, hp_changed, buff, END_PHASE_ID);
+    if (keep) {
+      next.push(buff);
+      continue;
+    }
+    log.push({
+      type: "heal_buff_end",
+      turn: state.turn,
+      phase: END_PHASE_ID,
+      summary: `Heal buff ${buff.id} ended on ${slot}`,
+      data: { targetSlot: slot, buff: buff.id, source: buff.source, sourceSlot: buff.sourceSlot }
+    });
+  }
+  state.activeHealBuffsBySlot[slot] = next;
+  if (heal_buff_id === TYPE_BUF_REGEN_HEAL_BUFF_ID && !next.some((entry) => entry.id === TYPE_BUF_REGEN_HEAL_BUFF_ID)) {
+    state.typePassiveRegenStacks[slot] = 0;
+  }
+  if (heal_buff_id === REJUVENATION_REGEN_HEAL_BUFF_ID && !next.some((entry) => entry.id === REJUVENATION_REGEN_HEAL_BUFF_ID)) {
+    state.rejuvenationStacks[slot] = 0;
+    state.rejuvenationStartTurn[slot] = 0;
+  }
 }
 
 function apply_move_curses_from_collateral(
@@ -1072,6 +1424,7 @@ export function clone_state(state: GameState): GameState {
     activeEffectsBySlot: empty_active_effects(),
     activeCursesBySlot: empty_active_curses(),
     activeBuffDebuffsBySlot: empty_active_buff_debuffs(),
+    activeHealBuffsBySlot: empty_active_heal_buffs(),
     lastMoveIndexBySlot: empty_last_move_index(),
   };
   cloned.rpsScore.player1 = normalize_int(state.rpsScore?.player1, 0, -99999);
@@ -1114,6 +1467,8 @@ export function clone_state(state: GameState): GameState {
   cloned.activeCursesBySlot.player2 = normalize_active_curses(state.activeCursesBySlot?.player2);
   cloned.activeBuffDebuffsBySlot.player1 = normalize_active_buff_debuffs(state.activeBuffDebuffsBySlot?.player1);
   cloned.activeBuffDebuffsBySlot.player2 = normalize_active_buff_debuffs(state.activeBuffDebuffsBySlot?.player2);
+  cloned.activeHealBuffsBySlot.player1 = normalize_active_heal_buffs(state.activeHealBuffsBySlot?.player1);
+  cloned.activeHealBuffsBySlot.player2 = normalize_active_heal_buffs(state.activeHealBuffsBySlot?.player2);
   const last_move_p1 = state.lastMoveIndexBySlot?.player1;
   const last_move_p2 = state.lastMoveIndexBySlot?.player2;
   cloned.lastMoveIndexBySlot.player1 =
@@ -1206,6 +1561,9 @@ function ensure_state_runtime_defaults(state: GameState): void {
   if (!state.activeBuffDebuffsBySlot) {
     state.activeBuffDebuffsBySlot = empty_active_buff_debuffs();
   }
+  if (!state.activeHealBuffsBySlot) {
+    state.activeHealBuffsBySlot = empty_active_heal_buffs();
+  }
   if (!state.lastMoveIndexBySlot) {
     state.lastMoveIndexBySlot = empty_last_move_index();
   }
@@ -1232,6 +1590,46 @@ function ensure_state_runtime_defaults(state: GameState): void {
   }
   if (!state.spikesArmedByTarget) {
     state.spikesArmedByTarget = empty_spikes_armed_by_target();
+  }
+  for (const slot of SLOT_ORDER) {
+    const buffs = state.activeHealBuffsBySlot[slot];
+    if (!Array.isArray(buffs)) {
+      state.activeHealBuffsBySlot[slot] = [];
+      continue;
+    }
+    if (!buffs.some((entry) => entry.id === TYPE_BUF_REGEN_HEAL_BUFF_ID)) {
+      const regen_stack = Math.max(0, normalize_int(state.typePassiveRegenStacks?.[slot], 0, 0));
+      if (regen_stack > 0) {
+        buffs.push({
+          id: TYPE_BUF_REGEN_HEAL_BUFF_ID,
+          sourceSlot: slot,
+          source: "type_buf_passive",
+          healPerTurn: regen_stack * TYPE_PASSIVE_BUF_REGEN_PER_STACK,
+          growthPerTurn: 0,
+          startTurn: state.turn,
+          remainingTicks: null,
+          clearsOnSwitch: false
+        });
+      }
+    }
+    if (!buffs.some((entry) => entry.id === REJUVENATION_REGEN_HEAL_BUFF_ID)) {
+      const stack = Math.max(0, normalize_int(state.rejuvenationStacks?.[slot], 0, 0));
+      const start_turn = Math.max(0, normalize_int(state.rejuvenationStartTurn?.[slot], 0, 0));
+      if (stack > 0 && start_turn > 0) {
+        const player = state.players[slot];
+        const base_regen = Math.max(0, mul_div_floor(player.sharedHpMax, REJUVENATION_REGEN_PERCENT_PER_STACK, 100));
+        buffs.push({
+          id: REJUVENATION_REGEN_HEAL_BUFF_ID,
+          sourceSlot: slot,
+          source: "rejuvenation",
+          healPerTurn: base_regen * stack,
+          growthPerTurn: base_regen,
+          startTurn: start_turn,
+          remainingTicks: null,
+          clearsOnSwitch: false
+        });
+      }
+    }
   }
   sync_all_players_shared_mSPE(state);
   refresh_active_monster_stats(state);
@@ -1574,8 +1972,21 @@ function apply_simultaneous_switch_passives(
     return;
   }
 
-  const before_stack = type_passive_regen_stack(state, winner);
-  const after_stack = before_stack + passive_mult;
+  const existing_regen = heal_buff_state(state, winner, TYPE_BUF_REGEN_HEAL_BUFF_ID);
+  const before_heal_per_turn = existing_regen?.healPerTurn ?? 0;
+  const added_heal_per_turn = TYPE_PASSIVE_BUF_REGEN_PER_STACK * passive_mult;
+  const regen_buff = upsert_heal_buff(state, log, winner, winner, "type_buf_passive", {
+    id: TYPE_BUF_REGEN_HEAL_BUFF_ID,
+    source: "type_buf_passive",
+    healPerTurn: added_heal_per_turn,
+    growthPerTurn: 0,
+    startTurn: state.turn,
+    remainingTicks: null,
+    clearsOnSwitch: false
+  });
+  const after_heal_per_turn = regen_buff.healPerTurn;
+  const before_stack = Math.max(0, Math.floor(before_heal_per_turn / TYPE_PASSIVE_BUF_REGEN_PER_STACK));
+  const after_stack = Math.max(0, Math.floor(after_heal_per_turn / TYPE_PASSIVE_BUF_REGEN_PER_STACK));
   state.typePassiveRegenStacks[winner] = after_stack;
   log.push({
     type: "passive_trigger",
@@ -1590,7 +2001,9 @@ function apply_simultaneous_switch_passives(
       passive: "type_buf_regen_stack",
       stackBefore: before_stack,
       stackAfter: after_stack,
-      healPerTurn: TYPE_PASSIVE_BUF_REGEN_PER_STACK * after_stack,
+      healPerTurnBefore: before_heal_per_turn,
+      healPerTurnAfter: after_heal_per_turn,
+      healPerTurnDelta: added_heal_per_turn,
       passiveMultiplier: passive_mult
     }
   });
@@ -1879,27 +2292,21 @@ function apply_rejuvenation_reactive_heal_end_turn(
     });
     return;
   }
-  const before_hp = player.sharedHp;
   const heal_attempt = Math.max(0, mul_div_floor(damage_taken, 1, 2));
-  const after_hp = Math.min(player.sharedHpMax, before_hp + heal_attempt);
-  const healed = Math.max(0, after_hp - before_hp);
-  if (healed > 0) {
-    sync_player_shared_hp(state, slot, after_hp);
-    hp_changed.add(target);
-  }
+  const result = apply_heal_amount(state, slot, hp_changed, heal_attempt);
   log.push({
     type: "rejuvenation_reactive_heal",
     turn: state.turn,
     phase: END_PHASE_ID,
-    summary: `${target.name} healed ${healed} from Rejuvenation (50% of damage taken)`,
+    summary: `${target.name} healed ${result.healed} from Rejuvenation (50% of damage taken)`,
     data: {
       slot,
       target: target.id,
       damageTaken: damage_taken,
       healAttempted: heal_attempt,
-      healApplied: healed,
-      before: before_hp,
-      after: after_hp
+      healApplied: result.healed,
+      before: result.before,
+      after: result.after
     }
   });
 }
@@ -1910,41 +2317,7 @@ function apply_rejuvenation_regen_end_turn(
   slot: PlayerSlot,
   hp_changed: WeakSet<MonsterState>
 ): void {
-  const stack = rejuvenation_stack(state, slot);
-  const start_turn = rejuvenation_start_turn(state, slot);
-  if (stack <= 0 || start_turn <= 0 || state.turn < start_turn) {
-    return;
-  }
-  const player = state.players[slot];
-  const target = active_monster(player);
-  const heal_percent = stack * REJUVENATION_REGEN_PERCENT_PER_STACK;
-  const heal_attempt = Math.max(0, mul_div_floor(player.sharedHpMax, heal_percent, 100));
-  const before_hp = player.sharedHp;
-  const after_hp = Math.min(player.sharedHpMax, before_hp + heal_attempt);
-  const healed = Math.max(0, after_hp - before_hp);
-  if (healed > 0) {
-    sync_player_shared_hp(state, slot, after_hp);
-    hp_changed.add(target);
-  }
-  state.rejuvenationStacks[slot] = stack + 1;
-  log.push({
-    type: "rejuvenation_regen",
-    turn: state.turn,
-    phase: END_PHASE_ID,
-    summary: `${target.name} healed ${healed} from Rejuvenation regen (${heal_percent}%)`,
-    data: {
-      slot,
-      target: target.id,
-      stack,
-      nextStack: stack + 1,
-      healPercent: heal_percent,
-      nextHealPercent: (stack + 1) * REJUVENATION_REGEN_PERCENT_PER_STACK,
-      healAttempted: heal_attempt,
-      healApplied: healed,
-      before: before_hp,
-      after: after_hp
-    }
-  });
+  apply_heal_buffs_end_turn_by_id(state, log, slot, hp_changed, REJUVENATION_REGEN_HEAL_BUFF_ID);
 }
 
 function apply_type_passive_regen_end_turn(
@@ -1953,36 +2326,7 @@ function apply_type_passive_regen_end_turn(
   slot: PlayerSlot,
   hp_changed: WeakSet<MonsterState>
 ): void {
-  const regen_stack = type_passive_regen_stack(state, slot);
-  if (regen_stack <= 0) {
-    return;
-  }
-  const heal_amount = regen_stack * TYPE_PASSIVE_BUF_REGEN_PER_STACK;
-  const player = state.players[slot];
-  const target = active_monster(player);
-  const before_hp = player.sharedHp;
-  const after_hp = Math.min(player.sharedHpMax, before_hp + heal_amount);
-  const healed = Math.max(0, after_hp - before_hp);
-  if (healed > 0) {
-    sync_player_shared_hp(state, slot, after_hp);
-    hp_changed.add(target);
-  }
-  log.push({
-    type: "type_passive_regen",
-    turn: state.turn,
-    phase: END_PHASE_ID,
-    summary: `${target.name} healed ${healed} from BUF passive (${regen_stack} stack)`,
-    data: {
-      slot,
-      target: target.id,
-      regenStack: regen_stack,
-      healPerStack: TYPE_PASSIVE_BUF_REGEN_PER_STACK,
-      healAttempted: heal_amount,
-      healApplied: healed,
-      before: before_hp,
-      after: after_hp
-    }
-  });
+  apply_heal_buffs_end_turn_by_id(state, log, slot, hp_changed, TYPE_BUF_REGEN_HEAL_BUFF_ID);
 }
 
 function clear_curses_on_target_switch(state: GameState, log: EventLog[], target_slot: PlayerSlot): void {
@@ -2024,6 +2368,26 @@ function clear_buff_debuffs_on_target_switch(state: GameState, log: EventLog[], 
     type: "buff_debuff_end",
     turn: state.turn,
     summary: `${target_slot} cleared ${removed} buff/debuff modifier${removed === 1 ? "" : "s"} on switch`,
+    data: { slot: target_slot, removed, reason: "switch" }
+  });
+}
+
+function clear_heal_buffs_on_target_switch(state: GameState, log: EventLog[], target_slot: PlayerSlot): void {
+  ensure_state_runtime_defaults(state);
+  const active = state.activeHealBuffsBySlot[target_slot];
+  if (!Array.isArray(active) || active.length === 0) {
+    return;
+  }
+  const kept = active.filter((entry) => entry.clearsOnSwitch !== true);
+  const removed = active.length - kept.length;
+  if (removed <= 0) {
+    return;
+  }
+  state.activeHealBuffsBySlot[target_slot] = kept;
+  log.push({
+    type: "heal_buff_end",
+    turn: state.turn,
+    summary: `${target_slot} cleared ${removed} heal buff${removed === 1 ? "" : "s"} on switch`,
     data: { slot: target_slot, removed, reason: "switch" }
   });
 }
@@ -3112,13 +3476,25 @@ function apply_move(
   if (spec.id === "rejuvenation") {
     ensure_state_runtime_defaults(state);
     rejuvenation_used_this_turn[player_slot] = true;
-    const stack_before = rejuvenation_stack(state, player_slot);
-    const start_turn_before = rejuvenation_start_turn(state, player_slot);
+    const existing_regen = heal_buff_state(state, player_slot, REJUVENATION_REGEN_HEAL_BUFF_ID);
+    const regen_value_per_turn = Math.max(0, mul_div_floor(player.sharedHpMax, REJUVENATION_REGEN_PERCENT_PER_STACK, 100));
     const starts_next_turn = state.turn + 1;
-    if (stack_before <= 0) {
+    const stack_before = existing_regen
+      ? Math.max(1, normalize_int(state.rejuvenationStacks?.[player_slot] ?? 1, 1, 1))
+      : 0;
+    if (!existing_regen) {
+      upsert_heal_buff(state, log, player_slot, player_slot, spec.id, {
+        id: REJUVENATION_REGEN_HEAL_BUFF_ID,
+        source: spec.id,
+        healPerTurn: regen_value_per_turn,
+        growthPerTurn: regen_value_per_turn,
+        startTurn: starts_next_turn,
+        remainingTicks: null,
+        clearsOnSwitch: false
+      });
       state.rejuvenationStacks[player_slot] = 1;
       state.rejuvenationStartTurn[player_slot] = starts_next_turn;
-    } else if (start_turn_before <= 0) {
+    } else if ((state.rejuvenationStartTurn?.[player_slot] ?? 0) <= 0) {
       state.rejuvenationStartTurn[player_slot] = starts_next_turn;
     }
     upsert_effect(state, log, player_slot, "rejuvenation", 999, player_slot, spec.id);
@@ -3137,7 +3513,8 @@ function apply_move(
         reactiveHealPercentOfDamageTaken: 50,
         regenStartTurn: state.rejuvenationStartTurn[player_slot],
         regenStackBefore: stack_before,
-        regenStackAfter: rejuvenation_stack(state, player_slot)
+        regenStackAfter: state.rejuvenationStacks[player_slot],
+        regenValuePerTurn: regen_value_per_turn
       }
     });
     finalize_move_success();
@@ -3176,53 +3553,35 @@ function apply_move(
   }
 
   if (spec.id === "recover") {
-    const before_hp = player.sharedHp;
-    const heal_amount = Math.max(0, mul_div_round(player.sharedHpMax, 1, 5));
-    const after_hp = Math.min(player.sharedHpMax, before_hp + heal_amount);
-    if (after_hp !== before_hp) {
-      sync_player_shared_hp(state, player_slot, after_hp);
-      hp_changed.add(attacker);
-    }
-    log.push({
-      type: "passive_heal",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${attacker.name} healed ${Math.max(0, after_hp - before_hp)} with Recover`,
-      data: {
-        slot: player_slot,
-        source: attacker.id,
-        target: attacker.id,
-        amount: Math.max(0, after_hp - before_hp),
-        before: before_hp,
-        after: after_hp
-      }
-    });
+    const heal_per_turn = Math.max(0, mul_div_round(player.sharedHpMax, 1, 5));
+    const recover_buff: ActiveHealBuffState = {
+      id: RECOVER_MOVE_HEAL_BUFF_ID,
+      sourceSlot: player_slot,
+      source: spec.id,
+      healPerTurn: heal_per_turn,
+      growthPerTurn: 0,
+      startTurn: state.turn,
+      remainingTicks: 1,
+      clearsOnSwitch: false
+    };
+    apply_heal_buff_tick(state, log, player_slot, hp_changed, recover_buff, spec.phaseId);
     finalize_move_success();
     return;
   }
 
   if (spec.id === "heal") {
-    const before_hp = player.sharedHp;
-    const heal_amount = Math.max(0, mul_div_round(player.sharedHpMax, 1, 5));
-    const after_hp = Math.min(player.sharedHpMax, before_hp + heal_amount);
-    if (after_hp !== before_hp) {
-      sync_player_shared_hp(state, player_slot, after_hp);
-      hp_changed.add(attacker);
-    }
-    log.push({
-      type: "passive_heal",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${attacker.name} healed ${Math.max(0, after_hp - before_hp)} with Heal`,
-      data: {
-        slot: player_slot,
-        source: attacker.id,
-        target: attacker.id,
-        amount: Math.max(0, after_hp - before_hp),
-        before: before_hp,
-        after: after_hp
-      }
-    });
+    const heal_per_turn = Math.max(0, mul_div_round(player.sharedHpMax, 1, 5));
+    const heal_buff: ActiveHealBuffState = {
+      id: HEAL_MOVE_HEAL_BUFF_ID,
+      sourceSlot: player_slot,
+      source: spec.id,
+      healPerTurn: heal_per_turn,
+      growthPerTurn: 0,
+      startTurn: state.turn,
+      remainingTicks: 1,
+      clearsOnSwitch: false
+    };
+    apply_heal_buff_tick(state, log, player_slot, hp_changed, heal_buff, spec.phaseId);
     finalize_move_success();
     return;
   }
@@ -3699,6 +4058,7 @@ function perform_switch(
   reset_monster_on_switch_out(outgoing);
   clear_curses_on_target_switch(state, log, slot);
   clear_buff_debuffs_on_target_switch(state, log, slot);
+  clear_heal_buffs_on_target_switch(state, log, slot);
   player.activeIndex = target_index;
   sync_player_shared_hp(state, slot, player.sharedHp);
   sync_player_shared_mSPE(state, slot, player.sharedMSPE);
@@ -3900,6 +4260,7 @@ export function create_initial_state(
     activeEffectsBySlot: empty_active_effects(),
     activeCursesBySlot: empty_active_curses(),
     activeBuffDebuffsBySlot: empty_active_buff_debuffs(),
+    activeHealBuffsBySlot: empty_active_heal_buffs(),
     lastMoveIndexBySlot: empty_last_move_index(),
   };
   sync_all_players_shared_hp(initial_state);
