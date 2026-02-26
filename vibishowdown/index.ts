@@ -67,10 +67,12 @@ type MonsterTooltipPayload = {
 type SwitchModalMode = "intent" | "forced" | "bounce_kick";
 
 const LOBBY_MOVE_SLOTS = 3;
-const STARTER_MONSTER_IDS = new Set<string>(["armoth", "kairus", "farien", "night"]);
+const STARTER_MONSTER_IDS = new Set<string>(["armoth", "kairus", "farien", "night", "vealkiria", "babydragonbuf"]);
 const MOVE_TOOLTIP_DELAY_MS = 2000;
 const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
+  punch: "Soco de dano verdadeiro fixo 93.",
+  power: "Aumenta ATK em +1 stage e reduz DEX em 10% do base.",
   kick: "Golpe fisico forte de dano escalado.",
   throw: "Golpe com formula fixa (90x90) escalada pelo nivel de formula.",
   agility: "Buff de DEX (x2) ate trocar.",
@@ -93,10 +95,11 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   taunt: "Forca o alvo a usar moves de ataque por 2 turnos.",
   spikes: "Arma Spikes no lado inimigo para causar dano em switches futuros.",
   recover: "Cura 20% do HP compartilhado maximo.",
+  heal: "Cura 20% do HP compartilhado maximo.",
   mega_punch: "Golpe de dano flat 20.",
   bounce_kick: "Da dano flat 5 e tenta fazer auto-switch para o aliado escolhido.",
   meditate: "Aumenta o ATK por estagios (stackavel).",
-  ki_blast: "Golpe de dano flat 20.",
+  ki_blast: "Golpe de dano flat 72.",
   endure: "Sobrevive ao dano letal no turno (minimo 1% HP) e ganha DEX ao ativar.",
   protect: "Bloqueia dano no turno. Compartilha cooldown com Endure.",
   none: "Nao faz acao neste turno."
@@ -316,7 +319,9 @@ const ICON_ALIASES: Record<string, string> = {
   armoth: "panda",
   kairus: "harpy",
   farien: "miren",
-  night: "knight"
+  night: "knight",
+  vealkiria: "valkyria",
+  babydragonbuf: "babydragon"
 };
 
 function icon_path(id: string): string {

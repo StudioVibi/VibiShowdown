@@ -60,11 +60,11 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     id: "knight",
     name: "Knight",
     role: "Metagross",
-    type: type_for_index(4),
+    type: "def",
     stats: { level: 12, maxHp: 242, attack: 542, defense: 521, speed: 271 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "seismic_toss", "none", "run"],
+    defaultMoves: ["return", "rejuvenation", "none", "run"],
     defaultPassive: "none"
   },
   {
@@ -109,6 +109,28 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["return", "seismic_toss", "none", "run"],
+    defaultPassive: "none"
+  },
+  {
+    id: "vealkiria",
+    name: "Vealkiria",
+    role: "Valkyria ATK Template",
+    type: "atk",
+    stats: { level: 12, maxHp: 242, attack: 417, defense: 250, speed: 521 },
+    possibleMoves: ["punch", "heal", "run", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["punch", "heal", "none", "run"],
+    defaultPassive: "none"
+  },
+  {
+    id: "babydragonbuf",
+    name: "Baby Dragon Buff",
+    role: "Baby Dragon BUF Template",
+    type: "buf",
+    stats: { level: 12, maxHp: 100, attack: 110, defense: 130, speed: 30 },
+    possibleMoves: ["power", "ki_blast", "run", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["power", "ki_blast", "none", "run"],
     defaultPassive: "none"
   },
   {
