@@ -1872,6 +1872,13 @@ var MOVE_CATALOG = [
     attackMultiplier100: 0,
     components: [{ kind: "curse", id: "leech_seed", clearsOnSwitch: true }]
   },
+  {
+    id: "sekyps",
+    label: "Sekyps",
+    phaseId: "attack_01",
+    attackMultiplier100: 0,
+    components: [{ kind: "curse", id: "sekyps", clearsOnSwitch: true }]
+  },
   { id: "focus_punch", label: "Focus Punch", phaseId: "attack_01", attackMultiplier100: 150 },
   { id: "pain_split", label: "Pain Split", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "screech", label: "Screech", phaseId: "attack_01", attackMultiplier100: 0 },
@@ -2011,6 +2018,17 @@ var MONSTER_ROSTER = [
     defaultPassive: "none"
   },
   {
+    id: "night",
+    name: "Night",
+    role: "Metagross Sekyps",
+    type: "atk",
+    stats: { level: 12, maxHp: 242, attack: 542, defense: 521, speed: 271 },
+    possibleMoves: ["sekyps", "kick", "run", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["sekyps", "kick", "none", "run"],
+    defaultPassive: "none"
+  },
+  {
     id: "miren",
     name: "Miren",
     role: "Celebi",
@@ -2084,8 +2102,6 @@ var EV_PER_STAT_MAX = 252;
 var EV_TOTAL_MAX = 508;
 var LEVEL_MIN = 1;
 var LEVEL_MAX = 12;
-var FORMULA_LEVEL_MIN = 1;
-var FORMULA_LEVEL_MAX = 100;
 function empty_ev_spread() {
   return { hp: 0, atk: 0, def: 0, spe: 0 };
 }
@@ -2106,15 +2122,7 @@ function clamp_input_level(level) {
   return Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, normalized));
 }
 function scaled_level_for_formula(level) {
-  const normalized = clamp_input_level(level);
-  if (LEVEL_MAX <= LEVEL_MIN) {
-    return FORMULA_LEVEL_MAX;
-  }
-  const source_span = LEVEL_MAX - LEVEL_MIN;
-  const target_span = FORMULA_LEVEL_MAX - FORMULA_LEVEL_MIN;
-  const offset = normalized - LEVEL_MIN;
-  const scaled_offset = Math.round(offset * target_span / source_span);
-  return FORMULA_LEVEL_MIN + scaled_offset;
+  return clamp_input_level(level);
 }
 function validate_ev_spread(ev) {
   const values = [
@@ -2369,7 +2377,8 @@ var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "screech",
   "taunt",
   "pain_split",
-  "leech_life"
+  "leech_life",
+  "sekyps"
 ]);
 var INITIATIVE_WITHOUT_SPEED = ["attack", "hp", "defense"];
 var STAT_STAGE_MIN = -6;
@@ -2384,6 +2393,7 @@ var STAT_MULTIPLIER_MAX_PERCENT = 400;
 var MSPE_VALUE_GOAL = 500;
 var MSPE_GAP_GOAL_PERCENT = 33;
 var RUN_MSPE_GAIN_PERCENT = 10;
+var SEKYPS_DAMAGE_PER_STACK = 36;
 var EFFECT_IDS = [
   "confuse",
   "sleep",
@@ -2402,6 +2412,7 @@ var EFFECT_ID_SET = new Set(EFFECT_IDS);
 var CURSE_IDS = [
   "madness",
   "leech_seed",
+  "sekyps",
   "destiny_bond",
   "endure"
 ];
@@ -2423,6 +2434,7 @@ var EFFECT_LABELS = {
 var CURSE_LABELS = {
   madness: "Madness",
   leech_seed: "Leech Seed",
+  sekyps: "Sekyps",
   destiny_bond: "Destiny Bond",
   endure: "Endure"
 };
@@ -2674,7 +2686,9 @@ function normalize_active_curses(input) {
       continue;
     }
     const source_slot = row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null;
-    normalized.push({ id: row.id, sourceSlot: source_slot, stacks: 1 });
+    const raw_stacks = typeof row.stacks === "number" ? row.stacks : 1;
+    const stacks = Math.max(1, normalize_int(raw_stacks, 1, 1));
+    normalized.push({ id: row.id, sourceSlot: source_slot, stacks });
   }
   return normalized;
 }
@@ -3794,7 +3808,7 @@ function clear_buff_debuffs_for_stat(state, slot, stat) {
   }
   return removed;
 }
-function apply_curse_end_turn(state, log, hp_changed) {
+function apply_curse_end_turn(state, log, hp_changed, switched_this_turn) {
   ensure_state_runtime_defaults(state);
   for (const target_slot of SLOT_ORDER) {
     const curses = state.activeCursesBySlot[target_slot];
@@ -3807,63 +3821,102 @@ function apply_curse_end_turn(state, log, hp_changed) {
       continue;
     }
     for (const curse of curses) {
-      if (curse.id !== "leech_seed") {
+      if (curse.id === "leech_seed") {
+        const source_slot = curse.sourceSlot ?? other_slot(target_slot);
+        const target_before = target_player.sharedHp;
+        const drained_base = mul_div_floor(target_player.sharedHpMax, 1, 8);
+        const drained_attempt = Math.max(0, drained_base * Math.max(1, curse.stacks));
+        const drained = Math.min(target_before, drained_attempt);
+        const target_after = target_before - drained;
+        if (drained <= 0) {
+          continue;
+        }
+        sync_player_shared_hp(state, target_slot, target_after);
+        hp_changed.add(target);
+        log.push({
+          type: "leech_drain",
+          turn: state.turn,
+          phase: END_PHASE_ID,
+          summary: `${target.name} lost ${drained} HP from Leech Seed`,
+          data: {
+            slot: source_slot,
+            targetSlot: target_slot,
+            source: source_slot,
+            target: target.id,
+            damage: drained,
+            stacks: curse.stacks,
+            before: target_before,
+            after: target_after
+          }
+        });
+        const source_player = state.players[source_slot];
+        const receiver = active_monster(source_player);
+        if (is_alive(receiver)) {
+          const heal_before = source_player.sharedHp;
+          const heal_after = Math.min(source_player.sharedHpMax, source_player.sharedHp + drained);
+          const healed = Math.max(0, heal_after - heal_before);
+          if (healed > 0) {
+            sync_player_shared_hp(state, source_slot, heal_after);
+            hp_changed.add(receiver);
+            log.push({
+              type: "leech_heal",
+              turn: state.turn,
+              phase: END_PHASE_ID,
+              summary: `${receiver.name} healed ${healed} HP from Leech Seed`,
+              data: {
+                slot: source_slot,
+                source: source_slot,
+                targetSlot: target_slot,
+                target: target.id,
+                heal: healed,
+                stacks: curse.stacks,
+                before: heal_before,
+                after: heal_after
+              }
+            });
+          }
+        }
         continue;
       }
-      const source_slot = curse.sourceSlot ?? other_slot(target_slot);
-      const target_before = target_player.sharedHp;
-      const drained_base = mul_div_floor(target_player.sharedHpMax, 1, 8);
-      const drained_attempt = Math.max(0, drained_base * Math.max(1, curse.stacks));
-      const drained = Math.min(target_before, drained_attempt);
-      const target_after = target_before - drained;
-      if (drained <= 0) {
+      if (curse.id === "sekyps") {
+        if (switched_this_turn[target_slot]) {
+          continue;
+        }
+        const source_slot = curse.sourceSlot ?? other_slot(target_slot);
+        const current_stack = Math.max(1, normalize_int(curse.stacks, 1, 1));
+        const damage_amount = current_stack * SEKYPS_DAMAGE_PER_STACK;
+        const target_before = target_player.sharedHp;
+        const damage = Math.min(target_before, Math.max(0, damage_amount));
+        const target_after = target_before - damage;
+        const next_stack = current_stack + 1;
+        curse.stacks = next_stack;
+        if (damage <= 0) {
+          continue;
+        }
+        sync_player_shared_hp(state, target_slot, target_after);
+        hp_changed.add(target);
+        log.push({
+          type: "sekyps_tick",
+          turn: state.turn,
+          phase: END_PHASE_ID,
+          summary: `${target.name} lost ${damage} HP from Sekyps (stack ${current_stack})`,
+          data: {
+            slot: source_slot,
+            targetSlot: target_slot,
+            source: source_slot,
+            target: target.id,
+            damage,
+            damageAmount: damage_amount,
+            stack: current_stack,
+            nextStack: next_stack,
+            nextDamageAmount: next_stack * SEKYPS_DAMAGE_PER_STACK,
+            before: target_before,
+            after: target_after
+          }
+        });
         continue;
       }
-      sync_player_shared_hp(state, target_slot, target_after);
-      hp_changed.add(target);
-      log.push({
-        type: "leech_drain",
-        turn: state.turn,
-        phase: END_PHASE_ID,
-        summary: `${target.name} lost ${drained} HP from Leech Seed`,
-        data: {
-          slot: source_slot,
-          targetSlot: target_slot,
-          source: source_slot,
-          target: target.id,
-          damage: drained,
-          stacks: curse.stacks,
-          before: target_before,
-          after: target_after
-        }
-      });
-      const source_player = state.players[source_slot];
-      const receiver = active_monster(source_player);
-      if (is_alive(receiver)) {
-        const heal_before = source_player.sharedHp;
-        const heal_after = Math.min(source_player.sharedHpMax, source_player.sharedHp + drained);
-        const healed = Math.max(0, heal_after - heal_before);
-        if (healed > 0) {
-          sync_player_shared_hp(state, source_slot, heal_after);
-          hp_changed.add(receiver);
-          log.push({
-            type: "leech_heal",
-            turn: state.turn,
-            phase: END_PHASE_ID,
-            summary: `${receiver.name} healed ${healed} HP from Leech Seed`,
-            data: {
-              slot: source_slot,
-              source: source_slot,
-              targetSlot: target_slot,
-              target: target.id,
-              heal: healed,
-              stacks: curse.stacks,
-              before: heal_before,
-              after: heal_after
-            }
-          });
-        }
-      }
+      continue;
     }
   }
 }
@@ -3918,7 +3971,7 @@ function apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending,
     apply_damage_move(state, log, slot, spec, hp_changed, END_PHASE_ID, took_damage_this_turn);
   }
 }
-function apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn) {
+function apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn, switched_this_turn) {
   if (effect_id === "focus_punch") {
     apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending, took_damage_this_turn);
     return;
@@ -3930,16 +3983,16 @@ function apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pe
     return;
   }
   if (effect_id === "leech_life") {
-    apply_curse_end_turn(state, log, hp_changed);
+    apply_curse_end_turn(state, log, hp_changed, switched_this_turn);
     return;
   }
   for (const slot of SLOT_ORDER) {
     apply_type_passive_regen_end_turn(state, log, slot, hp_changed);
   }
 }
-function apply_end_turn_phase(state, log, hp_changed, focus_punch_pending, took_damage_this_turn) {
+function apply_end_turn_phase(state, log, hp_changed, focus_punch_pending, took_damage_this_turn, switched_this_turn) {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
-    apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn);
+    apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn, switched_this_turn);
     const progress = check_zero_hp_match_result(state, log);
     if (progress !== "continue") {
       return progress;
@@ -4759,6 +4812,18 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     finalize_move_success();
     return;
   }
+  if (spec.id === "sekyps") {
+    const target_slot = other_slot(player_slot);
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: "Sekyps (curse): no end_turn causa dano flat 36 e acumula +36 por tick (36/72/108/...) enquanto nao houver switch",
+      data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot, baseDamage: 36 }
+    });
+    finalize_move_success();
+    return;
+  }
   if (spec.id === "focus_punch") {
     focus_punch_pending[player_slot] = true;
     log.push({
@@ -5119,7 +5184,6 @@ function resolve_turn(state, intents) {
   const hp_changed_this_turn = new WeakSet;
   const focus_punch_pending = { player1: false, player2: false };
   const took_damage_this_turn = { player1: false, player2: false };
-  const switched_this_turn = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
   sync_all_players_shared_mSPE(next);
   refresh_active_monster_stats(next);
@@ -5131,6 +5195,10 @@ function resolve_turn(state, intents) {
   const switch_sovietico_resolved_this_turn = {
     player1: !!next.pendingSwitchResolvedThisTurn.player1,
     player2: !!next.pendingSwitchResolvedThisTurn.player2
+  };
+  const switched_this_turn = {
+    player1: switch_sovietico_resolved_this_turn.player1,
+    player2: switch_sovietico_resolved_this_turn.player2
   };
   next.pendingSwitch = empty_pending();
   next.pendingSwitchReason = empty_pending_switch_reason();
@@ -5235,7 +5303,7 @@ function resolve_turn(state, intents) {
     }
   }
   if (progress === "continue") {
-    progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
+    progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn, switched_this_turn);
   }
   decrement_cooldowns(next);
   if (next.status === "running") {
@@ -5373,7 +5441,7 @@ var EV_KEYS = ["hp", "atk", "def", "spe"];
 var STAT_STAGE_MIN2 = -6;
 var STAT_STAGE_MAX2 = 6;
 var LOBBY_MOVE_SLOTS = 3;
-var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien"]);
+var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien", "night"]);
 var MOVE_TOOLTIP_DELAY_MS = 2000;
 var MOVE_TOOLTIP_DESCRIPTIONS = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
@@ -5386,10 +5454,11 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   team_cure: "Remove efeitos negativos e debuffs negativos do seu lado.",
   bait: "So funciona se tomou dano antes no turno; aplica Weakness por 2 turnos.",
   belly_drum: "Se HP atual > 50%, paga metade do HP atual e aumenta muito o ATK.",
-  return: "Dano escalado; o poder sobe com nivel de formula (Lv12 = formula Lv100).",
+  return: "Dano escalado; o poder sobe com o nivel atual da mutacao.",
   double_edge: "Golpe forte com recoil de 1/3 do dano final causado.",
   seismic_toss: "Dano flat fixo de 50, ignorando DEF.",
   leech_life: "Aplica Leech Seed (dreno no end_turn) ate o alvo trocar.",
+  sekyps: "Aplica o debuff Sekyps: no end_turn causa dano flat 36 e acumula para 72/108/144... se o alvo nao trocar.",
   focus_punch: "Carrega e resolve no inicio do end_turn; falha se tomar dano real antes.",
   pain_split: "Ambos ficam com floor((HP_user + HP_target)/2), respeitando clamp de HP.",
   screech: "Reduz DEF do alvo em 50% ate trocar.",
@@ -5593,7 +5662,8 @@ var room_game_count = 0;
 var ICON_ALIASES = {
   armoth: "panda",
   kairus: "harpy",
-  farien: "miren"
+  farien: "miren",
+  night: "knight"
 };
 function icon_path(id) {
   const resolved = ICON_ALIASES[id] ?? id;

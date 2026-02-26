@@ -67,7 +67,7 @@ type MonsterTooltipPayload = {
 type SwitchModalMode = "intent" | "forced" | "bounce_kick";
 
 const LOBBY_MOVE_SLOTS = 3;
-const STARTER_MONSTER_IDS = new Set<string>(["armoth", "kairus", "farien"]);
+const STARTER_MONSTER_IDS = new Set<string>(["armoth", "kairus", "farien", "night"]);
 const MOVE_TOOLTIP_DELAY_MS = 2000;
 const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
@@ -80,10 +80,11 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   team_cure: "Remove efeitos negativos e debuffs negativos do seu lado.",
   bait: "So funciona se tomou dano antes no turno; aplica Weakness por 2 turnos.",
   belly_drum: "Se HP atual > 50%, paga metade do HP atual e aumenta muito o ATK.",
-  return: "Dano escalado; o poder sobe com nivel de formula (Lv12 = formula Lv100).",
+  return: "Dano escalado; o poder sobe com o nivel atual da mutacao.",
   double_edge: "Golpe forte com recoil de 1/3 do dano final causado.",
   seismic_toss: "Dano flat fixo de 50, ignorando DEF.",
   leech_life: "Aplica Leech Seed (dreno no end_turn) ate o alvo trocar.",
+  sekyps: "Aplica o debuff Sekyps: no end_turn causa dano flat 36 e acumula para 72/108/144... se o alvo nao trocar.",
   focus_punch: "Carrega e resolve no inicio do end_turn; falha se tomar dano real antes.",
   pain_split: "Ambos ficam com floor((HP_user + HP_target)/2), respeitando clamp de HP.",
   screech: "Reduz DEF do alvo em 50% ate trocar.",
@@ -312,7 +313,8 @@ let room_game_count = 0;
 const ICON_ALIASES: Record<string, string> = {
   armoth: "panda",
   kairus: "harpy",
-  farien: "miren"
+  farien: "miren",
+  night: "knight"
 };
 
 function icon_path(id: string): string {

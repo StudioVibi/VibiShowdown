@@ -36,8 +36,6 @@ export const EV_PER_STAT_MAX = 252;
 export const EV_TOTAL_MAX = 508;
 export const LEVEL_MIN = 1;
 export const LEVEL_MAX = 12;
-export const FORMULA_LEVEL_MIN = 1;
-export const FORMULA_LEVEL_MAX = 100;
 
 export function empty_ev_spread(): EVSpread {
   return { hp: 0, atk: 0, def: 0, spe: 0 };
@@ -63,17 +61,8 @@ function clamp_input_level(level: number): number {
   return Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, normalized));
 }
 
-// Map user-visible level range (1..12) to canonical formula level (1..100).
 export function scaled_level_for_formula(level: number): number {
-  const normalized = clamp_input_level(level);
-  if (LEVEL_MAX <= LEVEL_MIN) {
-    return FORMULA_LEVEL_MAX;
-  }
-  const source_span = LEVEL_MAX - LEVEL_MIN;
-  const target_span = FORMULA_LEVEL_MAX - FORMULA_LEVEL_MIN;
-  const offset = normalized - LEVEL_MIN;
-  const scaled_offset = Math.round((offset * target_span) / source_span);
-  return FORMULA_LEVEL_MIN + scaled_offset;
+  return clamp_input_level(level);
 }
 
 export function validate_ev_spread(ev: EVSpread): string | null {

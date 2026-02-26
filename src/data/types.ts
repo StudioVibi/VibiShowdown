@@ -20,7 +20,7 @@ export type EffectCollateralId =
   | "paralyse"
   | "silence";
 
-export type CurseCollateralId = "madness" | "leech_seed" | "destiny_bond" | "endure";
+export type CurseCollateralId = "madness" | "leech_seed" | "destiny_bond" | "endure" | "sekyps";
 
 export type InstantCollateralId = "clear_body" | string;
 

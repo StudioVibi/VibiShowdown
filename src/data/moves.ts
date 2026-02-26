@@ -41,6 +41,13 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
     attackMultiplier100: 0,
     components: [{ kind: "curse", id: "leech_seed", clearsOnSwitch: true }]
   },
+  {
+    id: "sekyps",
+    label: "Sekyps",
+    phaseId: "attack_01",
+    attackMultiplier100: 0,
+    components: [{ kind: "curse", id: "sekyps", clearsOnSwitch: true }]
+  },
   { id: "focus_punch", label: "Focus Punch", phaseId: "attack_01", attackMultiplier100: 150 },
   { id: "pain_split", label: "Pain Split", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "screech", label: "Screech", phaseId: "attack_01", attackMultiplier100: 0 },

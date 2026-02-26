@@ -72,7 +72,8 @@ const TAUNT_BLOCKED_MOVE_IDS = new Set([
   "screech",
   "taunt",
   "pain_split",
-  "leech_life"
+  "leech_life",
+  "sekyps"
 ]);
 
 type Action =
@@ -102,6 +103,7 @@ const STAT_MULTIPLIER_MAX_PERCENT = 400;
 const MSPE_VALUE_GOAL = 500;
 const MSPE_GAP_GOAL_PERCENT = 33;
 const RUN_MSPE_GAIN_PERCENT = 10;
+const SEKYPS_DAMAGE_PER_STACK = 36;
 const EFFECT_IDS: readonly EffectCollateralId[] = [
   "confuse",
   "sleep",
@@ -120,6 +122,7 @@ const EFFECT_ID_SET = new Set<string>(EFFECT_IDS);
 const CURSE_IDS: readonly CurseCollateralId[] = [
   "madness",
   "leech_seed",
+  "sekyps",
   "destiny_bond",
   "endure"
 ] as const;
@@ -142,6 +145,7 @@ const EFFECT_LABELS: Record<EffectCollateralId, string> = {
 const CURSE_LABELS: Record<CurseCollateralId, string> = {
   madness: "Madness",
   leech_seed: "Leech Seed",
+  sekyps: "Sekyps",
   destiny_bond: "Destiny Bond",
   endure: "Endure"
 };
@@ -449,7 +453,9 @@ function normalize_active_curses(input: unknown): ActiveCurseState[] {
     }
     const source_slot: PlayerSlot | null =
       row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null;
-    normalized.push({ id: row.id, sourceSlot: source_slot, stacks: 1 });
+    const raw_stacks = typeof row.stacks === "number" ? row.stacks : 1;
+    const stacks = Math.max(1, normalize_int(raw_stacks, 1, 1));
+    normalized.push({ id: row.id, sourceSlot: source_slot, stacks });
   }
   return normalized;
 }
@@ -1864,7 +1870,12 @@ function clear_buff_debuffs_for_stat(state: GameState, slot: PlayerSlot, stat: B
   return removed;
 }
 
-function apply_curse_end_turn(state: GameState, log: EventLog[], hp_changed: WeakSet<MonsterState>): void {
+function apply_curse_end_turn(
+  state: GameState,
+  log: EventLog[],
+  hp_changed: WeakSet<MonsterState>,
+  switched_this_turn: Record<PlayerSlot, boolean>
+): void {
   ensure_state_runtime_defaults(state);
   for (const target_slot of SLOT_ORDER) {
     const curses = state.activeCursesBySlot[target_slot];
@@ -1878,65 +1889,106 @@ function apply_curse_end_turn(state: GameState, log: EventLog[], hp_changed: Wea
     }
 
     for (const curse of curses) {
-      if (curse.id !== "leech_seed") {
-        // Other curse rules are intentionally left as future extensions.
-        continue;
-      }
-      const source_slot = curse.sourceSlot ?? other_slot(target_slot);
-      const target_before = target_player.sharedHp;
-      const drained_base = mul_div_floor(target_player.sharedHpMax, 1, 8);
-      const drained_attempt = Math.max(0, drained_base * Math.max(1, curse.stacks));
-      const drained = Math.min(target_before, drained_attempt);
-      const target_after = target_before - drained;
-      if (drained <= 0) {
-        continue;
-      }
-      sync_player_shared_hp(state, target_slot, target_after);
-      hp_changed.add(target);
-      log.push({
-        type: "leech_drain",
-        turn: state.turn,
-        phase: END_PHASE_ID,
-        summary: `${target.name} lost ${drained} HP from Leech Seed`,
-        data: {
-          slot: source_slot,
-          targetSlot: target_slot,
-          source: source_slot,
-          target: target.id,
-          damage: drained,
-          stacks: curse.stacks,
-          before: target_before,
-          after: target_after
+      if (curse.id === "leech_seed") {
+        const source_slot = curse.sourceSlot ?? other_slot(target_slot);
+        const target_before = target_player.sharedHp;
+        const drained_base = mul_div_floor(target_player.sharedHpMax, 1, 8);
+        const drained_attempt = Math.max(0, drained_base * Math.max(1, curse.stacks));
+        const drained = Math.min(target_before, drained_attempt);
+        const target_after = target_before - drained;
+        if (drained <= 0) {
+          continue;
         }
-      });
+        sync_player_shared_hp(state, target_slot, target_after);
+        hp_changed.add(target);
+        log.push({
+          type: "leech_drain",
+          turn: state.turn,
+          phase: END_PHASE_ID,
+          summary: `${target.name} lost ${drained} HP from Leech Seed`,
+          data: {
+            slot: source_slot,
+            targetSlot: target_slot,
+            source: source_slot,
+            target: target.id,
+            damage: drained,
+            stacks: curse.stacks,
+            before: target_before,
+            after: target_after
+          }
+        });
 
-      const source_player = state.players[source_slot];
-      const receiver = active_monster(source_player);
-      if (is_alive(receiver)) {
-        const heal_before = source_player.sharedHp;
-        const heal_after = Math.min(source_player.sharedHpMax, source_player.sharedHp + drained);
-        const healed = Math.max(0, heal_after - heal_before);
-        if (healed > 0) {
-          sync_player_shared_hp(state, source_slot, heal_after);
-          hp_changed.add(receiver);
-          log.push({
-            type: "leech_heal",
-            turn: state.turn,
-            phase: END_PHASE_ID,
-            summary: `${receiver.name} healed ${healed} HP from Leech Seed`,
-            data: {
-              slot: source_slot,
-              source: source_slot,
-              targetSlot: target_slot,
-              target: target.id,
-              heal: healed,
-              stacks: curse.stacks,
-              before: heal_before,
-              after: heal_after
-            }
-          });
+        const source_player = state.players[source_slot];
+        const receiver = active_monster(source_player);
+        if (is_alive(receiver)) {
+          const heal_before = source_player.sharedHp;
+          const heal_after = Math.min(source_player.sharedHpMax, source_player.sharedHp + drained);
+          const healed = Math.max(0, heal_after - heal_before);
+          if (healed > 0) {
+            sync_player_shared_hp(state, source_slot, heal_after);
+            hp_changed.add(receiver);
+            log.push({
+              type: "leech_heal",
+              turn: state.turn,
+              phase: END_PHASE_ID,
+              summary: `${receiver.name} healed ${healed} HP from Leech Seed`,
+              data: {
+                slot: source_slot,
+                source: source_slot,
+                targetSlot: target_slot,
+                target: target.id,
+                heal: healed,
+                stacks: curse.stacks,
+                before: heal_before,
+                after: heal_after
+              }
+            });
+          }
         }
+        continue;
       }
+
+      if (curse.id === "sekyps") {
+        if (switched_this_turn[target_slot]) {
+          continue;
+        }
+        const source_slot = curse.sourceSlot ?? other_slot(target_slot);
+        const current_stack = Math.max(1, normalize_int(curse.stacks, 1, 1));
+        const damage_amount = current_stack * SEKYPS_DAMAGE_PER_STACK;
+        const target_before = target_player.sharedHp;
+        const damage = Math.min(target_before, Math.max(0, damage_amount));
+        const target_after = target_before - damage;
+        const next_stack = current_stack + 1;
+        curse.stacks = next_stack;
+        if (damage <= 0) {
+          continue;
+        }
+        sync_player_shared_hp(state, target_slot, target_after);
+        hp_changed.add(target);
+        log.push({
+          type: "sekyps_tick",
+          turn: state.turn,
+          phase: END_PHASE_ID,
+          summary: `${target.name} lost ${damage} HP from Sekyps (stack ${current_stack})`,
+          data: {
+            slot: source_slot,
+            targetSlot: target_slot,
+            source: source_slot,
+            target: target.id,
+            damage,
+            damageAmount: damage_amount,
+            stack: current_stack,
+            nextStack: next_stack,
+            nextDamageAmount: next_stack * SEKYPS_DAMAGE_PER_STACK,
+            before: target_before,
+            after: target_after
+          }
+        });
+        continue;
+      }
+
+      // Other curse rules are intentionally left as future extensions.
+      continue;
     }
   }
 }
@@ -2016,7 +2068,8 @@ function apply_end_turn_effect(
   hp_changed: WeakSet<MonsterState>,
   effect_id: EndTurnEffectId,
   focus_punch_pending: Record<PlayerSlot, boolean>,
-  took_damage_this_turn: Record<PlayerSlot, boolean>
+  took_damage_this_turn: Record<PlayerSlot, boolean>,
+  switched_this_turn: Record<PlayerSlot, boolean>
 ): void {
   if (effect_id === "focus_punch") {
     apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending, took_damage_this_turn);
@@ -2029,7 +2082,7 @@ function apply_end_turn_effect(
     return;
   }
   if (effect_id === "leech_life") {
-    apply_curse_end_turn(state, log, hp_changed);
+    apply_curse_end_turn(state, log, hp_changed, switched_this_turn);
     return;
   }
   for (const slot of SLOT_ORDER) {
@@ -2042,10 +2095,19 @@ function apply_end_turn_phase(
   log: EventLog[],
   hp_changed: WeakSet<MonsterState>,
   focus_punch_pending: Record<PlayerSlot, boolean>,
-  took_damage_this_turn: Record<PlayerSlot, boolean>
+  took_damage_this_turn: Record<PlayerSlot, boolean>,
+  switched_this_turn: Record<PlayerSlot, boolean>
 ): MatchProgress {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
-    apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn);
+    apply_end_turn_effect(
+      state,
+      log,
+      hp_changed,
+      effect_id,
+      focus_punch_pending,
+      took_damage_this_turn,
+      switched_this_turn
+    );
     const progress = check_zero_hp_match_result(state, log);
     if (progress !== "continue") {
       return progress;
@@ -3017,6 +3079,20 @@ function apply_move(
     return;
   }
 
+  if (spec.id === "sekyps") {
+    const target_slot = other_slot(player_slot);
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary:
+        "Sekyps (curse): no end_turn causa dano flat 36 e acumula +36 por tick (36/72/108/...) enquanto nao houver switch",
+      data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot, baseDamage: 36 }
+    });
+    finalize_move_success();
+    return;
+  }
+
   if (spec.id === "focus_punch") {
     focus_punch_pending[player_slot] = true;
     log.push({
@@ -3432,7 +3508,6 @@ export function resolve_turn(
   const hp_changed_this_turn = new WeakSet<MonsterState>();
   const focus_punch_pending: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   const took_damage_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
-  const switched_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
   sync_all_players_shared_mSPE(next);
   refresh_active_monster_stats(next);
@@ -3446,6 +3521,10 @@ export function resolve_turn(
   const switch_sovietico_resolved_this_turn: Record<PlayerSlot, boolean> = {
     player1: !!next.pendingSwitchResolvedThisTurn.player1,
     player2: !!next.pendingSwitchResolvedThisTurn.player2
+  };
+  const switched_this_turn: Record<PlayerSlot, boolean> = {
+    player1: switch_sovietico_resolved_this_turn.player1,
+    player2: switch_sovietico_resolved_this_turn.player2
   };
   next.pendingSwitch = empty_pending();
   next.pendingSwitchReason = empty_pending_switch_reason();
@@ -3589,7 +3668,14 @@ export function resolve_turn(
   }
 
   if (progress === "continue") {
-    progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn);
+    progress = apply_end_turn_phase(
+      next,
+      log,
+      hp_changed_this_turn,
+      focus_punch_pending,
+      took_damage_this_turn,
+      switched_this_turn
+    );
   }
   decrement_cooldowns(next);
   if (next.status === "running") {

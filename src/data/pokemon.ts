@@ -68,6 +68,17 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     defaultPassive: "none"
   },
   {
+    id: "night",
+    name: "Night",
+    role: "Metagross Sekyps",
+    type: "atk",
+    stats: { level: 12, maxHp: 242, attack: 542, defense: 521, speed: 271 },
+    possibleMoves: ["sekyps", "kick", "run", "none"],
+    possiblePassives: ["none"],
+    defaultMoves: ["sekyps", "kick", "none", "run"],
+    defaultPassive: "none"
+  },
+  {
     id: "miren",
     name: "Miren",
     role: "Celebi",
