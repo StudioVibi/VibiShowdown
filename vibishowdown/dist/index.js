@@ -1968,7 +1968,7 @@ function type_for_index(index) {
 var MONSTER_ROSTER = [
   {
     id: "babydragon",
-    name: "Baby Dragon",
+    name: "mon1",
     role: "Snorlax",
     type: type_for_index(0),
     stats: { level: 12, maxHp: 100, attack: 100, defense: 100, speed: 100 },
@@ -1979,7 +1979,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "croni",
-    name: "Croni",
+    name: "mon2",
     role: "Ninjask",
     type: type_for_index(1),
     stats: { level: 12, maxHp: 100, attack: 35, defense: 60, speed: 160 },
@@ -1990,7 +1990,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "harpy",
-    name: "Harpy",
+    name: "mon3",
     role: "Absol",
     type: type_for_index(2),
     stats: { level: 12, maxHp: 180, attack: 521, defense: 230, speed: 292 },
@@ -2001,7 +2001,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "hoof",
-    name: "Hoof",
+    name: "mon4",
     role: "Chansey",
     type: type_for_index(3),
     stats: { level: 12, maxHp: 950, attack: 0, defense: 0, speed: 188 },
@@ -2023,10 +2023,10 @@ var MONSTER_ROSTER = [
   },
   {
     id: "night_sekyps",
-    name: "Knight",
+    name: "mon5",
     role: "Metagross Sekyps",
     type: "atk",
-    stats: { level: 12, maxHp: 242, attack: 115, defense: 75, speed: 120 },
+    stats: { level: 12, maxHp: 242, attack: 115, defense: 75, speed: 75 },
     possibleMoves: ["sekyps", "kick", "run", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["sekyps", "kick", "none", "run"],
@@ -2034,7 +2034,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "miren",
-    name: "Miren",
+    name: "mon6",
     role: "Celebi",
     type: type_for_index(5),
     stats: { level: 12, maxHp: 325, attack: 396, defense: 396, speed: 396 },
@@ -2045,7 +2045,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "panda",
-    name: "Panda",
+    name: "mon7",
     role: "Cloyster",
     type: type_for_index(6),
     stats: { level: 12, maxHp: 117, attack: 375, defense: 730, speed: 271 },
@@ -2056,7 +2056,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "valkyria",
-    name: "Valkyria",
+    name: "mon8",
     role: "Aerodactyl",
     type: type_for_index(7),
     stats: { level: 12, maxHp: 242, attack: 100, defense: 100, speed: 100 },
