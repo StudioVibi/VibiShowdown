@@ -1222,6 +1222,14 @@ function attack_from_stage(base_attack: number, stage: number): number {
   return Math.max(0, mul_div_round(base_attack, 2, 2 - normalized));
 }
 
+function attack_percent_from_stage(stage: number): number {
+  const normalized = clamp_stage(stage);
+  if (normalized >= 0) {
+    return Math.round(((2 + normalized) * 100) / 2);
+  }
+  return Math.round((2 * 100) / (2 - normalized));
+}
+
 function tooltip_from_config(monster_id: string): MonsterTooltipPayload {
   const config = get_config(monster_id);
   const base = base_stats_for(monster_id, config.stats.level);
@@ -1256,10 +1264,14 @@ function tooltip_from_state(state: GameState, slot_id: PlayerSlot, mon: MonsterS
   const defense_blocked = has_active_effect(state, slot_id, "deterioration");
   const speed_blocked = has_active_effect(state, slot_id, "paralyse");
   const attack_value = tooltip_stat_value_from_percent(base.attack, attack_total_percent);
-  const weakened_attack_value = attack_from_stage(
-    Math.max(0, Number.isFinite(mon.baseAttack) ? Math.trunc(mon.baseAttack) : base.attack),
-    (Number.isFinite(mon.attackStage) ? mon.attackStage : 0) - 2
-  );
+  const base_attack_for_stage = Math.max(0, Number.isFinite(mon.baseAttack) ? Math.trunc(mon.baseAttack) : base.attack);
+  const stage_attack = Number.isFinite(mon.attackStage) ? mon.attackStage : 0;
+  const weakened_stage_attack = stage_attack - 2;
+  const weakened_attack_value = attack_from_stage(base_attack_for_stage, weakened_stage_attack);
+  const attack_percent_with_stage =
+    weakness_active && base_attack_for_stage > 0
+      ? clamp_tooltip_total_percent(attack_percent_from_stage(weakened_stage_attack))
+      : attack_total_percent;
   return {
     id: mon.id,
     name: monster_label(mon.id),
@@ -1272,7 +1284,7 @@ function tooltip_from_state(state: GameState, slot_id: PlayerSlot, mon: MonsterS
     },
     base,
     totalPercent: {
-      attack: attack_total_percent,
+      attack: attack_percent_with_stage,
       defense: defense_total_percent,
       speed: speed_total_percent
     }
