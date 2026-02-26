@@ -88,7 +88,8 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   double_edge: "Golpe forte com recoil de 1/3 do dano final causado.",
   seismic_toss: "Dano flat fixo de 50, ignorando DEF.",
   leech_life: "Aplica Leech Seed (dreno no end_turn) ate o alvo trocar.",
-  sekyps: "Aplica o debuff Sekyps: no end_turn causa dano flat 36 e acumula para 72/108/144... se o alvo nao trocar.",
+  sekyps:
+    "Aplica o debuff Sekyps: no end_turn causa dano flat 24 por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch e nao causa dano no turno em que o alvo troca.",
   focus_punch: "Carrega e resolve no inicio do end_turn; falha se tomar dano real antes.",
   pain_split: "Ambos ficam com floor((HP_user + HP_target)/2), respeitando clamp de HP.",
   screech: "Reduz DEF do alvo em 50% ate trocar.",

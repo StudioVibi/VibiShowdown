@@ -113,7 +113,7 @@ const STAT_MULTIPLIER_MAX_PERCENT = 400;
 const MSPE_VALUE_GOAL = 500;
 const MSPE_GAP_GOAL_PERCENT = 33;
 const RUN_MSPE_GAIN_PERCENT = 10;
-const SEKYPS_DAMAGE_PER_STACK = 36;
+const SEKYPS_DAMAGE_PER_STACK = 24;
 const REJUVENATION_REGEN_PERCENT_PER_STACK = 5;
 const EFFECT_IDS: readonly EffectCollateralId[] = [
   "confuse",
@@ -658,6 +658,26 @@ function upsert_curse(
   const curses = state.activeCursesBySlot[target_slot];
   const existing = curses.find((entry) => entry.id === curse_id) ?? null;
   if (existing) {
+    if (curse_id === "sekyps") {
+      const before_stack = Math.max(1, normalize_int(existing.stacks, 1, 1));
+      const after_stack = before_stack + 1;
+      existing.stacks = after_stack;
+      log.push({
+        type: "curse_apply",
+        turn: state.turn,
+        summary: `Sekyps stacked on ${target_slot} (${before_stack} -> ${after_stack})`,
+        data: {
+          slot: source_slot,
+          targetSlot: target_slot,
+          move: source_move_id,
+          curse: curse_id,
+          alreadyActive: true,
+          stackBefore: before_stack,
+          stackAfter: after_stack
+        }
+      });
+      return;
+    }
     log.push({
       type: "curse_apply",
       turn: state.turn,
@@ -1971,7 +1991,12 @@ function clear_curses_on_target_switch(state: GameState, log: EventLog[], target
   if (!Array.isArray(active_curses) || active_curses.length === 0) {
     return;
   }
+  const kept: ActiveCurseState[] = [];
   for (const curse of active_curses) {
+    if (curse.id === "sekyps") {
+      kept.push(curse);
+      continue;
+    }
     const ended_type = curse.id === "leech_seed" ? "leech_end" : "curse_end";
     log.push({
       type: ended_type,
@@ -1983,7 +2008,7 @@ function clear_curses_on_target_switch(state: GameState, log: EventLog[], target
       data: { slot: target_slot, source: curse.sourceSlot, curse: curse.id, stacks: curse.stacks, reason: "switch" }
     });
   }
-  state.activeCursesBySlot[target_slot] = [];
+  state.activeCursesBySlot[target_slot] = kept;
 }
 
 function clear_buff_debuffs_on_target_switch(state: GameState, log: EventLog[], target_slot: PlayerSlot): void {
@@ -2106,8 +2131,6 @@ function apply_curse_end_turn(
         const target_before = target_player.sharedHp;
         const damage = Math.min(target_before, Math.max(0, damage_amount));
         const target_after = target_before - damage;
-        const next_stack = current_stack + 1;
-        curse.stacks = next_stack;
         if (damage <= 0) {
           continue;
         }
@@ -2126,8 +2149,8 @@ function apply_curse_end_turn(
             damage,
             damageAmount: damage_amount,
             stack: current_stack,
-            nextStack: next_stack,
-            nextDamageAmount: next_stack * SEKYPS_DAMAGE_PER_STACK,
+            nextStack: current_stack,
+            nextDamageAmount: damage_amount,
             before: target_before,
             after: target_after
           }
@@ -3437,13 +3460,22 @@ function apply_move(
 
   if (spec.id === "sekyps") {
     const target_slot = other_slot(player_slot);
+    const existing_stack = Math.max(0, curse_stacks(state, target_slot, "sekyps"));
+    const after_stack = Math.max(1, existing_stack + 1);
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
       summary:
-        "Sekyps (curse): no end_turn causa dano flat 36 e acumula +36 por tick (36/72/108/...) enquanto nao houver switch",
-      data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot, baseDamage: 36 }
+        "Sekyps (curse): no end_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch e nao causa dano no turno em que o alvo troca",
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        target: defender.id,
+        targetSlot: target_slot,
+        baseDamage: SEKYPS_DAMAGE_PER_STACK,
+        stackAfterApply: after_stack
+      }
     });
     finalize_move_success();
     return;
