@@ -128,6 +128,8 @@ export type GameState = {
   mSPETelemetry: Record<PlayerSlot, MSPETelemetry>;
   typePassiveArmorStacks: Record<PlayerSlot, number>;
   typePassiveRegenStacks: Record<PlayerSlot, number>;
+  rejuvenationStacks: Record<PlayerSlot, number>;
+  rejuvenationStartTurn: Record<PlayerSlot, number>;
   arenaTrapUntilTurn: Record<PlayerSlot, number>;
   spikesArmedByTarget: Record<PlayerSlot, boolean>;
   players: Record<PlayerSlot, PlayerState>;

@@ -18,7 +18,8 @@ export type EffectCollateralId =
   | "weakness"
   | "deterioration"
   | "paralyse"
-  | "silence";
+  | "silence"
+  | "rejuvenation";
 
 export type CurseCollateralId = "madness" | "leech_seed" | "destiny_bond" | "endure" | "sekyps";
 

@@ -54,7 +54,14 @@ const PHASES: Phase[] = [
 
 const END_PHASE_ID = "end_turn";
 const SLOT_ORDER = ["player1", "player2"] as const;
-const END_TURN_EFFECT_ORDER = ["focus_punch", "wish", "leech_life", "type_regen"] as const;
+const END_TURN_EFFECT_ORDER = [
+  "focus_punch",
+  "rejuvenation_reactive",
+  "wish",
+  "leech_life",
+  "rejuvenation_regen",
+  "type_regen"
+] as const;
 type EndTurnEffectId = (typeof END_TURN_EFFECT_ORDER)[number];
 
 const TAUNT_BLOCKED_MOVE_IDS = new Set([
@@ -65,6 +72,7 @@ const TAUNT_BLOCKED_MOVE_IDS = new Set([
   "team_cure",
   "bait",
   "wish",
+  "rejuvenation",
   "spikes",
   "recover",
   "meditate",
@@ -104,6 +112,7 @@ const MSPE_VALUE_GOAL = 500;
 const MSPE_GAP_GOAL_PERCENT = 33;
 const RUN_MSPE_GAIN_PERCENT = 10;
 const SEKYPS_DAMAGE_PER_STACK = 36;
+const REJUVENATION_REGEN_PERCENT_PER_STACK = 5;
 const EFFECT_IDS: readonly EffectCollateralId[] = [
   "confuse",
   "sleep",
@@ -116,7 +125,8 @@ const EFFECT_IDS: readonly EffectCollateralId[] = [
   "weakness",
   "deterioration",
   "paralyse",
-  "silence"
+  "silence",
+  "rejuvenation"
 ] as const;
 const EFFECT_ID_SET = new Set<string>(EFFECT_IDS);
 const CURSE_IDS: readonly CurseCollateralId[] = [
@@ -140,7 +150,8 @@ const EFFECT_LABELS: Record<EffectCollateralId, string> = {
   weakness: "Weakness",
   deterioration: "Deterioration",
   paralyse: "Paralyse",
-  silence: "Silence"
+  silence: "Silence",
+  rejuvenation: "Rejuvenation"
 };
 const CURSE_LABELS: Record<CurseCollateralId, string> = {
   madness: "Madness",
@@ -352,6 +363,14 @@ function empty_type_passive_armor_stacks(): Record<PlayerSlot, number> {
 }
 
 function empty_type_passive_regen_stacks(): Record<PlayerSlot, number> {
+  return empty_slot_record(0, 0);
+}
+
+function empty_rejuvenation_stacks(): Record<PlayerSlot, number> {
+  return empty_slot_record(0, 0);
+}
+
+function empty_rejuvenation_start_turn(): Record<PlayerSlot, number> {
   return empty_slot_record(0, 0);
 }
 
@@ -840,6 +859,14 @@ function type_passive_regen_stack(state: GameState, slot: PlayerSlot): number {
   return normalize_type_passive_stack(state.typePassiveRegenStacks?.[slot], 0, 0, 9999);
 }
 
+function rejuvenation_stack(state: GameState, slot: PlayerSlot): number {
+  return normalize_type_passive_stack(state.rejuvenationStacks?.[slot], 0, 0, 9999);
+}
+
+function rejuvenation_start_turn(state: GameState, slot: PlayerSlot): number {
+  return normalize_int(state.rejuvenationStartTurn?.[slot], 0, 0);
+}
+
 function is_slot_clear_body_active(state: GameState, slot: PlayerSlot): boolean {
   return type_passive_armor_stack(state, slot) > 0;
 }
@@ -1007,6 +1034,8 @@ export function clone_state(state: GameState): GameState {
     mSPETelemetry: empty_mSPE_telemetry(),
     typePassiveArmorStacks: empty_type_passive_armor_stacks(),
     typePassiveRegenStacks: empty_type_passive_regen_stacks(),
+    rejuvenationStacks: empty_rejuvenation_stacks(),
+    rejuvenationStartTurn: empty_rejuvenation_start_turn(),
     arenaTrapUntilTurn: empty_arena_trap_until_turn(),
     spikesArmedByTarget: empty_spikes_armed_by_target(),
     players: {
@@ -1039,6 +1068,10 @@ export function clone_state(state: GameState): GameState {
   );
   cloned.typePassiveRegenStacks.player1 = normalize_type_passive_stack(state.typePassiveRegenStacks?.player1, 0, 0, 9999);
   cloned.typePassiveRegenStacks.player2 = normalize_type_passive_stack(state.typePassiveRegenStacks?.player2, 0, 0, 9999);
+  cloned.rejuvenationStacks.player1 = normalize_type_passive_stack(state.rejuvenationStacks?.player1, 0, 0, 9999);
+  cloned.rejuvenationStacks.player2 = normalize_type_passive_stack(state.rejuvenationStacks?.player2, 0, 0, 9999);
+  cloned.rejuvenationStartTurn.player1 = normalize_int(state.rejuvenationStartTurn?.player1, 0, 0);
+  cloned.rejuvenationStartTurn.player2 = normalize_int(state.rejuvenationStartTurn?.player2, 0, 0);
   cloned.arenaTrapUntilTurn.player1 = normalize_int(state.arenaTrapUntilTurn?.player1, 0, 0);
   cloned.arenaTrapUntilTurn.player2 = normalize_int(state.arenaTrapUntilTurn?.player2, 0, 0);
   cloned.spikesArmedByTarget.player1 = !!state.spikesArmedByTarget?.player1;
@@ -1165,6 +1198,12 @@ function ensure_state_runtime_defaults(state: GameState): void {
   }
   if (!state.typePassiveRegenStacks) {
     state.typePassiveRegenStacks = empty_type_passive_regen_stacks();
+  }
+  if (!state.rejuvenationStacks) {
+    state.rejuvenationStacks = empty_rejuvenation_stacks();
+  }
+  if (!state.rejuvenationStartTurn) {
+    state.rejuvenationStartTurn = empty_rejuvenation_start_turn();
   }
   if (!state.arenaTrapUntilTurn) {
     state.arenaTrapUntilTurn = empty_arena_trap_until_turn();
@@ -1311,7 +1350,8 @@ function apply_switch_sovietico_predict_bonus(
   log: EventLog[],
   resolved_this_turn: Record<PlayerSlot, boolean>,
   hp_changed: WeakSet<MonsterState>,
-  took_damage_this_turn: Record<PlayerSlot, boolean>
+  took_damage_this_turn: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn: Record<PlayerSlot, number>
 ): boolean {
   if (!resolved_this_turn.player1 || !resolved_this_turn.player2) {
     return false;
@@ -1348,7 +1388,15 @@ function apply_switch_sovietico_predict_bonus(
   );
 
   const switched: Record<PlayerSlot, boolean> = { player1: true, player2: true };
-  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn, 2);
+  apply_simultaneous_switch_passives(
+    state,
+    log,
+    switched,
+    hp_changed,
+    took_damage_this_turn,
+    damage_taken_this_turn,
+    2
+  );
   return true;
 }
 
@@ -1357,7 +1405,8 @@ function apply_spikes_on_switch(
   log: EventLog[],
   slot: PlayerSlot,
   hp_changed?: WeakSet<MonsterState>,
-  took_damage_this_turn?: Record<PlayerSlot, boolean>
+  took_damage_this_turn?: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn?: Record<PlayerSlot, number>
 ): void {
   if (!(state.spikesArmedByTarget?.[slot] ?? false)) {
     return;
@@ -1365,6 +1414,7 @@ function apply_spikes_on_switch(
   state.spikesArmedByTarget[slot] = false;
   const hp_changed_ref = hp_changed ?? new WeakSet<MonsterState>();
   const took_damage_ref = took_damage_this_turn ?? { player1: false, player2: false };
+  const damage_taken_ref = damage_taken_this_turn ?? { player1: 0, player2: 0 };
   const target_player = state.players[slot];
   const target = active_monster(target_player);
   const damage_attempt = Math.max(0, mul_div_round(target_player.sharedHpMax, 1, 20));
@@ -1376,7 +1426,9 @@ function apply_spikes_on_switch(
     target,
     damage_attempt,
     hp_changed_ref,
-    took_damage_ref
+    took_damage_ref,
+    undefined,
+    damage_taken_ref
   );
   log.push({
     type: "spikes_trigger",
@@ -1403,6 +1455,7 @@ function apply_simultaneous_switch_passives(
   switched_this_turn: Record<PlayerSlot, boolean>,
   hp_changed: WeakSet<MonsterState>,
   took_damage_this_turn: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn?: Record<PlayerSlot, number>,
   passive_multiplier: number = 1
 ): void {
   if (!switched_this_turn.player1 || !switched_this_turn.player2) {
@@ -1438,7 +1491,8 @@ function apply_simultaneous_switch_passives(
       true_damage,
       hp_changed,
       took_damage_this_turn,
-      { ignoreArmor: true, source: "type_passive_atk" }
+      { ignoreArmor: true, source: "type_passive_atk" },
+      damage_taken_this_turn
     );
     log.push({
       type: "passive_trigger",
@@ -1779,6 +1833,98 @@ function apply_pending_wish(state: GameState, log: EventLog[], slot: PlayerSlot,
   }
 }
 
+function apply_rejuvenation_reactive_heal_end_turn(
+  state: GameState,
+  log: EventLog[],
+  slot: PlayerSlot,
+  hp_changed: WeakSet<MonsterState>,
+  rejuvenation_used_this_turn: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn: Record<PlayerSlot, number>
+): void {
+  if (!rejuvenation_used_this_turn[slot]) {
+    return;
+  }
+  const player = state.players[slot];
+  const target = active_monster(player);
+  const damage_taken = Math.max(0, normalize_int(damage_taken_this_turn[slot], 0, 0));
+  if (damage_taken <= 0) {
+    log.push({
+      type: "rejuvenation_reactive_heal",
+      turn: state.turn,
+      phase: END_PHASE_ID,
+      summary: `${target.name} used Rejuvenation but took no damage this turn`,
+      data: { slot, target: target.id, damageTaken: 0, healApplied: 0 }
+    });
+    return;
+  }
+  const before_hp = player.sharedHp;
+  const heal_attempt = Math.max(0, mul_div_floor(damage_taken, 1, 2));
+  const after_hp = Math.min(player.sharedHpMax, before_hp + heal_attempt);
+  const healed = Math.max(0, after_hp - before_hp);
+  if (healed > 0) {
+    sync_player_shared_hp(state, slot, after_hp);
+    hp_changed.add(target);
+  }
+  log.push({
+    type: "rejuvenation_reactive_heal",
+    turn: state.turn,
+    phase: END_PHASE_ID,
+    summary: `${target.name} healed ${healed} from Rejuvenation (50% of damage taken)`,
+    data: {
+      slot,
+      target: target.id,
+      damageTaken: damage_taken,
+      healAttempted: heal_attempt,
+      healApplied: healed,
+      before: before_hp,
+      after: after_hp
+    }
+  });
+}
+
+function apply_rejuvenation_regen_end_turn(
+  state: GameState,
+  log: EventLog[],
+  slot: PlayerSlot,
+  hp_changed: WeakSet<MonsterState>
+): void {
+  const stack = rejuvenation_stack(state, slot);
+  const start_turn = rejuvenation_start_turn(state, slot);
+  if (stack <= 0 || start_turn <= 0 || state.turn < start_turn) {
+    return;
+  }
+  const player = state.players[slot];
+  const target = active_monster(player);
+  const heal_percent = stack * REJUVENATION_REGEN_PERCENT_PER_STACK;
+  const heal_attempt = Math.max(0, mul_div_floor(player.sharedHpMax, heal_percent, 100));
+  const before_hp = player.sharedHp;
+  const after_hp = Math.min(player.sharedHpMax, before_hp + heal_attempt);
+  const healed = Math.max(0, after_hp - before_hp);
+  if (healed > 0) {
+    sync_player_shared_hp(state, slot, after_hp);
+    hp_changed.add(target);
+  }
+  state.rejuvenationStacks[slot] = stack + 1;
+  log.push({
+    type: "rejuvenation_regen",
+    turn: state.turn,
+    phase: END_PHASE_ID,
+    summary: `${target.name} healed ${healed} from Rejuvenation regen (${heal_percent}%)`,
+    data: {
+      slot,
+      target: target.id,
+      stack,
+      nextStack: stack + 1,
+      healPercent: heal_percent,
+      nextHealPercent: (stack + 1) * REJUVENATION_REGEN_PERCENT_PER_STACK,
+      healAttempted: heal_attempt,
+      healApplied: healed,
+      before: before_hp,
+      after: after_hp
+    }
+  });
+}
+
 function apply_type_passive_regen_end_turn(
   state: GameState,
   log: EventLog[],
@@ -2030,7 +2176,8 @@ function apply_focus_punch_end_turn(
   log: EventLog[],
   hp_changed: WeakSet<MonsterState>,
   focus_punch_pending: Record<PlayerSlot, boolean>,
-  took_damage_this_turn: Record<PlayerSlot, boolean>
+  took_damage_this_turn: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn: Record<PlayerSlot, number>
 ): void {
   const spec = move_spec("focus_punch");
   for (const slot of SLOT_ORDER) {
@@ -2058,7 +2205,7 @@ function apply_focus_punch_end_turn(
       });
       continue;
     }
-    apply_damage_move(state, log, slot, spec, hp_changed, END_PHASE_ID, took_damage_this_turn);
+    apply_damage_move(state, log, slot, spec, hp_changed, END_PHASE_ID, took_damage_this_turn, damage_taken_this_turn);
   }
 }
 
@@ -2069,10 +2216,32 @@ function apply_end_turn_effect(
   effect_id: EndTurnEffectId,
   focus_punch_pending: Record<PlayerSlot, boolean>,
   took_damage_this_turn: Record<PlayerSlot, boolean>,
-  switched_this_turn: Record<PlayerSlot, boolean>
+  switched_this_turn: Record<PlayerSlot, boolean>,
+  rejuvenation_used_this_turn: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn: Record<PlayerSlot, number>
 ): void {
   if (effect_id === "focus_punch") {
-    apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending, took_damage_this_turn);
+    apply_focus_punch_end_turn(
+      state,
+      log,
+      hp_changed,
+      focus_punch_pending,
+      took_damage_this_turn,
+      damage_taken_this_turn
+    );
+    return;
+  }
+  if (effect_id === "rejuvenation_reactive") {
+    for (const slot of SLOT_ORDER) {
+      apply_rejuvenation_reactive_heal_end_turn(
+        state,
+        log,
+        slot,
+        hp_changed,
+        rejuvenation_used_this_turn,
+        damage_taken_this_turn
+      );
+    }
     return;
   }
   if (effect_id === "wish") {
@@ -2083,6 +2252,12 @@ function apply_end_turn_effect(
   }
   if (effect_id === "leech_life") {
     apply_curse_end_turn(state, log, hp_changed, switched_this_turn);
+    return;
+  }
+  if (effect_id === "rejuvenation_regen") {
+    for (const slot of SLOT_ORDER) {
+      apply_rejuvenation_regen_end_turn(state, log, slot, hp_changed);
+    }
     return;
   }
   for (const slot of SLOT_ORDER) {
@@ -2096,7 +2271,9 @@ function apply_end_turn_phase(
   hp_changed: WeakSet<MonsterState>,
   focus_punch_pending: Record<PlayerSlot, boolean>,
   took_damage_this_turn: Record<PlayerSlot, boolean>,
-  switched_this_turn: Record<PlayerSlot, boolean>
+  switched_this_turn: Record<PlayerSlot, boolean>,
+  rejuvenation_used_this_turn: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn: Record<PlayerSlot, number>
 ): MatchProgress {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
     apply_end_turn_effect(
@@ -2106,7 +2283,9 @@ function apply_end_turn_phase(
       effect_id,
       focus_punch_pending,
       took_damage_this_turn,
-      switched_this_turn
+      switched_this_turn,
+      rejuvenation_used_this_turn,
+      damage_taken_this_turn
     );
     const progress = check_zero_hp_match_result(state, log);
     if (progress !== "continue") {
@@ -2129,7 +2308,8 @@ function apply_damage_with_endure(
   attempted_damage: number,
   hp_changed: WeakSet<MonsterState>,
   took_damage_this_turn: Record<PlayerSlot, boolean>,
-  options?: { ignoreArmor?: boolean; source?: string }
+  options?: { ignoreArmor?: boolean; source?: string },
+  damage_taken_this_turn?: Record<PlayerSlot, number>
 ): { before: number; after: number; applied: number } {
   const before = state.players[slot].sharedHp;
   if (before <= 0 || attempted_damage <= 0) {
@@ -2241,6 +2421,10 @@ function apply_damage_with_endure(
   if (applied > 0) {
     hp_changed.add(monster);
     took_damage_this_turn[slot] = true;
+    if (damage_taken_this_turn) {
+      const current = normalize_int(damage_taken_this_turn[slot], 0, 0);
+      damage_taken_this_turn[slot] = current + applied;
+    }
   }
   return { before, after: final_after, applied };
 }
@@ -2252,7 +2436,8 @@ function apply_damage_move(
   spec: ReturnType<typeof move_spec>,
   hp_changed: WeakSet<MonsterState>,
   phase_id: string,
-  took_damage_this_turn: Record<PlayerSlot, boolean>
+  took_damage_this_turn: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn: Record<PlayerSlot, number>
 ): void {
   const player = state.players[player_slot];
   const opponent_slot = other_slot(player_slot);
@@ -2327,7 +2512,8 @@ function apply_damage_move(
     damage,
     hp_changed,
     took_damage_this_turn,
-    { source: spec.id, ignoreArmor: spec.id === "seismic_toss" }
+    { source: spec.id, ignoreArmor: spec.id === "seismic_toss" },
+    damage_taken_this_turn
   );
   const final_damage = defender_result.applied;
 
@@ -2362,7 +2548,8 @@ function apply_damage_move(
         recoil_damage,
         hp_changed,
         took_damage_this_turn,
-        { ignoreArmor: true, source: "recoil" }
+        { ignoreArmor: true, source: "recoil" },
+        damage_taken_this_turn
       );
       recoil_before = recoil_result.before;
       recoil_damage = recoil_result.applied;
@@ -2509,7 +2696,9 @@ function apply_move(
   self_switch_target_index: number | undefined,
   hp_changed: WeakSet<MonsterState>,
   focus_punch_pending: Record<PlayerSlot, boolean>,
-  took_damage_this_turn: Record<PlayerSlot, boolean>
+  took_damage_this_turn: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn: Record<PlayerSlot, number>,
+  rejuvenation_used_this_turn: Record<PlayerSlot, boolean>
 ): void {
   const player = state.players[player_slot];
   const opponent = state.players[other_slot(player_slot)];
@@ -2808,6 +2997,41 @@ function apply_move(
     return;
   }
 
+  if (spec.id === "rejuvenation") {
+    ensure_state_runtime_defaults(state);
+    rejuvenation_used_this_turn[player_slot] = true;
+    const stack_before = rejuvenation_stack(state, player_slot);
+    const start_turn_before = rejuvenation_start_turn(state, player_slot);
+    const starts_next_turn = state.turn + 1;
+    if (stack_before <= 0) {
+      state.rejuvenationStacks[player_slot] = 1;
+      state.rejuvenationStartTurn[player_slot] = starts_next_turn;
+    } else if (start_turn_before <= 0) {
+      state.rejuvenationStartTurn[player_slot] = starts_next_turn;
+    }
+    upsert_effect(state, log, player_slot, "rejuvenation", 999, player_slot, spec.id);
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary:
+        stack_before <= 0
+          ? `Rejuvenation: cura 50% do dano sofrido neste turno; regen acumulativo ativo a partir do turno ${starts_next_turn} (5/10/15/...)`
+          : "Rejuvenation: cura 50% do dano sofrido neste turno; regen acumulativo ja estava ativo",
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        target: attacker.id,
+        reactiveHealPercentOfDamageTaken: 50,
+        regenStartTurn: state.rejuvenationStartTurn[player_slot],
+        regenStackBefore: stack_before,
+        regenStackAfter: rejuvenation_stack(state, player_slot)
+      }
+    });
+    finalize_move_success();
+    return;
+  }
+
   if (spec.id === "wish") {
     const trigger_turn = state.turn + 1;
     if (!state.pendingWish) {
@@ -3023,7 +3247,16 @@ function apply_move(
   }
 
   if (spec.id === "bounce_kick") {
-    apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn);
+    apply_damage_move(
+      state,
+      log,
+      player_slot,
+      spec,
+      hp_changed,
+      spec.phaseId,
+      took_damage_this_turn,
+      damage_taken_this_turn
+    );
     if (state.players[other_slot(player_slot)].sharedHp <= 0) {
       finalize_move_success();
       return;
@@ -3052,7 +3285,15 @@ function apply_move(
       return;
     }
     const target_index = Number(self_switch_target_index);
-    const switched = apply_switch(state, log, player_slot, target_index, hp_changed, took_damage_this_turn);
+    const switched = apply_switch(
+      state,
+      log,
+      player_slot,
+      target_index,
+      hp_changed,
+      took_damage_this_turn,
+      damage_taken_this_turn
+    );
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -3255,7 +3496,16 @@ function apply_move(
     return;
   }
 
-  apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn);
+  apply_damage_move(
+    state,
+    log,
+    player_slot,
+    spec,
+    hp_changed,
+    spec.phaseId,
+    took_damage_this_turn,
+    damage_taken_this_turn
+  );
   finalize_move_success();
 }
 
@@ -3293,7 +3543,8 @@ function perform_switch(
   target_index: number,
   event_type: "switch" | "forced_switch",
   hp_changed?: WeakSet<MonsterState>,
-  took_damage_this_turn?: Record<PlayerSlot, boolean>
+  took_damage_this_turn?: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn?: Record<PlayerSlot, number>
 ): void {
   const player = state.players[slot];
   const from = player.activeIndex;
@@ -3305,7 +3556,7 @@ function perform_switch(
   sync_player_shared_hp(state, slot, player.sharedHp);
   sync_player_shared_mSPE(state, slot, player.sharedMSPE);
   refresh_active_monster_stats_for_slot(state, slot);
-  apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn);
+  apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn, damage_taken_this_turn);
   log.push({
     type: event_type,
     turn: state.turn,
@@ -3320,7 +3571,8 @@ function apply_switch(
   player_slot: PlayerSlot,
   targetIndex: number,
   hp_changed?: WeakSet<MonsterState>,
-  took_damage_this_turn?: Record<PlayerSlot, boolean>
+  took_damage_this_turn?: Record<PlayerSlot, boolean>,
+  damage_taken_this_turn?: Record<PlayerSlot, number>
 ): boolean {
   const player = state.players[player_slot];
   const error = validate_switch_target(player, targetIndex);
@@ -3339,7 +3591,16 @@ function apply_switch(
     });
     return false;
   }
-  perform_switch(state, log, player_slot, targetIndex, "switch", hp_changed, took_damage_this_turn);
+  perform_switch(
+    state,
+    log,
+    player_slot,
+    targetIndex,
+    "switch",
+    hp_changed,
+    took_damage_this_turn,
+    damage_taken_this_turn
+  );
   return true;
 }
 
@@ -3476,6 +3737,8 @@ export function create_initial_state(
     mSPETelemetry: empty_mSPE_telemetry(),
     typePassiveArmorStacks: empty_type_passive_armor_stacks(),
     typePassiveRegenStacks: empty_type_passive_regen_stacks(),
+    rejuvenationStacks: empty_rejuvenation_stacks(),
+    rejuvenationStartTurn: empty_rejuvenation_start_turn(),
     arenaTrapUntilTurn: empty_arena_trap_until_turn(),
     spikesArmedByTarget: empty_spikes_armed_by_target(),
     players: {
@@ -3508,6 +3771,8 @@ export function resolve_turn(
   const hp_changed_this_turn = new WeakSet<MonsterState>();
   const focus_punch_pending: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   const took_damage_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
+  const damage_taken_this_turn: Record<PlayerSlot, number> = { player1: 0, player2: 0 };
+  const rejuvenation_used_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
   sync_all_players_shared_mSPE(next);
   refresh_active_monster_stats(next);
@@ -3570,7 +3835,8 @@ export function resolve_turn(
         log,
         switch_sovietico_resolved_this_turn,
         hp_changed_this_turn,
-        took_damage_this_turn
+        took_damage_this_turn,
+        damage_taken_this_turn
       );
       if (!sovietico_bonus_applied) {
         apply_mindgame_bonus_event(next, log, actions);
@@ -3608,7 +3874,8 @@ export function resolve_turn(
             action.player,
             action.targetIndex,
             hp_changed_this_turn,
-            took_damage_this_turn
+            took_damage_this_turn,
+            damage_taken_this_turn
           );
           if (switched) {
             switched_this_turn[action.player] = true;
@@ -3649,7 +3916,9 @@ export function resolve_turn(
           action.selfSwitchTargetIndex,
           hp_changed_this_turn,
           focus_punch_pending,
-          took_damage_this_turn
+          took_damage_this_turn,
+          damage_taken_this_turn,
+          rejuvenation_used_this_turn
         );
       } else {
         apply_run_action(next, log, action.player);
@@ -3660,7 +3929,14 @@ export function resolve_turn(
       }
     }
     if (phase.id === "switch" && progress === "continue") {
-      apply_simultaneous_switch_passives(next, log, switched_this_turn, hp_changed_this_turn, took_damage_this_turn);
+      apply_simultaneous_switch_passives(
+        next,
+        log,
+        switched_this_turn,
+        hp_changed_this_turn,
+        took_damage_this_turn,
+        damage_taken_this_turn
+      );
       progress = check_zero_hp_match_result(next, log);
     } else if (phase.id === "run" && progress === "continue") {
       progress = check_mSPE_match_result(next, log);
@@ -3674,7 +3950,9 @@ export function resolve_turn(
       hp_changed_this_turn,
       focus_punch_pending,
       took_damage_this_turn,
-      switched_this_turn
+      switched_this_turn,
+      rejuvenation_used_this_turn,
+      damage_taken_this_turn
     );
   }
   decrement_cooldowns(next);

@@ -55,7 +55,8 @@ export const EFFECT_COLLATERAL_TEMPLATES: readonly EffectCollateralTemplate[] = 
   { id: "weakness", label: "Weakness", rank: "C", summary: "ATK -2 stages." },
   { id: "deterioration", label: "Deterioration", rank: "C", summary: "Remove defense." },
   { id: "paralyse", label: "Paralyse", rank: "C", summary: "Remove speed." },
-  { id: "silence", label: "Silence", rank: "C", summary: "Impede skills." }
+  { id: "silence", label: "Silence", rank: "C", summary: "Impede skills." },
+  { id: "rejuvenation", label: "Rejuvenation", rank: "B", summary: "Regen acumulativo por turno ate o fim da partida." }
 ] as const;
 
 // Curse taxonomy. Runtime currently supports application/removal and Leech Seed tick behavior.

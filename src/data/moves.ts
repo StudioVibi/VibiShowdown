@@ -7,6 +7,7 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "run", label: "Run", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "wish", label: "Wish", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "rejuvenation", label: "Rejuvenation", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "switch_sovietico", label: "Switch Sovietico", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "team_cure", label: "Team Cure", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "bait", label: "Bait", phaseId: "attack_01", attackMultiplier100: 0 },
