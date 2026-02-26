@@ -2022,8 +2022,8 @@ var MONSTER_ROSTER = [
     defaultPassive: "none"
   },
   {
-    id: "night",
-    name: "Night",
+    id: "night_sekyps",
+    name: "Night Sekyps",
     role: "Metagross Sekyps",
     type: "atk",
     stats: { level: 12, maxHp: 242, attack: 542, defense: 521, speed: 271 },
@@ -5725,7 +5725,7 @@ var EV_KEYS = ["hp", "atk", "def", "spe"];
 var STAT_STAGE_MIN2 = -6;
 var STAT_STAGE_MAX2 = 6;
 var LOBBY_MOVE_SLOTS = 3;
-var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien", "night", "vealkiria", "babydragonbuf"]);
+var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien", "knight", "vealkiria", "babydragonbuf"]);
 var MOVE_TOOLTIP_DELAY_MS = 2000;
 var MOVE_TOOLTIP_DESCRIPTIONS = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
@@ -5951,7 +5951,7 @@ var ICON_ALIASES = {
   armoth: "panda",
   kairus: "harpy",
   farien: "miren",
-  night: "knight",
+  night_sekyps: "knight",
   vealkiria: "valkyria",
   babydragonbuf: "babydragon"
 };
@@ -5961,6 +5961,12 @@ function icon_path(id) {
 }
 function is_lobby_enabled_monster(id) {
   return STARTER_MONSTER_IDS.has(id);
+}
+var LEGACY_MONSTER_ID_ALIASES = {
+  night: "night_sekyps"
+};
+function canonical_monster_id(id) {
+  return LEGACY_MONSTER_ID_ALIASES[id] ?? id;
 }
 function monster_type_description(type) {
   if (type === "def")
@@ -7173,7 +7179,28 @@ function save_json(key, value) {
 function load_profile() {
   const parsed = load_json(profile_key, null);
   if (parsed && typeof parsed === "object" && parsed.monsters) {
-    return { monsters: parsed.monsters };
+    const source = parsed.monsters;
+    const migrated = {};
+    let changed = false;
+    for (const [raw_id, config] of Object.entries(source)) {
+      const id = canonical_monster_id(raw_id);
+      if (id !== raw_id) {
+        changed = true;
+      }
+      if (!MONSTER_BY_ID.has(id)) {
+        changed = true;
+        continue;
+      }
+      if (migrated[id]) {
+        changed = true;
+        continue;
+      }
+      migrated[id] = config;
+    }
+    if (changed) {
+      save_json(profile_key, { monsters: migrated });
+    }
+    return { monsters: migrated };
   }
   return { monsters: {} };
 }
@@ -7184,9 +7211,9 @@ function save_profile() {
 function load_team_selection() {
   const parsed = load_json(team_key, null);
   if (parsed && Array.isArray(parsed.selected)) {
-    const filtered = parsed.selected.filter((id) => MONSTER_BY_ID.has(id) && is_lobby_enabled_monster(id)).slice(0, 3);
+    const filtered = parsed.selected.map((id) => canonical_monster_id(id)).filter((id) => MONSTER_BY_ID.has(id) && is_lobby_enabled_monster(id)).slice(0, 3);
+    const changed = filtered.length !== parsed.selected.length || filtered.some((id, index) => id !== parsed.selected?.[index]);
     selected.splice(0, selected.length, ...filtered);
-    const changed = filtered.length !== parsed.selected.length;
     if (changed) {
       save_team_selection();
     }
@@ -7246,6 +7273,13 @@ function stats_from_base_level_ev(base, level, ev) {
     speed: final.spe
   };
 }
+function default_lobby_moves_for_spec(spec) {
+  const default_moves = spec.defaultMoves.slice(0, LOBBY_MOVE_SLOTS).map((move_id) => move_id === "run" ? "none" : move_id);
+  while (default_moves.length < LOBBY_MOVE_SLOTS) {
+    default_moves.push("none");
+  }
+  return default_moves;
+}
 function normalize_stats(value, fallback) {
   const source = value ?? {};
   return {
@@ -7269,10 +7303,7 @@ function coerce_config(spec, value) {
   const base_stats = base_stats_from_spec(spec);
   const base_level = normalize_stat_value("level", base_stats.level, 1);
   const base_ev = empty_ev_spread();
-  const default_moves = spec.defaultMoves.slice(0, LOBBY_MOVE_SLOTS).map((move_id) => move_id === "run" ? "none" : move_id);
-  while (default_moves.length < LOBBY_MOVE_SLOTS) {
-    default_moves.push("none");
-  }
+  const default_moves = default_lobby_moves_for_spec(spec);
   const base = {
     moves: default_moves,
     passive: "none",
@@ -7380,7 +7411,14 @@ function reset_profile_stats_to_defaults() {
     const config = coerce_config(spec, profile.monsters[spec.id]);
     const base_stats = base_stats_from_spec(spec);
     const default_ev = empty_ev_spread();
+    const default_moves = default_lobby_moves_for_spec(spec);
     const default_stats = stats_from_base_level_ev(base_stats, base_stats.level, default_ev);
+    if (config.moves.some((move, index) => move !== default_moves[index])) {
+      changed = true;
+    }
+    if (config.passive !== "none") {
+      changed = true;
+    }
     if (!stats_equal(config.stats, default_stats)) {
       changed = true;
     }
@@ -7388,8 +7426,8 @@ function reset_profile_stats_to_defaults() {
       changed = true;
     }
     profile.monsters[spec.id] = {
-      moves: config.moves.slice(0, LOBBY_MOVE_SLOTS),
-      passive: config.passive,
+      moves: default_moves,
+      passive: "none",
       stats: default_stats,
       ev: default_ev
     };
