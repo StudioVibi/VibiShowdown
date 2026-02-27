@@ -3024,7 +3024,7 @@ function build_team_selection(): TeamSelection | null {
 }
 
 function send_ready(next_ready: boolean): void {
-  if (match_started) {
+  if (next_ready && match_started) {
     return;
   }
   if (next_ready) {
@@ -3134,6 +3134,7 @@ function reset_to_lobby_view(): void {
   status_turn.textContent = "0";
   update_rps_status(null);
   update_deadline();
+  update_ready_ui();
   update_action_controls();
 }
 
@@ -3874,6 +3875,11 @@ if (reset_status_btn) {
 }
 
 match_end_btn.addEventListener("click", () => {
+  if (slot && is_ready) {
+    send_ready(false);
+    // Optimistic unlock: local lobby editing is available immediately.
+    is_ready = false;
+  }
   reset_to_lobby_view();
 });
 
