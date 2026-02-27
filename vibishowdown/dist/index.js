@@ -2018,7 +2018,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 242, attack: 80, defense: 160, speed: 85 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["return", "rejuvenation", "none", "run"],
+    defaultMoves: ["sekyps", "rejuvenation", "none", "run"],
     defaultPassive: "none"
   },
   {
