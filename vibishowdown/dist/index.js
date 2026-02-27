@@ -1833,7 +1833,7 @@ function ping() {
 // src/data/moves.ts
 var MOVE_CATALOG = [
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
-  { id: "punch", label: "Punch", phaseId: "attack_01", attackMultiplier100: 0, damageType: "flat", flatDamage: 93 },
+  { id: "punch", label: "Punch", phaseId: "attack_01", attackMultiplier100: 93 },
   { id: "power", label: "Power", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "kick", label: "Kick", phaseId: "attack_01", attackMultiplier100: 120 },
   { id: "throw", label: "Throw", phaseId: "attack_01", attackMultiplier100: 100 },
@@ -4644,7 +4644,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       data: { slot: opponent_slot }
     });
   }
-  const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn, { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "punch" || spec.id === "ki_blast" }, damage_taken_this_turn);
+  const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn, { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "ki_blast" }, damage_taken_this_turn);
   const final_damage = defender_result.applied;
   log.push({
     type: "damage",
@@ -4713,7 +4713,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "punch") {
-    const detail = `Punch: true dmg = flat ${spec.flatDamage ?? 0} (ignores defense/armor); final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}`;
+    const detail = `Punch: dmg = floor(((((2*L)/5)+2)*93*A/D)/50)+2 = floor(((${level_term}*93*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${was_blocked ? " (blocked by Protect)" : ""}`;
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -6054,7 +6054,7 @@ var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien", "knight", "veal
 var MOVE_TOOLTIP_DELAY_MS = 2000;
 var MOVE_TOOLTIP_DESCRIPTIONS = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
-  punch: "Soco de dano verdadeiro fixo 93.",
+  punch: "Golpe fisico com multiplicador 93 (passa por DEF e armadura).",
   power: "Aumenta ATK em +1 stage e reduz DEX em 10% do base.",
   kick: "Golpe fisico forte de dano escalado.",
   throw: "Golpe com formula fixa (90x90) escalada pelo nivel de formula.",

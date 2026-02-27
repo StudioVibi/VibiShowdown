@@ -71,7 +71,7 @@ const STARTER_MONSTER_IDS = new Set<string>(["armoth", "kairus", "farien", "knig
 const MOVE_TOOLTIP_DELAY_MS = 2000;
 const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
-  punch: "Soco de dano verdadeiro fixo 93.",
+  punch: "Golpe fisico com multiplicador 93 (passa por DEF e armadura).",
   power: "Aumenta ATK em +1 stage e reduz DEX em 10% do base.",
   kick: "Golpe fisico forte de dano escalado.",
   throw: "Golpe com formula fixa (90x90) escalada pelo nivel de formula.",

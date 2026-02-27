@@ -2903,7 +2903,7 @@ function apply_damage_move(
     damage,
     hp_changed,
     took_damage_this_turn,
-    { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "punch" || spec.id === "ki_blast" },
+    { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "ki_blast" },
     damage_taken_this_turn
   );
   const final_damage = defender_result.applied;
@@ -2994,7 +2994,7 @@ function apply_damage_move(
       data: { move: spec.id, damage: final_damage, blocked: was_blocked }
     });
   } else if (spec.id === "punch") {
-    const detail = `Punch: true dmg = flat ${spec.flatDamage ?? 0} (ignores defense/armor); final=${final_damage}${
+    const detail = `Punch: dmg = floor(((((2*L)/5)+2)*93*A/D)/50)+2 = floor(((${level_term}*93*${effective_attack}/${effective_defense})/50))+2 = ${raw_damage}; final=${final_damage}${
       was_blocked ? " (blocked by Protect)" : ""
     }`;
     log.push({
