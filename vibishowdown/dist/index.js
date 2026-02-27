@@ -2081,7 +2081,7 @@ var MONSTER_ROSTER = [
     name: "Baby Dragon",
     role: "Baby Dragon BUF Template",
     type: "buf",
-    stats: { level: 12, maxHp: 100, attack: 100, defense: 100, speed: 100 },
+    stats: { level: 12, maxHp: 95, attack: 95, defense: 95, speed: 95 },
     possibleMoves: ["power", "ki_blast", "run", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["power", "ki_blast", "none", "run"],
@@ -4612,7 +4612,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
   const damage_type = spec.damageType ?? "scaled";
   const effective_defense_base = effective_defense_for_slot(state, opponent_slot, defender);
   const effective_defense = effective_defense_base <= 0 ? 1 : effective_defense_base;
-  const level_term = mul_div_floor(2, formula_level, 5) + 2;
+  const level_term = mul_div_floor(1, formula_level, 1) + 30;
   let raw_damage = 0;
   if (spec.id === "ki_blast") {
     raw_damage = Math.max(0, mul_div_floor(effective_attack, 75, 100));
