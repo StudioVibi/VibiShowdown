@@ -2012,7 +2012,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "knight",
-    name: "Mon1",
+    name: "Knight",
     role: "Metagross",
     type: "def",
     stats: { level: 12, maxHp: 242, attack: 80, defense: 160, speed: 85 },
@@ -2023,7 +2023,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "night_sekyps",
-    name: "mon5",
+    name: "Mon1",
     role: "Metagross Sekyps",
     type: "atk",
     stats: { level: 12, maxHp: 242, attack: 115, defense: 75, speed: 75 },
@@ -2078,7 +2078,7 @@ var MONSTER_ROSTER = [
   },
   {
     id: "babydragonbuf",
-    name: "Baby Dragon Buff",
+    name: "Baby Dragon",
     role: "Baby Dragon BUF Template",
     type: "buf",
     stats: { level: 12, maxHp: 100, attack: 100, defense: 100, speed: 100 },

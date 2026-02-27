@@ -58,7 +58,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
   },
   {
     id: "knight",
-    name: "Mon1",
+    name: "Knight",
     role: "Metagross",
     type: "def",
     stats: { level: 12, maxHp: 242, attack: 80, defense: 160, speed: 85 },
@@ -69,7 +69,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
   },
   {
     id: "night_sekyps",
-    name: "mon5",
+    name: "Mon1",
     role: "Metagross Sekyps",
     type: "atk",
     stats: { level: 12, maxHp: 242, attack: 115, defense: 75, speed: 75 },
@@ -124,7 +124,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
   },
   {
     id: "babydragonbuf",
-    name: "Baby Dragon Buff",
+    name: "Baby Dragon",
     role: "Baby Dragon BUF Template",
     type: "buf",
     stats: { level: 12, maxHp: 95, attack: 95, defense: 95, speed: 95 },
