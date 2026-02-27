@@ -1,7 +1,7 @@
 import { MOVE_BY_ID, MOVE_CATALOG } from "./moves.ts";
 import { PASSIVE_BY_ID } from "./passives.ts";
 import type { MonsterCatalogEntry } from "./types.ts";
-import { MONSTER_ROSTER } from "./pokemon.ts";
+import { MONSTER_ROSTER } from "./mon.ts";
 import { LEVEL_MAX, LEVEL_MIN } from "../stats_calc.ts";
 
 function ensure(condition: unknown, message: string): void {

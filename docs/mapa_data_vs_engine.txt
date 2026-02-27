@@ -22,7 +22,7 @@ A ideia e facilitar edicao por pessoas nao programadoras.
   - Seismic Toss: flatDamage
   - Taunt: maxDurationTurns via components.effect
 
-1.2 src/data/pokemon.ts
+1.2 src/data/mon.ts
 - Roster dos monstros.
 - Stats base por monstro:
   - level

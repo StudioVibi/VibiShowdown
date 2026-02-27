@@ -124,7 +124,7 @@ Moves novos no catalogo:
 4) Onde alterar cada tipo de regra
 ----------------------------------
 Cadastro de dados:
-- Pokemons/defaults: src/data/pokemon.ts
+- Pokemons/defaults: src/data/mon.ts
 - Moves/catalogo: src/data/moves.ts
 - Passivas/catalogo + efeitos (temporariamente desligados no combate): src/data/passives.ts
 - Check de integridade: src/data/integrity.ts

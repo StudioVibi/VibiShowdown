@@ -1,6 +1,6 @@
 import { MOVE_BY_ID, MOVE_CATALOG, MOVE_LABELS, MOVE_OPTIONS, move_spec } from "./moves.ts";
 import { PASSIVE_BY_ID, PASSIVE_CATALOG, PASSIVE_LABELS, PASSIVE_OPTIONS, normalize_passive_id, passive_spec } from "./passives.ts";
-import { MONSTER_BY_ID, MONSTER_ROSTER } from "./pokemon.ts";
+import { MONSTER_BY_ID, MONSTER_ROSTER } from "./mon.ts";
 import {
   BUFF_DEBUFF_COLLATERAL_TEMPLATES,
   COLLATERAL_KIND_OPTIONS,

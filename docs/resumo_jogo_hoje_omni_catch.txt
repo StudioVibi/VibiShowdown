@@ -224,7 +224,7 @@ Observacao:
 - Catalogo de moves:
   - src/data/moves.ts
 - Catalogo de mons:
-  - src/data/pokemon.ts
+  - src/data/mon.ts
 - Catalogo de passivas:
   - src/data/passives.ts
 - Taxonomia de collateral (effects/curses/buff_debuff):

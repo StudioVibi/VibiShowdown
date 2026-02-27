@@ -23,7 +23,7 @@ import type {
   PlayerState,
   TeamSelection
 } from "./shared.ts";
-import { MONSTER_BY_ID } from "./data/pokemon.ts";
+import { MONSTER_BY_ID } from "./data/mon.ts";
 import { move_spec } from "./data/moves.ts";
 import type {
   BuffDebuffCollateral,
