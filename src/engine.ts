@@ -116,6 +116,8 @@ const MSPE_GAP_GOAL_PERCENT = 33;
 const RUN_MSPE_GAIN_PERCENT = 10;
 const SEKYPS_DAMAGE_PER_STACK = 24;
 const REJUVENATION_REGEN_PERCENT_PER_STACK = 5;
+const REJUVENATION_REGEN_STACK_MAX = 3;
+const REJUVENATION_REGEN_PERCENT_MAX = REJUVENATION_REGEN_PERCENT_PER_STACK * REJUVENATION_REGEN_STACK_MAX;
 const TYPE_BUF_REGEN_HEAL_BUFF_ID = "type_buf_regen";
 const REJUVENATION_REGEN_HEAL_BUFF_ID = "rejuvenation_regen";
 const HEAL_MOVE_HEAL_BUFF_ID = "heal_move";
@@ -921,8 +923,15 @@ function apply_heal_buff_tick(
   const player = state.players[slot];
   const target = active_monster(player);
   const heal_per_turn = Math.max(0, normalize_int(buff.healPerTurn, 0, 0));
-  const next_heal_per_turn = Math.max(0, normalize_int(buff.healPerTurn + buff.growthPerTurn, buff.healPerTurn, 0));
-  const result = apply_heal_amount(state, slot, hp_changed, heal_per_turn);
+  let next_heal_per_turn = Math.max(0, normalize_int(buff.healPerTurn + buff.growthPerTurn, buff.healPerTurn, 0));
+  let heal_attempt = heal_per_turn;
+  if (buff.id === REJUVENATION_REGEN_HEAL_BUFF_ID) {
+    const base_regen = Math.max(1, mul_div_floor(player.sharedHpMax, REJUVENATION_REGEN_PERCENT_PER_STACK, 100));
+    const max_regen_per_turn = base_regen * REJUVENATION_REGEN_STACK_MAX;
+    heal_attempt = Math.min(max_regen_per_turn, heal_per_turn);
+    next_heal_per_turn = Math.min(max_regen_per_turn, next_heal_per_turn);
+  }
+  const result = apply_heal_amount(state, slot, hp_changed, heal_attempt);
 
   if (buff.id === TYPE_BUF_REGEN_HEAL_BUFF_ID) {
     const regen_stack = Math.max(0, Math.floor(heal_per_turn / TYPE_PASSIVE_BUF_REGEN_PER_STACK));
@@ -944,9 +953,12 @@ function apply_heal_buff_tick(
       }
     });
   } else if (buff.id === REJUVENATION_REGEN_HEAL_BUFF_ID) {
-    const growth = Math.max(1, Math.max(0, normalize_int(buff.growthPerTurn, 0, 0)));
-    const stack = Math.max(1, Math.floor(Math.max(1, heal_per_turn) / growth));
-    const next_stack = Math.max(1, Math.floor(Math.max(1, next_heal_per_turn) / growth));
+    const base_regen = Math.max(1, mul_div_floor(player.sharedHpMax, REJUVENATION_REGEN_PERCENT_PER_STACK, 100));
+    const stack = Math.min(REJUVENATION_REGEN_STACK_MAX, Math.max(1, Math.floor(Math.max(1, heal_attempt) / base_regen)));
+    const next_stack = Math.min(
+      REJUVENATION_REGEN_STACK_MAX,
+      Math.max(1, Math.floor(Math.max(1, next_heal_per_turn) / base_regen))
+    );
     state.rejuvenationStacks[slot] = next_stack;
     state.rejuvenationStartTurn[slot] = buff.startTurn;
     log.push({
@@ -961,7 +973,7 @@ function apply_heal_buff_tick(
         nextStack: next_stack,
         healPercent: stack * REJUVENATION_REGEN_PERCENT_PER_STACK,
         nextHealPercent: next_stack * REJUVENATION_REGEN_PERCENT_PER_STACK,
-        healAttempted: heal_per_turn,
+        healAttempted: heal_attempt,
         healApplied: result.healed,
         before: result.before,
         after: result.after
@@ -1008,7 +1020,7 @@ function apply_heal_buff_tick(
         sourceSlot: buff.sourceSlot,
         source: buff.source,
         buff: buff.id,
-        healAttempted: heal_per_turn,
+        healAttempted: heal_attempt,
         healApplied: result.healed,
         before: result.before,
         after: result.after
@@ -1017,6 +1029,10 @@ function apply_heal_buff_tick(
   }
 
   buff.healPerTurn = next_heal_per_turn;
+  if (buff.id === REJUVENATION_REGEN_HEAL_BUFF_ID) {
+    // Rejuvenation only increases regen on recast. Consume any pending growth after this tick.
+    buff.growthPerTurn = 0;
+  }
   if (buff.remainingTicks !== null) {
     buff.remainingTicks = Math.max(0, buff.remainingTicks - 1);
   }
@@ -1240,7 +1256,7 @@ function type_passive_regen_stack(state: GameState, slot: PlayerSlot): number {
 }
 
 function rejuvenation_stack(state: GameState, slot: PlayerSlot): number {
-  return normalize_type_passive_stack(state.rejuvenationStacks?.[slot], 0, 0, 9999);
+  return normalize_type_passive_stack(state.rejuvenationStacks?.[slot], 0, 0, REJUVENATION_REGEN_STACK_MAX);
 }
 
 function rejuvenation_start_turn(state: GameState, slot: PlayerSlot): number {
@@ -1449,8 +1465,18 @@ export function clone_state(state: GameState): GameState {
   );
   cloned.typePassiveRegenStacks.player1 = normalize_type_passive_stack(state.typePassiveRegenStacks?.player1, 0, 0, 9999);
   cloned.typePassiveRegenStacks.player2 = normalize_type_passive_stack(state.typePassiveRegenStacks?.player2, 0, 0, 9999);
-  cloned.rejuvenationStacks.player1 = normalize_type_passive_stack(state.rejuvenationStacks?.player1, 0, 0, 9999);
-  cloned.rejuvenationStacks.player2 = normalize_type_passive_stack(state.rejuvenationStacks?.player2, 0, 0, 9999);
+  cloned.rejuvenationStacks.player1 = normalize_type_passive_stack(
+    state.rejuvenationStacks?.player1,
+    0,
+    0,
+    REJUVENATION_REGEN_STACK_MAX
+  );
+  cloned.rejuvenationStacks.player2 = normalize_type_passive_stack(
+    state.rejuvenationStacks?.player2,
+    0,
+    0,
+    REJUVENATION_REGEN_STACK_MAX
+  );
   cloned.rejuvenationStartTurn.player1 = normalize_int(state.rejuvenationStartTurn?.player1, 0, 0);
   cloned.rejuvenationStartTurn.player2 = normalize_int(state.rejuvenationStartTurn?.player2, 0, 0);
   cloned.arenaTrapUntilTurn.player1 = normalize_int(state.arenaTrapUntilTurn?.player1, 0, 0);
@@ -1619,7 +1645,10 @@ function ensure_state_runtime_defaults(state: GameState): void {
       }
     }
     if (!buffs.some((entry) => entry.id === REJUVENATION_REGEN_HEAL_BUFF_ID)) {
-      const stack = Math.max(0, normalize_int(state.rejuvenationStacks?.[slot], 0, 0));
+      const stack = Math.min(
+        REJUVENATION_REGEN_STACK_MAX,
+        Math.max(0, normalize_int(state.rejuvenationStacks?.[slot], 0, 0))
+      );
       const start_turn = Math.max(0, normalize_int(state.rejuvenationStartTurn?.[slot], 0, 0));
       if (stack > 0 && start_turn > 0) {
         const player = state.players[slot];
@@ -1629,7 +1658,7 @@ function ensure_state_runtime_defaults(state: GameState): void {
           sourceSlot: slot,
           source: "rejuvenation",
           healPerTurn: base_regen * stack,
-          growthPerTurn: base_regen,
+          growthPerTurn: 0,
           startTurn: start_turn,
           remainingTicks: null,
           clearsOnSwitch: false
@@ -3491,22 +3520,34 @@ function apply_move(
     const regen_value_per_turn = Math.max(0, mul_div_floor(player.sharedHpMax, REJUVENATION_REGEN_PERCENT_PER_STACK, 100));
     const starts_next_turn = state.turn + 1;
     const stack_before = existing_regen
-      ? Math.max(1, normalize_int(state.rejuvenationStacks?.[player_slot] ?? 1, 1, 1))
+      ? Math.min(REJUVENATION_REGEN_STACK_MAX, Math.max(1, normalize_int(state.rejuvenationStacks?.[player_slot] ?? 1, 1, 1)))
       : 0;
     if (!existing_regen) {
       upsert_heal_buff(state, log, player_slot, player_slot, spec.id, {
         id: REJUVENATION_REGEN_HEAL_BUFF_ID,
         source: spec.id,
         healPerTurn: regen_value_per_turn,
-        growthPerTurn: regen_value_per_turn,
+        growthPerTurn: 0,
         startTurn: starts_next_turn,
         remainingTicks: null,
         clearsOnSwitch: false
       });
       state.rejuvenationStacks[player_slot] = 1;
       state.rejuvenationStartTurn[player_slot] = starts_next_turn;
-    } else if ((state.rejuvenationStartTurn?.[player_slot] ?? 0) <= 0) {
-      state.rejuvenationStartTurn[player_slot] = starts_next_turn;
+    } else {
+      if (stack_before < REJUVENATION_REGEN_STACK_MAX) {
+        const pending_growth = Math.max(0, normalize_int(existing_regen.growthPerTurn, 0, 0));
+        existing_regen.growthPerTurn = Math.min(regen_value_per_turn, pending_growth + regen_value_per_turn);
+      } else {
+        existing_regen.growthPerTurn = 0;
+      }
+      state.rejuvenationStacks[player_slot] = Math.min(
+        REJUVENATION_REGEN_STACK_MAX,
+        stack_before + (stack_before < REJUVENATION_REGEN_STACK_MAX ? 1 : 0)
+      );
+      if ((state.rejuvenationStartTurn?.[player_slot] ?? 0) <= 0) {
+        state.rejuvenationStartTurn[player_slot] = starts_next_turn;
+      }
     }
     upsert_effect(state, log, player_slot, "rejuvenation", 999, player_slot, spec.id);
     log.push({
@@ -3515,8 +3556,10 @@ function apply_move(
       phase: spec.phaseId,
       summary:
         stack_before <= 0
-          ? `Rejuvenation: cura 50% do dano sofrido neste turno; regen acumulativo ativo a partir do turno ${starts_next_turn} (5/10/15/...)`
-          : "Rejuvenation: cura 50% do dano sofrido neste turno; regen acumulativo ja estava ativo",
+          ? `Rejuvenation: cura 50% do dano sofrido neste turno; regen ativo a partir do turno ${starts_next_turn} (+5% por turno)`
+          : stack_before >= REJUVENATION_REGEN_STACK_MAX
+            ? `Rejuvenation: cura 50% do dano sofrido neste turno; regen ja esta no maximo (${REJUVENATION_REGEN_PERCENT_MAX}%)`
+            : "Rejuvenation: cura 50% do dano sofrido neste turno; regen +5% no proximo turno",
       data: {
         move: spec.id,
         slot: player_slot,

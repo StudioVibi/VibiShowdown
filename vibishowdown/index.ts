@@ -79,7 +79,7 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   run: "Acao da fase Run (ultima): +10% de M.SPE sem reset por switch.",
   wish: "No proximo turno, no comeco do end_turn, cura 50% do HP maximo do ativo.",
   rejuvenation:
-    "Cura 50% do dano sofrido no turno (se houver) e ativa regen acumulativo de 5/10/15/... por turno ate o fim da partida.",
+    "Cura 50% do dano sofrido no turno (se houver), ativa regen de +5% por turno e cada recast adiciona +5% no proximo turno ate o maximo de 15%.",
   switch_sovietico: "Arma switch obrigatorio para ambos no proximo turno.",
   team_cure: "Remove efeitos negativos e debuffs negativos do seu lado.",
   bait: "So funciona se tomou dano antes no turno; aplica Weakness por 2 turnos.",
