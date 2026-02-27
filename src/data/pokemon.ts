@@ -127,7 +127,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     name: "Baby Dragon Buff",
     role: "Baby Dragon BUF Template",
     type: "buf",
-    stats: { level: 12, maxHp: 100, attack: 100, defense: 100, speed: 100 },
+    stats: { level: 12, maxHp: 95, attack: 95, defense: 95, speed: 95 },
     possibleMoves: ["power", "ki_blast", "run", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["power", "ki_blast", "none", "run"],
