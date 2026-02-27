@@ -3,8 +3,8 @@ import {
   MONSTER_BY_ID as roster_by_id,
   MONSTER_ROSTER as roster,
   MOVE_LABELS
-} from "../src/data/index.ts";
-import type { MonsterCatalogEntry } from "../src/data/index.ts";
+} from "../src/data/exports.ts";
+import type { MonsterCatalogEntry } from "../src/data/exports.ts";
 import { apply_forced_switch, create_initial_state, resolve_turn, validate_intent } from "../src/engine.ts";
 import {
   BASE_TURN_LIMIT,
