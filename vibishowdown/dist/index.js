@@ -1957,7 +1957,7 @@ for (const entry of PASSIVE_CATALOG) {
 }
 var PASSIVE_BY_ID = PASSIVE_BY_ID_INTERNAL;
 
-// src/data/pokemon.ts
+// src/data/mon.ts
 function all_move_options() {
   return MOVE_OPTIONS.slice();
 }
@@ -2015,7 +2015,7 @@ var MONSTER_ROSTER = [
     name: "Knight",
     role: "Metagross",
     type: "def",
-    stats: { level: 12, maxHp: 242, attack: 80, defense: 160, speed: 85 },
+    stats: { level: 12, maxHp: 242, attack: 80, defense: 160, speed: 75 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["sekyps", "rejuvenation", "none", "run"],
@@ -2070,7 +2070,7 @@ var MONSTER_ROSTER = [
     name: "Vealkiria",
     role: "Valkyria ATK Template",
     type: "atk",
-    stats: { level: 12, maxHp: 242, attack: 115, defense: 75, speed: 120 },
+    stats: { level: 12, maxHp: 242, attack: 115, defense: 75, speed: 80 },
     possibleMoves: ["punch", "heal", "run", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["punch", "heal", "none", "run"],
@@ -2081,7 +2081,7 @@ var MONSTER_ROSTER = [
     name: "Baby Dragon",
     role: "Baby Dragon BUF Template",
     type: "buf",
-    stats: { level: 12, maxHp: 95, attack: 95, defense: 95, speed: 95 },
+    stats: { level: 12, maxHp: 85, attack: 85, defense: 85, speed: 85 },
     possibleMoves: ["power", "ki_blast", "run", "none"],
     possiblePassives: ["none"],
     defaultMoves: ["power", "ki_blast", "none", "run"],
@@ -2298,7 +2298,7 @@ if (is_integrity_entrypoint()) {
   console.log(`[integrity] ok (${MONSTER_ROSTER.length} monsters)`);
 }
 
-// src/data/index.ts
+// src/data/exports.ts
 assert_monster_integrity(MONSTER_ROSTER);
 
 // src/shared.ts
