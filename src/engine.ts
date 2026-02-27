@@ -477,7 +477,7 @@ function normalize_active_curses(input: unknown): ActiveCurseState[] {
     if (!item || typeof item !== "object") {
       continue;
     }
-    const row = item as { id?: unknown; sourceSlot?: unknown; stacks?: unknown };
+    const row = item as { id?: unknown; sourceSlot?: unknown; stacks?: unknown; appliedTurn?: unknown };
     if (typeof row.id !== "string" || !CURSE_ID_SET.has(row.id)) {
       continue;
     }
@@ -485,7 +485,11 @@ function normalize_active_curses(input: unknown): ActiveCurseState[] {
       row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null;
     const raw_stacks = typeof row.stacks === "number" ? row.stacks : 1;
     const stacks = Math.max(1, normalize_int(raw_stacks, 1, 1));
-    normalized.push({ id: row.id, sourceSlot: source_slot, stacks });
+    const applied_turn =
+      typeof row.appliedTurn === "number" && Number.isFinite(row.appliedTurn)
+        ? normalize_int(row.appliedTurn, 0, -1000000)
+        : undefined;
+    normalized.push({ id: row.id, sourceSlot: source_slot, stacks, appliedTurn: applied_turn });
   }
   return normalized;
 }
@@ -739,6 +743,7 @@ function upsert_curse(
       const before_stack = Math.max(1, normalize_int(existing.stacks, 1, 1));
       const after_stack = before_stack + 1;
       existing.stacks = after_stack;
+      existing.appliedTurn = state.turn;
       log.push({
         type: "curse_apply",
         turn: state.turn,
@@ -772,7 +777,8 @@ function upsert_curse(
   curses.push({
     id: curse_id,
     sourceSlot: source_slot,
-    stacks: 1
+    stacks: 1,
+    appliedTurn: state.turn
   });
   log.push({
     type: "curse_apply",
@@ -2489,6 +2495,9 @@ function apply_curse_end_turn(
         if (switched_this_turn[target_slot]) {
           continue;
         }
+        if (typeof curse.appliedTurn === "number" && curse.appliedTurn === state.turn) {
+          continue;
+        }
         const source_slot = curse.sourceSlot ?? other_slot(target_slot);
         const current_stack = Math.max(1, normalize_int(curse.stacks, 1, 1));
         const damage_amount = current_stack * SEKYPS_DAMAGE_PER_STACK;
@@ -3828,7 +3837,7 @@ function apply_move(
       turn: state.turn,
       phase: spec.phaseId,
       summary:
-        "Sekyps (curse): no end_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch e nao causa dano no turno em que o alvo troca",
+        "Sekyps (curse): no end_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no turno em que e aplicado e nao causa dano no turno em que o alvo troca",
       data: {
         move: spec.id,
         slot: player_slot,

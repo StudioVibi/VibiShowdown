@@ -90,6 +90,7 @@ export type ActiveCurseState = {
   id: string;
   sourceSlot: PlayerSlot | null;
   stacks: number;
+  appliedTurn?: number;
 };
 
 export type BuffDebuffStat = "attack" | "defense" | "speed";
