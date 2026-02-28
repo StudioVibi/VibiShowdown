@@ -104,6 +104,8 @@ type MatchProgress = "continue" | "stop_turn" | "ended";
 const INITIATIVE_WITHOUT_SPEED: Phase["initiative"] = ["attack", "hp", "defense"];
 const STAT_STAGE_MIN = -6;
 const STAT_STAGE_MAX = 6;
+const POWER_ATTACK_DELTA_PER_CAST = 50;
+const POWER_ATTACK_DELTA_MAX = POWER_ATTACK_DELTA_PER_CAST * STAT_STAGE_MAX;
 const TYPE_PASSIVE_ATK_TRUE_DAMAGE = 50;
 const THROW_FIXED_OFFENSE_TERM = 90 * 90;
 const TYPE_PASSIVE_DEF_ARMOR_STACK_MAX = 5;
@@ -3368,29 +3370,77 @@ function apply_move(
 
   if (spec.id === "power") {
     ensure_state_runtime_defaults(state);
-    state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter(
-      (entry) => entry.id !== "power_speed_down"
+    const current_entries = state.activeBuffDebuffsBySlot[player_slot];
+    let power_attack_delta_total = 0;
+    const next_entries: ActiveBuffDebuffState[] = [];
+    for (const entry of current_entries) {
+      if (entry.id === "power_speed_down") {
+        continue;
+      }
+      if (entry.id === "power_attack_up" && entry.stat === "attack") {
+        power_attack_delta_total += entry.deltaPercent;
+        continue;
+      }
+      next_entries.push(entry);
+    }
+    const sanitized_power_attack_delta = Math.max(
+      0,
+      normalize_int(power_attack_delta_total, 0, 0)
     );
+    if (sanitized_power_attack_delta > 0) {
+      next_entries.push({
+        id: "power_attack_up",
+        sourceSlot: player_slot,
+        source: spec.id,
+        stat: "attack",
+        deltaPercent: Math.min(POWER_ATTACK_DELTA_MAX, sanitized_power_attack_delta),
+        clearsOnSwitch: true
+      });
+    }
+    state.activeBuffDebuffsBySlot[player_slot] = next_entries;
     refresh_active_monster_stats_for_slot(state, player_slot);
     const before_stage = attacker.attackStage;
     const before_attack = attacker.attack;
     const before_speed = attacker.speed;
     if (before_stage < STAT_STAGE_MAX) {
-      apply_buff_debuff_component(
-        state,
-        log,
-        player_slot,
-        {
-          kind: "buff_debuff",
-          id: "power_attack_up",
-          target: "self",
-          stat: "attack",
-          deltaPercent: 50,
-          clearsOnSwitch: true
-        },
-        player_slot,
-        spec.id
+      const power_attack_entry = state.activeBuffDebuffsBySlot[player_slot].find(
+        (entry) => entry.id === "power_attack_up" && entry.stat === "attack"
       );
+      const attack_before = attacker.attack;
+      if (power_attack_entry) {
+        const current_delta = Math.max(0, normalize_int(power_attack_entry.deltaPercent, 0, 0));
+        power_attack_entry.deltaPercent = Math.min(POWER_ATTACK_DELTA_MAX, current_delta + POWER_ATTACK_DELTA_PER_CAST);
+      } else {
+        state.activeBuffDebuffsBySlot[player_slot].push({
+          id: "power_attack_up",
+          sourceSlot: player_slot,
+          source: spec.id,
+          stat: "attack",
+          deltaPercent: POWER_ATTACK_DELTA_PER_CAST,
+          clearsOnSwitch: true
+        });
+      }
+      refresh_active_monster_stats_for_slot(state, player_slot);
+      const attack_after = attacker.attack;
+      const total_delta = total_delta_percent_from_buff_debuffs(state, player_slot, "attack");
+      const total_percent = stat_multiplier_percent_from_delta(total_delta);
+      log.push({
+        type: "buff_debuff_apply",
+        turn: state.turn,
+        summary: `${attacker.name} ATK +${POWER_ATTACK_DELTA_PER_CAST}%`,
+        data: {
+          slot: player_slot,
+          targetSlot: player_slot,
+          move: spec.id,
+          componentId: "power_attack_up",
+          stat: "attack",
+          deltaPercent: POWER_ATTACK_DELTA_PER_CAST,
+          totalDeltaPercent: total_delta,
+          totalPercent: total_percent,
+          before: attack_before,
+          after: attack_after
+        }
+      });
     }
     apply_buff_debuff_component(
       state,
