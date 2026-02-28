@@ -51,6 +51,9 @@ type EVStatKey = keyof EVSpread;
 const EV_KEYS: EVStatKey[] = ["hp", "atk", "def", "spe"];
 const STAT_STAGE_MIN = -6;
 const STAT_STAGE_MAX = 6;
+const TURN_DURATION_SECONDS_DEFAULT = Math.max(1, Math.floor(TURN_DURATION_MS / 1000));
+const TURN_DURATION_SECONDS_MIN = 5;
+const TURN_DURATION_SECONDS_MAX = 300;
 
 type TooltipValueState = "up" | "down" | "neutral";
 
@@ -177,6 +180,9 @@ const status_turn = document.getElementById("status-turn")!;
 const status_deadline = document.getElementById("status-deadline")!;
 const status_rps = document.getElementById("status-rps");
 const status_evade = document.getElementById("status-mSPE");
+const spec_view = document.getElementById("spec-view") as HTMLDivElement | null;
+const spec_view_p1 = document.getElementById("spec-view-p1") as HTMLButtonElement | null;
+const spec_view_p2 = document.getElementById("spec-view-p2") as HTMLButtonElement | null;
 const status_ready = document.getElementById("status-ready");
 const status_opponent = document.getElementById("status-opponent");
 const chat_messages = document.getElementById("chat-messages")!;
@@ -204,6 +210,7 @@ const prematch = document.getElementById("prematch")!;
 const prematch_hint = document.getElementById("prematch-hint")!;
 const ready_btn = document.getElementById("ready-btn") as HTMLButtonElement;
 const reset_status_btn = document.getElementById("reset-status-btn") as HTMLButtonElement | null;
+const turn_seconds_input = document.getElementById("turn-seconds-input") as HTMLInputElement | null;
 const move_buttons = [
   document.getElementById("move-btn-0") as HTMLButtonElement,
   document.getElementById("move-btn-1") as HTMLButtonElement,
@@ -264,6 +271,7 @@ document.body.classList.add("prematch-open");
 
 let current_turn = 0;
 let deadline_at = 0;
+let lobby_turn_duration_seconds = TURN_DURATION_SECONDS_DEFAULT;
 let slot: PlayerSlot | null = null;
 let is_ready = false;
 let match_started = false;
@@ -271,6 +279,7 @@ let latest_state: GameState | null = null;
 let opponent_ready = false;
 let opponent_name: string | null = null;
 let is_spectator = false;
+let spectator_viewer_slot: PlayerSlot = "player1";
 let last_ready_snapshot: Record<PlayerSlot, boolean> | null = null;
 let participants: { players: Record<PlayerSlot, string | null>; spectators: string[] } | null = null;
 let ready_order: PlayerSlot[] = [];
@@ -295,6 +304,7 @@ let relay_ended = false;
 let relay_turn = 0;
 let relay_state: GameState | null = null;
 let relay_turn_timeout_id: number | null = null;
+let relay_turn_duration_ms = TURN_DURATION_MS;
 let relay_local_role: PlayerSlot | "spectator" | null = null;
 const RELAY_WATCHER_TTL_MS = 90_000;
 const RELAY_JOIN_HEARTBEAT_MS = 25_000;
@@ -362,6 +372,45 @@ function default_evade_telemetry(): MSPETelemetry {
   };
 }
 
+function normalize_turn_duration_seconds(value: unknown, fallback: number = TURN_DURATION_SECONDS_DEFAULT): number {
+  const raw =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim().length > 0
+        ? Number(value)
+        : fallback;
+  if (!Number.isFinite(raw)) {
+    return fallback;
+  }
+  const normalized = normalize_int(raw, fallback, TURN_DURATION_SECONDS_MIN);
+  return Math.max(TURN_DURATION_SECONDS_MIN, Math.min(TURN_DURATION_SECONDS_MAX, normalized));
+}
+
+function apply_turn_duration_seconds(next_seconds: number): void {
+  const normalized = normalize_turn_duration_seconds(next_seconds, lobby_turn_duration_seconds);
+  lobby_turn_duration_seconds = normalized;
+  relay_turn_duration_ms = normalized * 1000;
+  update_turn_duration_input();
+}
+
+function update_turn_duration_input(): void {
+  if (!turn_seconds_input) {
+    return;
+  }
+  turn_seconds_input.value = `${lobby_turn_duration_seconds}`;
+  turn_seconds_input.disabled = match_started || is_ready;
+}
+
+function send_turn_duration_config(next_seconds: number): void {
+  const normalized = normalize_turn_duration_seconds(next_seconds, lobby_turn_duration_seconds);
+  const changed = normalized !== lobby_turn_duration_seconds;
+  apply_turn_duration_seconds(normalized);
+  if (!changed || match_started) {
+    return;
+  }
+  try_post({ $: "turn_config", turnDurationSeconds: normalized, player_id });
+}
+
 function read_evade_telemetry(state: GameState, slot_id: PlayerSlot): MSPETelemetry {
   const input = state.mSPETelemetry?.[slot_id] as
     | (Partial<MSPETelemetry> & {
@@ -408,6 +457,38 @@ function signed_percent(value: number): string {
   }
   const rounded = Math.round(value);
   return `${rounded >= 0 ? "+" : ""}${rounded}%`;
+}
+
+function current_viewer_slot(): PlayerSlot | null {
+  if (slot) {
+    return slot;
+  }
+  if (is_spectator) {
+    return spectator_viewer_slot;
+  }
+  return null;
+}
+
+function update_spec_view_controls(): void {
+  if (!spec_view || !spec_view_p1 || !spec_view_p2) {
+    return;
+  }
+  const visible = is_spectator && !slot;
+  spec_view.hidden = !visible;
+  spec_view_p1.classList.toggle("active", spectator_viewer_slot === "player1");
+  spec_view_p2.classList.toggle("active", spectator_viewer_slot === "player2");
+  spec_view_p1.disabled = spectator_viewer_slot === "player1";
+  spec_view_p2.disabled = spectator_viewer_slot === "player2";
+}
+
+function set_spectator_viewer_slot(next_slot: PlayerSlot): void {
+  spectator_viewer_slot = next_slot;
+  update_spec_view_controls();
+  if (!latest_state) {
+    return;
+  }
+  update_panels(latest_state);
+  update_action_controls();
 }
 
 function update_evade_status(state: GameState | null): void {
@@ -801,9 +882,10 @@ function relay_start_turn(): void {
   relay_intents.player2 = null;
   relay_forced_switch_intents.player1 = null;
   relay_forced_switch_intents.player2 = null;
-  const deadline_at = Date.now() + TURN_DURATION_MS;
+  const turn_duration_ms = Math.max(1000, relay_turn_duration_ms);
+  const deadline_at = Date.now() + turn_duration_ms;
   const scheduled_turn = relay_turn;
-  relay_turn_timeout_id = window.setTimeout(() => relay_on_turn_timeout(scheduled_turn), TURN_DURATION_MS);
+  relay_turn_timeout_id = window.setTimeout(() => relay_on_turn_timeout(scheduled_turn), turn_duration_ms);
   emit_local_post({
     $: "turn_start",
     turn: relay_turn,
@@ -1001,6 +1083,9 @@ function relay_consume_post(data: RoomPost, seen_at: number): void {
       relay_handle_join(data);
       return;
     case "chat":
+      emit_local_post(data);
+      return;
+    case "turn_config":
       emit_local_post(data);
       return;
     case "ready":
@@ -2724,7 +2809,7 @@ function update_action_controls(): void {
   surrender_btn.classList.toggle("hidden", !show_surrender);
   surrender_btn.disabled = !show_surrender;
   if (latest_state) {
-    const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+    const viewer_slot = current_viewer_slot();
     if (viewer_slot) {
       update_bench(latest_state, viewer_slot);
     }
@@ -3078,6 +3163,7 @@ function update_ready_ui(should_refresh_lobby: boolean = true): void {
   if (reset_status_btn) {
     reset_status_btn.disabled = match_started || is_ready;
   }
+  update_turn_duration_input();
   if (match_started) {
     prematch_hint.textContent = "Match started.";
     return;
@@ -3410,7 +3496,7 @@ function update_panels(
   state: GameState,
   opts?: { skipMeta?: { player?: boolean; enemy?: boolean }; skipBar?: { player?: boolean; enemy?: boolean } }
 ): void {
-  const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+  const viewer_slot = current_viewer_slot();
   if (!viewer_slot) return;
   const enemy_slot = viewer_slot === "player1" ? "player2" : "player1";
   const hide_panels_for_pending_choice =
@@ -3644,7 +3730,7 @@ function trigger_shield_hit(el: HTMLElement, duration: number): void {
 function handle_state(data: { state: GameState; log: EventLog[] }): void {
   const prev_state = latest_state;
   clear_animation_timers();
-  const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+  const viewer_slot = current_viewer_slot();
   const steps = prev_state ? build_visual_steps(prev_state, data.log, viewer_slot) : [];
   const hit_sides = new Set<"player" | "enemy">(
     steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide)
@@ -3738,6 +3824,7 @@ function handle_post(message: any): void {
     case "assign":
       slot = data.slot;
       is_spectator = false;
+      update_spec_view_controls();
       set_player_name(data.slot, data.name);
       if (status_slot) status_slot.textContent = data.slot === "player1" ? "P1" : "P2";
       if (status_conn) status_conn.textContent = "synced";
@@ -3745,6 +3832,10 @@ function handle_post(message: any): void {
       append_log(`assigned ${data.slot}`);
       append_chat(`${data.name} assigned to ${data.slot === "player1" ? "P1" : "P2"}`);
       update_rps_status(latest_state);
+      if (latest_state) {
+        update_panels(latest_state);
+        update_action_controls();
+      }
       render_participants();
       return;
     case "ready_state": {
@@ -3795,6 +3886,12 @@ function handle_post(message: any): void {
       render_participants();
       return;
     }
+    case "turn_config":
+      if (match_started) {
+        return;
+      }
+      apply_turn_duration_seconds(data.turnDurationSeconds);
+      return;
     case "turn_start":
       handle_turn_start(data);
       return;
@@ -3825,6 +3922,8 @@ function handle_post(message: any): void {
     case "spectator":
       slot = null;
       is_spectator = true;
+      spectator_viewer_slot = "player1";
+      update_spec_view_controls();
       is_ready = false;
       opponent_ready = false;
       opponent_name = null;
@@ -3832,6 +3931,10 @@ function handle_post(message: any): void {
       if (status_slot) status_slot.textContent = "spectator";
       player_meta.textContent = "Spectator";
       update_rps_status(latest_state);
+      if (latest_state) {
+        update_panels(latest_state);
+        update_action_controls();
+      }
       update_opponent_ui(false, null);
       update_ready_ui();
       render_participants();
@@ -3855,6 +3958,18 @@ move_buttons.forEach((btn, index) => {
   });
   bind_move_button_tooltip(btn);
 });
+
+if (spec_view_p1) {
+  spec_view_p1.addEventListener("click", () => {
+    set_spectator_viewer_slot("player1");
+  });
+}
+
+if (spec_view_p2) {
+  spec_view_p2.addEventListener("click", () => {
+    set_spectator_viewer_slot("player2");
+  });
+}
 
 if (run_btn) {
   run_btn.addEventListener("click", () => {
@@ -3887,6 +4002,18 @@ ready_btn.addEventListener("click", () => {
     send_ready(true);
   }
 });
+
+if (turn_seconds_input) {
+  const commit_turn_seconds = (): void => {
+    if (match_started || is_ready) {
+      update_turn_duration_input();
+      return;
+    }
+    send_turn_duration_config(turn_seconds_input.value);
+  };
+  turn_seconds_input.addEventListener("change", commit_turn_seconds);
+  turn_seconds_input.addEventListener("blur", commit_turn_seconds);
+}
 
 if (reset_status_btn) {
   reset_status_btn.addEventListener("click", () => {
@@ -4001,9 +4128,11 @@ render_tabs();
 render_config();
 update_roster_count();
 update_slots();
+update_turn_duration_input();
 update_action_controls();
 update_rps_status(null);
 render_participants();
+update_spec_view_controls();
 
 on_sync(() => {
   if (status_conn) status_conn.textContent = "synced";

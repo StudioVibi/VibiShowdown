@@ -6197,6 +6197,9 @@ function validate_intent(state, slot, intent) {
 var EV_KEYS = ["hp", "atk", "def", "spe"];
 var STAT_STAGE_MIN2 = -6;
 var STAT_STAGE_MAX2 = 6;
+var TURN_DURATION_SECONDS_DEFAULT = Math.max(1, Math.floor(TURN_DURATION_MS / 1000));
+var TURN_DURATION_SECONDS_MIN = 5;
+var TURN_DURATION_SECONDS_MAX = 300;
 var LOBBY_MOVE_SLOTS = 3;
 var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien", "knight", "vealkiria", "babydragonbuf"]);
 var MOVE_TOOLTIP_DELAY_MS = 2000;
@@ -6290,6 +6293,9 @@ var status_turn = document.getElementById("status-turn");
 var status_deadline = document.getElementById("status-deadline");
 var status_rps = document.getElementById("status-rps");
 var status_evade = document.getElementById("status-mSPE");
+var spec_view = document.getElementById("spec-view");
+var spec_view_p1 = document.getElementById("spec-view-p1");
+var spec_view_p2 = document.getElementById("spec-view-p2");
 var status_ready = document.getElementById("status-ready");
 var status_opponent = document.getElementById("status-opponent");
 var chat_messages = document.getElementById("chat-messages");
@@ -6315,6 +6321,7 @@ var prematch = document.getElementById("prematch");
 var prematch_hint = document.getElementById("prematch-hint");
 var ready_btn = document.getElementById("ready-btn");
 var reset_status_btn = document.getElementById("reset-status-btn");
+var turn_seconds_input = document.getElementById("turn-seconds-input");
 var move_buttons = [
   document.getElementById("move-btn-0"),
   document.getElementById("move-btn-1"),
@@ -6371,6 +6378,7 @@ enemy_title.textContent = "Opponent";
 document.body.classList.add("prematch-open");
 var current_turn = 0;
 var deadline_at = 0;
+var lobby_turn_duration_seconds = TURN_DURATION_SECONDS_DEFAULT;
 var slot = null;
 var is_ready = false;
 var match_started = false;
@@ -6378,6 +6386,7 @@ var latest_state = null;
 var opponent_ready = false;
 var opponent_name = null;
 var is_spectator = false;
+var spectator_viewer_slot = "player1";
 var last_ready_snapshot = null;
 var participants = null;
 var ready_order = [];
@@ -6400,6 +6409,7 @@ var relay_ended = false;
 var relay_turn = 0;
 var relay_state = null;
 var relay_turn_timeout_id = null;
+var relay_turn_duration_ms = TURN_DURATION_MS;
 var relay_local_role = null;
 var RELAY_WATCHER_TTL_MS = 90000;
 var RELAY_JOIN_HEARTBEAT_MS = 25000;
@@ -6460,6 +6470,36 @@ function default_evade_telemetry() {
     canMSPE: false
   };
 }
+function normalize_turn_duration_seconds(value, fallback = TURN_DURATION_SECONDS_DEFAULT) {
+  const raw = typeof value === "number" ? value : typeof value === "string" && value.trim().length > 0 ? Number(value) : fallback;
+  if (!Number.isFinite(raw)) {
+    return fallback;
+  }
+  const normalized = normalize_int(raw, fallback, TURN_DURATION_SECONDS_MIN);
+  return Math.max(TURN_DURATION_SECONDS_MIN, Math.min(TURN_DURATION_SECONDS_MAX, normalized));
+}
+function apply_turn_duration_seconds(next_seconds) {
+  const normalized = normalize_turn_duration_seconds(next_seconds, lobby_turn_duration_seconds);
+  lobby_turn_duration_seconds = normalized;
+  relay_turn_duration_ms = normalized * 1000;
+  update_turn_duration_input();
+}
+function update_turn_duration_input() {
+  if (!turn_seconds_input) {
+    return;
+  }
+  turn_seconds_input.value = `${lobby_turn_duration_seconds}`;
+  turn_seconds_input.disabled = match_started || is_ready;
+}
+function send_turn_duration_config(next_seconds) {
+  const normalized = normalize_turn_duration_seconds(next_seconds, lobby_turn_duration_seconds);
+  const changed = normalized !== lobby_turn_duration_seconds;
+  apply_turn_duration_seconds(normalized);
+  if (!changed || match_started) {
+    return;
+  }
+  try_post({ $: "turn_config", turnDurationSeconds: normalized, player_id });
+}
 function read_evade_telemetry(state, slot_id) {
   const input = state.mSPETelemetry?.[slot_id];
   if (!input) {
@@ -6490,6 +6530,35 @@ function signed_percent(value) {
   }
   const rounded = Math.round(value);
   return `${rounded >= 0 ? "+" : ""}${rounded}%`;
+}
+function current_viewer_slot() {
+  if (slot) {
+    return slot;
+  }
+  if (is_spectator) {
+    return spectator_viewer_slot;
+  }
+  return null;
+}
+function update_spec_view_controls() {
+  if (!spec_view || !spec_view_p1 || !spec_view_p2) {
+    return;
+  }
+  const visible = is_spectator && !slot;
+  spec_view.hidden = !visible;
+  spec_view_p1.classList.toggle("active", spectator_viewer_slot === "player1");
+  spec_view_p2.classList.toggle("active", spectator_viewer_slot === "player2");
+  spec_view_p1.disabled = spectator_viewer_slot === "player1";
+  spec_view_p2.disabled = spectator_viewer_slot === "player2";
+}
+function set_spectator_viewer_slot(next_slot) {
+  spectator_viewer_slot = next_slot;
+  update_spec_view_controls();
+  if (!latest_state) {
+    return;
+  }
+  update_panels(latest_state);
+  update_action_controls();
 }
 function update_evade_status(state) {
   if (!status_evade) {
@@ -6841,9 +6910,10 @@ function relay_start_turn() {
   relay_intents.player2 = null;
   relay_forced_switch_intents.player1 = null;
   relay_forced_switch_intents.player2 = null;
-  const deadline_at2 = Date.now() + TURN_DURATION_MS;
+  const turn_duration_ms = Math.max(1000, relay_turn_duration_ms);
+  const deadline_at2 = Date.now() + turn_duration_ms;
   const scheduled_turn = relay_turn;
-  relay_turn_timeout_id = window.setTimeout(() => relay_on_turn_timeout(scheduled_turn), TURN_DURATION_MS);
+  relay_turn_timeout_id = window.setTimeout(() => relay_on_turn_timeout(scheduled_turn), turn_duration_ms);
   emit_local_post({
     $: "turn_start",
     turn: relay_turn,
@@ -7028,6 +7098,9 @@ function relay_consume_post(data, seen_at) {
       relay_handle_join(data);
       return;
     case "chat":
+      emit_local_post(data);
+      return;
+    case "turn_config":
       emit_local_post(data);
       return;
     case "ready":
@@ -8552,7 +8625,7 @@ function update_action_controls() {
   surrender_btn.classList.toggle("hidden", !show_surrender);
   surrender_btn.disabled = !show_surrender;
   if (latest_state) {
-    const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+    const viewer_slot = current_viewer_slot();
     if (viewer_slot) {
       update_bench(latest_state, viewer_slot);
     }
@@ -8872,6 +8945,7 @@ function update_ready_ui(should_refresh_lobby = true) {
   if (reset_status_btn) {
     reset_status_btn.disabled = match_started || is_ready;
   }
+  update_turn_duration_input();
   if (match_started) {
     prematch_hint.textContent = "Match started.";
     return;
@@ -9163,7 +9237,7 @@ function update_side_panel(side, state, slot_id, skip_meta, skip_bar, force_hidd
   set_monster_tooltip(sprite_wrap, tooltip_from_state(state, slot_id, active));
 }
 function update_panels(state, opts) {
-  const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+  const viewer_slot = current_viewer_slot();
   if (!viewer_slot)
     return;
   const enemy_slot = viewer_slot === "player1" ? "player2" : "player1";
@@ -9352,7 +9426,7 @@ function trigger_shield_hit(el, duration) {
 function handle_state(data) {
   const prev_state = latest_state;
   clear_animation_timers();
-  const viewer_slot = slot ?? (is_spectator ? "player1" : null);
+  const viewer_slot = current_viewer_slot();
   const steps = prev_state ? build_visual_steps(prev_state, data.log, viewer_slot) : [];
   const hit_sides = new Set(steps.filter((step) => step.kind === "damage").map((step) => step.defenderSide));
   latest_state = data.state;
@@ -9442,6 +9516,7 @@ function handle_post(message) {
     case "assign":
       slot = data.slot;
       is_spectator = false;
+      update_spec_view_controls();
       set_player_name(data.slot, data.name);
       if (status_slot)
         status_slot.textContent = data.slot === "player1" ? "P1" : "P2";
@@ -9451,6 +9526,10 @@ function handle_post(message) {
       append_log(`assigned ${data.slot}`);
       append_chat(`${data.name} assigned to ${data.slot === "player1" ? "P1" : "P2"}`);
       update_rps_status(latest_state);
+      if (latest_state) {
+        update_panels(latest_state);
+        update_action_controls();
+      }
       render_participants();
       return;
     case "ready_state": {
@@ -9501,6 +9580,12 @@ function handle_post(message) {
       render_participants();
       return;
     }
+    case "turn_config":
+      if (match_started) {
+        return;
+      }
+      apply_turn_duration_seconds(data.turnDurationSeconds);
+      return;
     case "turn_start":
       handle_turn_start(data);
       return;
@@ -9531,6 +9616,8 @@ function handle_post(message) {
     case "spectator":
       slot = null;
       is_spectator = true;
+      spectator_viewer_slot = "player1";
+      update_spec_view_controls();
       is_ready = false;
       opponent_ready = false;
       opponent_name = null;
@@ -9539,6 +9626,10 @@ function handle_post(message) {
         status_slot.textContent = "spectator";
       player_meta.textContent = "Spectator";
       update_rps_status(latest_state);
+      if (latest_state) {
+        update_panels(latest_state);
+        update_action_controls();
+      }
       update_opponent_ui(false, null);
       update_ready_ui();
       render_participants();
@@ -9561,6 +9652,16 @@ move_buttons.forEach((btn, index) => {
   });
   bind_move_button_tooltip(btn);
 });
+if (spec_view_p1) {
+  spec_view_p1.addEventListener("click", () => {
+    set_spectator_viewer_slot("player1");
+  });
+}
+if (spec_view_p2) {
+  spec_view_p2.addEventListener("click", () => {
+    set_spectator_viewer_slot("player2");
+  });
+}
 if (run_btn) {
   run_btn.addEventListener("click", () => {
     send_run_intent();
@@ -9588,6 +9689,17 @@ ready_btn.addEventListener("click", () => {
     send_ready(true);
   }
 });
+if (turn_seconds_input) {
+  const commit_turn_seconds = () => {
+    if (match_started || is_ready) {
+      update_turn_duration_input();
+      return;
+    }
+    send_turn_duration_config(turn_seconds_input.value);
+  };
+  turn_seconds_input.addEventListener("change", commit_turn_seconds);
+  turn_seconds_input.addEventListener("blur", commit_turn_seconds);
+}
 if (reset_status_btn) {
   reset_status_btn.addEventListener("click", () => {
     if (match_started) {
@@ -9689,9 +9801,11 @@ render_tabs();
 render_config();
 update_roster_count();
 update_slots();
+update_turn_duration_input();
 update_action_controls();
 update_rps_status(null);
 render_participants();
+update_spec_view_controls();
 on_sync(() => {
   if (status_conn)
     status_conn.textContent = "synced";

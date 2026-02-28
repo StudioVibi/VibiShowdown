@@ -426,6 +426,37 @@
         color: var(--accent);
       }
 
+      .spec-view {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .spec-view[hidden] {
+        display: none;
+      }
+
+      .spec-view-label {
+        color: var(--muted);
+      }
+
+      .spec-view-btn {
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 11px;
+        font-family: "Space Mono", monospace;
+        cursor: pointer;
+      }
+
+      .spec-view-btn.active {
+        border-color: rgba(110, 214, 255, 0.65);
+        background: rgba(110, 214, 255, 0.24);
+        color: #e9f9ff;
+      }
+
       #status-mSPE {
         color: var(--accent-2);
       }
@@ -1065,6 +1096,39 @@
         gap: 8px;
       }
 
+      .turn-seconds-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 8px;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .turn-seconds-control label {
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      #turn-seconds-input {
+        width: 58px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        padding: 5px 7px;
+        background: rgba(16, 19, 28, 0.9);
+        color: var(--text);
+        font-family: "Space Mono", monospace;
+        font-size: 12px;
+        text-align: right;
+      }
+
+      #turn-seconds-input:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+      }
+
       .setup-grid {
         display: grid;
         grid-template-columns: 1fr 1.1fr;
@@ -1687,6 +1751,11 @@
                   <span id="status-deadline">--:--</span>
                   <span id="status-rps">PTS -- | --</span>
                   <span id="status-mSPE">mSPE --</span>
+                  <div class="spec-view" id="spec-view" hidden>
+                    <span class="spec-view-label">View</span>
+                    <button class="spec-view-btn active" id="spec-view-p1" type="button">P1</button>
+                    <button class="spec-view-btn" id="spec-view-p2" type="button">P2</button>
+                  </div>
                 </div>
               </div>
               <div class="action-pad" id="action-pad">
@@ -1736,6 +1805,10 @@
                 <span>Pre-match Setup</span>
                 <div class="setup-title-actions">
                   <button id="reset-status-btn" type="button">Reset status</button>
+                  <div class="turn-seconds-control">
+                    <label for="turn-seconds-input">Turn (s)</label>
+                    <input id="turn-seconds-input" type="number" min="5" max="300" step="1" value="50" />
+                  </div>
                   <button id="ready-btn" type="button">Ready</button>
                 </div>
               </div>

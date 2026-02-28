@@ -196,6 +196,7 @@ export type IntentPost = {
 export type ForcedSwitchPost = { $: "forced_switch"; targetIndex: number; player_id?: string };
 export type IntentLockedPost = { $: "intent_locked"; slot: PlayerSlot; turn: number };
 export type TurnStartPost = { $: "turn_start"; turn: number; deadline_at: number; intents: Record<PlayerSlot, boolean> };
+export type TurnConfigPost = { $: "turn_config"; turnDurationSeconds: number; player_id?: string };
 export type StatePost = { $: "state"; turn: number; state: GameState; log: EventLog[] };
 export type SurrenderRequestPost = { $: "surrender"; player_id?: string };
 export type SurrenderPost = { $: "surrender"; turn: number; loser: PlayerSlot; winner: PlayerSlot };
@@ -213,6 +214,7 @@ export type RoomPost =
   | ForcedSwitchPost
   | IntentLockedPost
   | TurnStartPost
+  | TurnConfigPost
   | StatePost
   | SurrenderRequestPost
   | SurrenderPost
