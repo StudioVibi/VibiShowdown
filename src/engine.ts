@@ -745,7 +745,10 @@ function upsert_curse(
       const before_stack = Math.max(1, normalize_int(existing.stacks, 1, 1));
       const after_stack = before_stack + 1;
       existing.stacks = after_stack;
-      existing.appliedTurn = state.turn;
+      // Sekyps should skip damage only on the first turn it is applied.
+      if (typeof existing.appliedTurn !== "number" || !Number.isFinite(existing.appliedTurn) || existing.appliedTurn <= 0) {
+        existing.appliedTurn = state.turn;
+      }
       log.push({
         type: "curse_apply",
         turn: state.turn,
@@ -3879,7 +3882,7 @@ function apply_move(
       turn: state.turn,
       phase: spec.phaseId,
       summary:
-        "Sekyps (curse): no ending_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no turno em que e aplicado e nao causa dano no turno em que o alvo troca",
+        "Sekyps (curse): no ending_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no primeiro turno em que e aplicado e nao causa dano no turno em que o alvo troca",
       data: {
         move: spec.id,
         slot: player_slot,

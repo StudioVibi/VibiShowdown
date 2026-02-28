@@ -2915,7 +2915,9 @@ function upsert_curse(state, log, target_slot, curse_id, source_slot, source_mov
       const before_stack = Math.max(1, normalize_int(existing.stacks, 1, 1));
       const after_stack = before_stack + 1;
       existing.stacks = after_stack;
-      existing.appliedTurn = state.turn;
+      if (typeof existing.appliedTurn !== "number" || !Number.isFinite(existing.appliedTurn) || existing.appliedTurn <= 0) {
+        existing.appliedTurn = state.turn;
+      }
       log.push({
         type: "curse_apply",
         turn: state.turn,
@@ -5440,7 +5442,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Sekyps (curse): no ending_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no turno em que e aplicado e nao causa dano no turno em que o alvo troca",
+      summary: "Sekyps (curse): no ending_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no primeiro turno em que e aplicado e nao causa dano no turno em que o alvo troca",
       data: {
         move: spec.id,
         slot: player_slot,
@@ -6096,7 +6098,7 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   double_edge: "Golpe forte com recoil de 1/3 do dano final causado.",
   seismic_toss: "Dano flat fixo de 50, ignorando DEF.",
   leech_life: "Aplica Leech Seed (dreno no ending_turn) ate o alvo trocar.",
-  sekyps: "Aplica o debuff Sekyps: no ending_turn causa dano flat 24 por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no turno em que e usado e nao causa dano no turno em que o alvo troca.",
+  sekyps: "Aplica o debuff Sekyps: no ending_turn causa dano flat 24 por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no primeiro turno em que e usado e nao causa dano no turno em que o alvo troca.",
   focus_punch: "Carrega e resolve no inicio do ending_turn; falha se tomar dano real antes.",
   pain_split: "Ambos ficam com floor((HP_user + HP_target)/2), respeitando clamp de HP.",
   screech: "Reduz DEF do alvo em 50% ate trocar.",
