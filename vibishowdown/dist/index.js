@@ -7826,6 +7826,25 @@ function update_slots() {
   set_slot_card(1, slot_bench_a, slot_bench_a_img, slot_bench_a_name);
   set_slot_card(2, slot_bench_b, slot_bench_b_img, slot_bench_b_name);
 }
+function refresh_roster_tooltips() {
+  const list = document.getElementById("roster-list");
+  if (!list) {
+    return;
+  }
+  const cards = list.querySelectorAll(".roster-card[data-monster-id]");
+  for (const card of cards) {
+    const monster_id = card.dataset.monsterId;
+    if (!monster_id || !MONSTER_BY_ID.has(monster_id)) {
+      set_monster_tooltip(card, null);
+      continue;
+    }
+    set_monster_tooltip(card, tooltip_from_config(monster_id));
+  }
+}
+function refresh_lobby_tooltips() {
+  update_slots();
+  refresh_roster_tooltips();
+}
 function render_tabs() {
   if (monster_tabs) {
     monster_tabs.innerHTML = "";
@@ -7975,6 +7994,7 @@ function render_config() {
     if (normalized !== config.stats.level) {
       config.stats = stats_from_base_level_ev(base_stats, normalized, config.ev);
       save_profile();
+      refresh_lobby_tooltips();
     }
     return normalized;
   };
@@ -8091,6 +8111,7 @@ function render_config() {
         clear_warning();
         update_points_summary();
         save_profile();
+        refresh_lobby_tooltips();
         return;
       }
       if (!Number.isInteger(next_raw)) {
@@ -8115,6 +8136,7 @@ function render_config() {
       clear_warning();
       update_points_summary();
       save_profile();
+      refresh_lobby_tooltips();
     };
     alloc_input.addEventListener("change", () => {
       if (is_ready && !match_started)
@@ -8198,6 +8220,7 @@ function render_roster() {
     const is_disabled = !is_selected && selected.length >= 3 || is_ready && !match_started;
     const tooltip = tooltip_from_config(entry.id);
     card.className = `roster-card${is_selected ? " active" : ""}${is_disabled ? " disabled" : ""}`;
+    card.dataset.monsterId = entry.id;
     set_monster_tooltip(card, tooltip);
     card.innerHTML = `
       <div class="sprite" style="width:24px;height:24px;">
