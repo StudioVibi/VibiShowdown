@@ -85,7 +85,7 @@ Move por move
 - Fase de uso: attack_01.
 - Nao causa dano direto.
 - Ao usar, agenda cura para o turno seguinte.
-- Recebimento: no turno seguinte, a cura resolve automaticamente no inicio da fase end_turn.
+- Recebimento: no turno seguinte, a cura resolve automaticamente no inicio da fase ending_turn.
 - O recebimento nao consome o move escolhido no turno de cura.
 - Cura no alvo ativo do mesmo lado no momento da resolucao (apos switch, se houver).
 - Valor da cura: +50% do maxHp do alvo no momento da resolucao (clamp no maxHp).
@@ -111,7 +111,7 @@ Move por move
 - Fase: attack_01
 - Nao causa dano direto imediato.
 - Aplica semente no alvo.
-- No fim de cada turno (fase end_turn): alvo perde 12.5% do HP maximo.
+- No fim de cada turno (fase ending_turn): alvo perde 12.5% do HP maximo.
 - Ja proca no mesmo turno em que a semente foi aplicada.
 - O lado que aplicou recupera o mesmo valor drenado no mon ativo daquele lado.
 - O efeito some quando o alvo troca.
@@ -121,7 +121,7 @@ Move por move
 15) Focus Punch
 - Fase de uso: attack_01.
 - Nao causa dano no momento da escolha; o usuario entra em concentracao.
-- Resolucao: no inicio da fase end_turn (antes de Wish/Leftovers/Leech Life).
+- Resolucao: no inicio da fase ending_turn (antes de Wish/Leftovers/Leech Life).
 - Se o usuario tomou dano real antes de executar no turno, Focus Punch falha.
 - Se tentaram causar dano mas o dano aplicado foi 0, Focus Punch nao perde foco.
 - Dano do golpe quando executa: scaled com multiplicador 150.

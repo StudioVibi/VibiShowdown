@@ -12,7 +12,7 @@ Data de referencia: 2026-02-24
   1) switch
   2) guard
   3) attack_01
-  4) end_turn (efeitos do fim do turno)
+  4) ending_turn (efeitos do fim do turno)
 
 Constantes atuais:
 - SHARED_HP_START = 200
@@ -81,7 +81,7 @@ As passivas de tipo so disparam quando os dois players fazem switch no mesmo tur
 
 4.3) Tipo BUF vencedor
 - Ganha stack de regen.
-- Cada stack cura +5 HP no end_turn.
+- Cada stack cura +5 HP no ending_turn.
 
 Observacao importante:
 - O campo de arena trap ainda existe no estado, mas hoje nao ha regra ativa no motor que aplique arena trap.
@@ -130,7 +130,7 @@ Bloqueios/restricoes por effect (runtime atual):
 - Sao removidas quando o alvo troca.
 - Runtime com efeito de tick hoje:
   - leech_seed:
-    - drena 1/8 do HP max por stack no end_turn
+    - drena 1/8 do HP max por stack no ending_turn
     - cura o lado que aplicou no mon ativo atual
 - Outras curses existem em catalogo, mas sem regra de tick implementada no motor.
 
@@ -146,7 +146,7 @@ Legenda:
 - return: dano escalado com componente por level.
 - double_edge: dano escalado + recoil.
 - seismic_toss: dano flat 35.
-- focus_punch: carrega no attack_01, resolve no inicio do end_turn, falha se tomou dano real antes.
+- focus_punch: carrega no attack_01, resolve no inicio do ending_turn, falha se tomou dano real antes.
 - mega_punch: dano flat 20.
 - bounce_kick: dano flat 5 + self switch para alvo escolhido.
 - ki_blast: dano flat 20.
@@ -154,7 +154,7 @@ Legenda:
 7.2) Moves de setup/controle/suporte
 - agility: speed x2.
 - run: +32 evade compartilhado do proprio lado.
-- wish: agenda cura de 50% do maxHp no turno seguinte (end_turn).
+- wish: agenda cura de 50% do maxHp no turno seguinte (ending_turn).
 - belly_drum: paga 50% do HP atual e vai para stage maximo de ataque.
 - pain_split: ambos ficam com floor((HP1 + HP2)/2), com clamp por max.
 - screech: reduz defense do alvo para metade (min 1), bloqueado por Clear Body.

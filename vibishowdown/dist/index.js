@@ -2385,7 +2385,7 @@ var PHASES = [
   { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT },
   { id: "run", name: "Run", order: 3, initiative: INITIATIVE_NONE }
 ];
-var END_PHASE_ID = "end_turn";
+var END_PHASE_ID = "ending_turn";
 var SLOT_ORDER = ["player1", "player2"];
 var END_TURN_EFFECT_ORDER = [
   "focus_punch",
@@ -2430,9 +2430,9 @@ var MSPE_VALUE_GOAL = 500;
 var MSPE_GAP_GOAL_PERCENT = 33;
 var RUN_MSPE_GAIN_PERCENT = 10;
 var SEKYPS_DAMAGE_PER_STACK = 24;
-var REJUVENATION_REGEN_PERCENT_PER_STACK = 5;
+var REJUVENATION_REGEN_FLAT_PER_STACK = 30;
 var REJUVENATION_REGEN_STACK_MAX = 3;
-var REJUVENATION_REGEN_PERCENT_MAX = REJUVENATION_REGEN_PERCENT_PER_STACK * REJUVENATION_REGEN_STACK_MAX;
+var REJUVENATION_REGEN_FLAT_MAX = REJUVENATION_REGEN_FLAT_PER_STACK * REJUVENATION_REGEN_STACK_MAX;
 var TYPE_BUF_REGEN_HEAL_BUFF_ID = "type_buf_regen";
 var REJUVENATION_REGEN_HEAL_BUFF_ID = "rejuvenation_regen";
 var HEAL_MOVE_HEAL_BUFF_ID = "heal_move";
@@ -3059,7 +3059,7 @@ function apply_heal_buff_tick(state, log, slot, hp_changed, buff, phase = END_PH
   let next_heal_per_turn = Math.max(0, normalize_int(buff.healPerTurn + buff.growthPerTurn, buff.healPerTurn, 0));
   let heal_attempt = heal_per_turn;
   if (buff.id === REJUVENATION_REGEN_HEAL_BUFF_ID) {
-    const base_regen = Math.max(1, mul_div_floor(player.sharedHpMax, REJUVENATION_REGEN_PERCENT_PER_STACK, 100));
+    const base_regen = REJUVENATION_REGEN_FLAT_PER_STACK;
     const max_regen_per_turn = base_regen * REJUVENATION_REGEN_STACK_MAX;
     heal_attempt = Math.min(max_regen_per_turn, heal_per_turn);
     next_heal_per_turn = Math.min(max_regen_per_turn, next_heal_per_turn);
@@ -3085,7 +3085,7 @@ function apply_heal_buff_tick(state, log, slot, hp_changed, buff, phase = END_PH
       }
     });
   } else if (buff.id === REJUVENATION_REGEN_HEAL_BUFF_ID) {
-    const base_regen = Math.max(1, mul_div_floor(player.sharedHpMax, REJUVENATION_REGEN_PERCENT_PER_STACK, 100));
+    const base_regen = REJUVENATION_REGEN_FLAT_PER_STACK;
     const stack = Math.min(REJUVENATION_REGEN_STACK_MAX, Math.max(1, Math.floor(Math.max(1, heal_attempt) / base_regen)));
     const next_stack = Math.min(REJUVENATION_REGEN_STACK_MAX, Math.max(1, Math.floor(Math.max(1, next_heal_per_turn) / base_regen)));
     state.rejuvenationStacks[slot] = next_stack;
@@ -3094,14 +3094,14 @@ function apply_heal_buff_tick(state, log, slot, hp_changed, buff, phase = END_PH
       type: "rejuvenation_regen",
       turn: state.turn,
       phase,
-      summary: `${target.name} healed ${result.healed} from Rejuvenation regen (${stack * REJUVENATION_REGEN_PERCENT_PER_STACK}%)`,
+      summary: `${target.name} healed ${result.healed} from Rejuvenation regen (stack ${stack}: +${heal_attempt}/turn)`,
       data: {
         slot,
         target: target.id,
         stack,
         nextStack: next_stack,
-        healPercent: stack * REJUVENATION_REGEN_PERCENT_PER_STACK,
-        nextHealPercent: next_stack * REJUVENATION_REGEN_PERCENT_PER_STACK,
+        healPerTurn: heal_attempt,
+        nextHealPerTurn: next_heal_per_turn,
         healAttempted: heal_attempt,
         healApplied: result.healed,
         before: result.before,
@@ -3671,8 +3671,7 @@ function ensure_state_runtime_defaults(state) {
       const stack = Math.min(REJUVENATION_REGEN_STACK_MAX, Math.max(0, normalize_int(state.rejuvenationStacks?.[slot], 0, 0)));
       const start_turn = Math.max(0, normalize_int(state.rejuvenationStartTurn?.[slot], 0, 0));
       if (stack > 0 && start_turn > 0) {
-        const player = state.players[slot];
-        const base_regen = Math.max(0, mul_div_floor(player.sharedHpMax, REJUVENATION_REGEN_PERCENT_PER_STACK, 100));
+        const base_regen = REJUVENATION_REGEN_FLAT_PER_STACK;
         buffs.push({
           id: REJUVENATION_REGEN_HEAL_BUFF_ID,
           sourceSlot: slot,
@@ -5135,7 +5134,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     ensure_state_runtime_defaults(state);
     rejuvenation_used_this_turn[player_slot] = true;
     const existing_regen = heal_buff_state(state, player_slot, REJUVENATION_REGEN_HEAL_BUFF_ID);
-    const regen_value_per_turn = Math.max(0, mul_div_floor(player.sharedHpMax, REJUVENATION_REGEN_PERCENT_PER_STACK, 100));
+    const regen_value_per_turn = REJUVENATION_REGEN_FLAT_PER_STACK;
     const starts_next_turn = state.turn + 1;
     const stack_before = existing_regen ? Math.min(REJUVENATION_REGEN_STACK_MAX, Math.max(1, normalize_int(state.rejuvenationStacks?.[player_slot] ?? 1, 1, 1))) : 0;
     if (!existing_regen) {
@@ -5167,7 +5166,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: stack_before <= 0 ? `Rejuvenation: cura 50% do dano sofrido neste turno; regen ativo a partir do turno ${starts_next_turn} (+5% por turno)` : stack_before >= REJUVENATION_REGEN_STACK_MAX ? `Rejuvenation: cura 50% do dano sofrido neste turno; regen ja esta no maximo (${REJUVENATION_REGEN_PERCENT_MAX}%)` : "Rejuvenation: cura 50% do dano sofrido neste turno; regen +5% no proximo turno",
+      summary: stack_before <= 0 ? `Rejuvenation: cura 50% do dano sofrido neste turno; regen ativo a partir do turno ${starts_next_turn} (+${REJUVENATION_REGEN_FLAT_PER_STACK} por turno)` : stack_before >= REJUVENATION_REGEN_STACK_MAX ? `Rejuvenation: cura 50% do dano sofrido neste turno; regen ja esta no maximo (+${REJUVENATION_REGEN_FLAT_MAX} por turno)` : `Rejuvenation: cura 50% do dano sofrido neste turno; regen +${REJUVENATION_REGEN_FLAT_PER_STACK} no proximo turno`,
       data: {
         move: spec.id,
         slot: player_slot,
@@ -5192,7 +5191,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Wish: no turno ${trigger_turn}, no inicio do end_turn, o ativo de ${player_slot} cura +50% do maxHp (clamp no max)`,
+      summary: `Wish: no turno ${trigger_turn}, no inicio do ending_turn, o ativo de ${player_slot} cura +50% do maxHp (clamp no max)`,
       data: { move: spec.id, slot: player_slot, triggerTurn: trigger_turn }
     });
     finalize_move_success();
@@ -5427,7 +5426,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Leech Seed (curse): drains at end_turn and ends when the target switches",
+      summary: "Leech Seed (curse): drains at ending_turn and ends when the target switches",
       data: { move: spec.id, slot: player_slot, target: defender.id, targetSlot: target_slot }
     });
     finalize_move_success();
@@ -5441,7 +5440,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Sekyps (curse): no end_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no turno em que e aplicado e nao causa dano no turno em que o alvo troca",
+      summary: "Sekyps (curse): no ending_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no turno em que e aplicado e nao causa dano no turno em que o alvo troca",
       data: {
         move: spec.id,
         slot: player_slot,
@@ -5467,7 +5466,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Focus Punch: resolves at start of end_turn; fails if user took real damage before executing",
+      summary: "Focus Punch: resolves at start of ending_turn; fails if user took real damage before executing",
       data: { move: spec.id, slot: player_slot, target: defender.id }
     });
     finalize_move_success();
@@ -6087,8 +6086,8 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   throw: "Golpe com formula fixa (90x90) escalada pelo nivel de formula.",
   agility: "Buff de DEX (x2) ate trocar.",
   run: "Acao da fase Run (ultima): +10% de M.SPE sem reset por switch.",
-  wish: "No proximo turno, no comeco do end_turn, cura 50% do HP maximo do ativo.",
-  rejuvenation: "Cura 50% do dano sofrido no turno (se houver), ativa regen de +5% por turno e cada recast adiciona +5% no proximo turno ate o maximo de 15%.",
+  wish: "No proximo turno, no comeco do ending_turn, cura 50% do HP maximo do ativo.",
+  rejuvenation: "Cura 50% do dano sofrido no turno (se houver), ativa regen de +30 por turno e cada recast adiciona +30 no proximo turno ate o maximo de +90.",
   switch_sovietico: "Arma switch obrigatorio para ambos no proximo turno.",
   team_cure: "Remove efeitos negativos e debuffs negativos do seu lado.",
   bait: "So funciona se tomou dano antes no turno; aplica Weakness por 2 turnos.",
@@ -6096,9 +6095,9 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   return: "Dano escalado; o poder sobe com o nivel atual da mutacao.",
   double_edge: "Golpe forte com recoil de 1/3 do dano final causado.",
   seismic_toss: "Dano flat fixo de 50, ignorando DEF.",
-  leech_life: "Aplica Leech Seed (dreno no end_turn) ate o alvo trocar.",
-  sekyps: "Aplica o debuff Sekyps: no end_turn causa dano flat 24 por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no turno em que e usado e nao causa dano no turno em que o alvo troca.",
-  focus_punch: "Carrega e resolve no inicio do end_turn; falha se tomar dano real antes.",
+  leech_life: "Aplica Leech Seed (dreno no ending_turn) ate o alvo trocar.",
+  sekyps: "Aplica o debuff Sekyps: no ending_turn causa dano flat 24 por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no turno em que e usado e nao causa dano no turno em que o alvo troca.",
+  focus_punch: "Carrega e resolve no inicio do ending_turn; falha se tomar dano real antes.",
   pain_split: "Ambos ficam com floor((HP_user + HP_target)/2), respeitando clamp de HP.",
   screech: "Reduz DEF do alvo em 50% ate trocar.",
   taunt: "Forca o alvo a usar moves de ataque por 2 turnos.",

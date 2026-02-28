@@ -60,7 +60,7 @@ export const EFFECT_COLLATERAL_TEMPLATES: readonly EffectCollateralTemplate[] = 
     id: "rejuvenation",
     label: "Rejuvenation",
     rank: "B",
-    summary: "Regen de +5% por turno; cada recast adiciona +5% no turno seguinte ate o maximo de 15%."
+    summary: "Regen de +30 por turno; cada recast adiciona +30 no turno seguinte ate o maximo de +90."
   }
 ] as const;
 
@@ -68,7 +68,7 @@ export const EFFECT_COLLATERAL_TEMPLATES: readonly EffectCollateralTemplate[] = 
 export const CURSE_COLLATERAL_TEMPLATES: readonly CurseCollateralTemplate[] = [
   { id: "madness", label: "Madness", rank: "?", summary: "Maldição removida ao trocar." },
   { id: "leech_seed", label: "Leech Seed", rank: "?", summary: "Maldição removida ao trocar." },
-  { id: "sekyps", label: "Sekyps", rank: "?", summary: "Dano flat no end_turn (acumulativo por stack) e removida ao trocar." },
+  { id: "sekyps", label: "Sekyps", rank: "?", summary: "Dano flat no ending_turn (acumulativo por stack) e removida ao trocar." },
   { id: "destiny_bond", label: "Destiny Bond", rank: "?", summary: "Maldição removida ao trocar." },
   { id: "endure", label: "Endure", rank: "?", summary: "Maldição removida ao trocar." }
 ] as const;
