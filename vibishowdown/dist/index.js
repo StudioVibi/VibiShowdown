@@ -1835,6 +1835,7 @@ var MOVE_CATALOG = [
   { id: "quick_attack", label: "Quick Attack", phaseId: "attack_01", attackMultiplier100: 66 },
   { id: "punch", label: "Punch", phaseId: "attack_01", attackMultiplier100: 93 },
   { id: "power", label: "Power", phaseId: "attack_01", attackMultiplier100: 0 },
+  { id: "hook", label: "Hook", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "kick", label: "Kick", phaseId: "attack_01", attackMultiplier100: 120 },
   { id: "throw", label: "Throw", phaseId: "attack_01", attackMultiplier100: 100 },
   { id: "agility", label: "Agility", phaseId: "attack_01", attackMultiplier100: 0 },
@@ -2414,7 +2415,8 @@ var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "taunt",
   "pain_split",
   "leech_life",
-  "sekyps"
+  "sekyps",
+  "hook"
 ]);
 var INITIATIVE_WITHOUT_SPEED = ["attack", "hp", "defense"];
 var STAT_STAGE_MIN = -6;
@@ -2431,6 +2433,8 @@ var STAT_MULTIPLIER_MAX_PERCENT = 400;
 var MSPE_VALUE_GOAL = 500;
 var MSPE_GAP_GOAL_PERCENT = 33;
 var RUN_MSPE_GAIN_PERCENT = 10;
+var HOOK_MSPE_REDUCTION_PERCENT = 30;
+var HOOK_INCOMING_DAMAGE_MULTIPLIER_PERCENT = 200;
 var SEKYPS_DAMAGE_PER_STACK = 24;
 var REJUVENATION_REGEN_FLAT_PER_STACK = 30;
 var REJUVENATION_REGEN_STACK_MAX = 3;
@@ -3803,7 +3807,7 @@ function apply_mindgame_bonus_event(state, log, actions) {
     player2Type: p2_type
   });
 }
-function apply_switch_sovietico_predict_bonus(state, log, resolved_this_turn, hp_changed, took_damage_this_turn, damage_taken_this_turn) {
+function apply_switch_sovietico_predict_bonus(state, log, resolved_this_turn, hp_changed, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent) {
   if (!resolved_this_turn.player1 || !resolved_this_turn.player2) {
     return false;
   }
@@ -3828,10 +3832,10 @@ function apply_switch_sovietico_predict_bonus(state, log, resolved_this_turn, hp
   const loser = winner === "player1" ? "player2" : "player1";
   award_mindgame_point(state, log, winner, loser, "switch_sovietico", { player1Type: p1_type, player2Type: p2_type, passiveRepeats: 2 }, 2);
   const switched = { player1: true, player2: true };
-  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn, damage_taken_this_turn, 2);
+  apply_simultaneous_switch_passives(state, log, switched, hp_changed, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent, 2);
   return true;
 }
-function apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn, damage_taken_this_turn) {
+function apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent) {
   if (!(state.spikesArmedByTarget?.[slot] ?? false)) {
     return;
   }
@@ -3842,7 +3846,7 @@ function apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_t
   const target_player = state.players[slot];
   const target = active_monster(target_player);
   const damage_attempt = Math.max(0, mul_div_round(target_player.sharedHpMax, 1, 20));
-  const result = apply_damage_with_endure(state, log, "switch", slot, target, damage_attempt, hp_changed_ref, took_damage_ref, undefined, damage_taken_ref);
+  const result = apply_damage_with_endure(state, log, "switch", slot, target, damage_attempt, hp_changed_ref, took_damage_ref, undefined, damage_taken_ref, incoming_damage_multiplier_percent);
   log.push({
     type: "spikes_trigger",
     turn: state.turn,
@@ -3858,7 +3862,7 @@ function apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_t
     }
   });
 }
-function apply_simultaneous_switch_passives(state, log, switched_this_turn, hp_changed, took_damage_this_turn, damage_taken_this_turn, passive_multiplier = 1) {
+function apply_simultaneous_switch_passives(state, log, switched_this_turn, hp_changed, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent, passive_multiplier = 1) {
   if (!switched_this_turn.player1 || !switched_this_turn.player2) {
     return;
   }
@@ -3880,7 +3884,7 @@ function apply_simultaneous_switch_passives(state, log, switched_this_turn, hp_c
   const loser_mon = active_monster(loser_player);
   if (winner_mon.type === "atk") {
     const true_damage = TYPE_PASSIVE_ATK_TRUE_DAMAGE * passive_mult;
-    const damage_result = apply_damage_with_endure(state, log, "switch", loser, loser_mon, true_damage, hp_changed, took_damage_this_turn, { ignoreArmor: true, source: "type_passive_atk" }, damage_taken_this_turn);
+    const damage_result = apply_damage_with_endure(state, log, "switch", loser, loser_mon, true_damage, hp_changed, took_damage_this_turn, { ignoreArmor: true, source: "type_passive_atk" }, damage_taken_this_turn, incoming_damage_multiplier_percent);
     log.push({
       type: "passive_trigger",
       turn: state.turn,
@@ -4423,7 +4427,7 @@ function maybe_end_match_by_turn_limit(state, log) {
     player2Hp: p2_hp
   }, "turn_limit");
 }
-function apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn) {
+function apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent) {
   const spec = move_spec("focus_punch");
   for (const slot of SLOT_ORDER) {
     if (!focus_punch_pending[slot]) {
@@ -4450,12 +4454,12 @@ function apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending,
       });
       continue;
     }
-    apply_damage_move(state, log, slot, spec, hp_changed, END_PHASE_ID, took_damage_this_turn, damage_taken_this_turn);
+    apply_damage_move(state, log, slot, spec, hp_changed, END_PHASE_ID, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
   }
 }
-function apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn, switched_this_turn, rejuvenation_used_this_turn, damage_taken_this_turn) {
+function apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn, switched_this_turn, rejuvenation_used_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent) {
   if (effect_id === "focus_punch") {
-    apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn);
+    apply_focus_punch_end_turn(state, log, hp_changed, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
     return;
   }
   if (effect_id === "rejuvenation_reactive") {
@@ -4484,9 +4488,9 @@ function apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pe
     apply_type_passive_regen_end_turn(state, log, slot, hp_changed);
   }
 }
-function apply_end_turn_phase(state, log, hp_changed, focus_punch_pending, took_damage_this_turn, switched_this_turn, rejuvenation_used_this_turn, damage_taken_this_turn) {
+function apply_end_turn_phase(state, log, hp_changed, focus_punch_pending, took_damage_this_turn, switched_this_turn, rejuvenation_used_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent) {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
-    apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn, switched_this_turn, rejuvenation_used_this_turn, damage_taken_this_turn);
+    apply_end_turn_effect(state, log, hp_changed, effect_id, focus_punch_pending, took_damage_this_turn, switched_this_turn, rejuvenation_used_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
     const progress = check_zero_hp_match_result(state, log);
     if (progress !== "continue") {
       return progress;
@@ -4497,18 +4501,21 @@ function apply_end_turn_phase(state, log, hp_changed, focus_punch_pending, took_
 function minimum_endure_hp(monster) {
   return Math.max(1, mul_div_ceil(monster.maxHp, 1, 100));
 }
-function apply_damage_with_endure(state, log, phase, slot, monster, attempted_damage, hp_changed, took_damage_this_turn, options, damage_taken_this_turn) {
+function apply_damage_with_endure(state, log, phase, slot, monster, attempted_damage, hp_changed, took_damage_this_turn, options, damage_taken_this_turn, incoming_damage_multiplier_percent) {
   const before = state.players[slot].sharedHp;
   if (before <= 0 || attempted_damage <= 0) {
     return { before, after: before, applied: 0 };
   }
+  const incoming_multiplier_raw = incoming_damage_multiplier_percent ? incoming_damage_multiplier_percent[slot] : 100;
+  const incoming_multiplier = Math.max(0, normalize_int(incoming_multiplier_raw, 100, 0));
+  const adjusted_attempted_damage = incoming_multiplier === 100 ? attempted_damage : Math.max(0, mul_div_floor(attempted_damage, incoming_multiplier, 100));
   const ignore_armor = !!options?.ignoreArmor;
   const armor_stack = ignore_armor ? 0 : type_passive_armor_stack(state, slot);
   const armor_reduction_percent = Math.max(0, Math.min(99, armor_stack * TYPE_PASSIVE_DEF_ARMOR_REDUCTION_PER_STACK_PERCENT));
-  let damage_after_armor = attempted_damage;
+  let damage_after_armor = adjusted_attempted_damage;
   if (!ignore_armor && armor_reduction_percent > 0) {
-    damage_after_armor = Math.max(0, mul_div_floor(attempted_damage, 100 - armor_reduction_percent, 100));
-    const mitigated = Math.max(0, attempted_damage - damage_after_armor);
+    damage_after_armor = Math.max(0, mul_div_floor(adjusted_attempted_damage, 100 - armor_reduction_percent, 100));
+    const mitigated = Math.max(0, adjusted_attempted_damage - damage_after_armor);
     if (mitigated > 0) {
       log.push({
         type: "armor_block",
@@ -4521,7 +4528,7 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
           source: options?.source ?? null,
           armorStack: armor_stack,
           armorReductionPercent: armor_reduction_percent,
-          damageBeforeArmor: attempted_damage,
+          damageBeforeArmor: adjusted_attempted_damage,
           damageAfterArmor: damage_after_armor,
           mitigated
         }
@@ -4557,7 +4564,7 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
           target: monster.id,
           before,
           after,
-          attemptedDamage: attempted_damage,
+          attemptedDamage: adjusted_attempted_damage,
           postArmorDamage: damage_after_armor,
           appliedDamage: capped_damage
         }
@@ -4573,14 +4580,14 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
         type: "move_detail",
         turn: state.turn,
         phase,
-        summary: `Endure: immortal trigger (HP floor 1% => ${after}); dmg capped ${attempted_damage} -> ${capped_damage}; DEX x1.5 (${speed_before} -> ${speed_after})`,
+        summary: `Endure: immortal trigger (HP floor 1% => ${after}); dmg capped ${adjusted_attempted_damage} -> ${capped_damage}; DEX x1.5 (${speed_before} -> ${speed_after})`,
         data: {
           move: "endure",
           slot,
           target: monster.id,
           hpBefore: before,
           hpAfter: after,
-          damageAttempted: attempted_damage,
+          damageAttempted: adjusted_attempted_damage,
           damageAfterArmor: damage_after_armor,
           damageApplied: capped_damage,
           speedBefore: speed_before,
@@ -4601,7 +4608,7 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
   }
   return { before, after: final_after, applied };
 }
-function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, took_damage_this_turn, damage_taken_this_turn) {
+function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent) {
   const player = state.players[player_slot];
   const opponent_slot = other_slot(player_slot);
   const opponent = state.players[opponent_slot];
@@ -4665,7 +4672,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
       data: { slot: opponent_slot }
     });
   }
-  const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn, { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "ki_blast" }, damage_taken_this_turn);
+  const defender_result = apply_damage_with_endure(state, log, phase_id, opponent_slot, defender, damage, hp_changed, took_damage_this_turn, { source: spec.id, ignoreArmor: spec.id === "seismic_toss" || spec.id === "ki_blast" }, damage_taken_this_turn, incoming_damage_multiplier_percent);
   const final_damage = defender_result.applied;
   log.push({
     type: "damage",
@@ -4688,7 +4695,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
     const recoil_attempt = Math.max(0, mul_div_round(final_damage, recoil_num, recoil_den));
     recoil_damage = recoil_attempt;
     if (recoil_damage > 0) {
-      const recoil_result = apply_damage_with_endure(state, log, phase_id, player_slot, attacker, recoil_damage, hp_changed, took_damage_this_turn, { ignoreArmor: true, source: "recoil" }, damage_taken_this_turn);
+      const recoil_result = apply_damage_with_endure(state, log, phase_id, player_slot, attacker, recoil_damage, hp_changed, took_damage_this_turn, { ignoreArmor: true, source: "recoil" }, damage_taken_this_turn, incoming_damage_multiplier_percent);
       recoil_before = recoil_result.before;
       recoil_damage = recoil_result.applied;
       log.push({
@@ -4780,7 +4787,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
     });
   }
 }
-function apply_run_action(state, log, player_slot) {
+function apply_run_action(state, log, player_slot, blocked_by_hook_this_turn = false) {
   const player = state.players[player_slot];
   const actor = active_monster(player);
   if (!is_alive(actor)) {
@@ -4790,6 +4797,16 @@ function apply_run_action(state, log, player_slot) {
       phase: "run",
       summary: `${player_slot} run skipped (fainted)`,
       data: { slot: player_slot, action: "run" }
+    });
+    return;
+  }
+  if (blocked_by_hook_this_turn) {
+    log.push({
+      type: "action_skipped",
+      turn: state.turn,
+      phase: "run",
+      summary: `${player_slot} run failed (Hook)`,
+      data: { slot: player_slot, action: "run", reason: "hook" }
     });
     return;
   }
@@ -4827,7 +4844,7 @@ function apply_run_action(state, log, player_slot) {
     }
   });
 }
-function apply_move(state, log, player_slot, move_id, move_index, self_switch_target_index, hp_changed, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn, rejuvenation_used_this_turn) {
+function apply_move(state, log, player_slot, move_id, move_index, self_switch_target_index, hp_changed, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn, rejuvenation_used_this_turn, hook_run_blocked_this_turn, incoming_damage_multiplier_percent) {
   const player = state.players[player_slot];
   const opponent = state.players[other_slot(player_slot)];
   const attacker = active_monster(player);
@@ -5182,7 +5199,54 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     return;
   }
   if (spec.id === "run") {
-    apply_run_action(state, log, player_slot);
+    apply_run_action(state, log, player_slot, hook_run_blocked_this_turn[player_slot]);
+    finalize_move_success();
+    return;
+  }
+  if (spec.id === "hook") {
+    const target_slot = other_slot(player_slot);
+    const target_player = state.players[target_slot];
+    const target = active_monster(target_player);
+    hook_run_blocked_this_turn[target_slot] = true;
+    incoming_damage_multiplier_percent[player_slot] = Math.max(HOOK_INCOMING_DAMAGE_MULTIPLIER_PERCENT, normalize_int(incoming_damage_multiplier_percent[player_slot], 100, 0));
+    const before_mSPE = Math.max(0, normalize_int(target_player.sharedMSPE, SHARED_MSPE_START, 0));
+    const reduction = before_mSPE > 0 ? Math.max(1, mul_div_floor(before_mSPE, HOOK_MSPE_REDUCTION_PERCENT, 100)) : 0;
+    const after_mSPE = sync_player_shared_mSPE(state, target_slot, before_mSPE - reduction);
+    log.push({
+      type: "stat_mod",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${target.name} had mSPE reduced by Hook (${before_mSPE} -> ${after_mSPE})`,
+      data: {
+        slot: player_slot,
+        targetSlot: target_slot,
+        source: attacker.id,
+        target: target.id,
+        stat: "mSPE",
+        amountPercent: -HOOK_MSPE_REDUCTION_PERCENT,
+        amount: reduction,
+        before: before_mSPE,
+        after: after_mSPE
+      }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `Hook: blocks enemy Run this turn, reduces enemy mSPE by ${HOOK_MSPE_REDUCTION_PERCENT}% and increases self incoming damage by +100% this turn`,
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        targetSlot: target_slot,
+        source: attacker.id,
+        target: target.id,
+        blocksRunThisTurn: true,
+        mSPEReductionPercent: HOOK_MSPE_REDUCTION_PERCENT,
+        mSPEBefore: before_mSPE,
+        mSPEAfter: after_mSPE,
+        selfIncomingDamageMultiplierPercent: incoming_damage_multiplier_percent[player_slot]
+      }
+    });
     finalize_move_success();
     return;
   }
@@ -5436,7 +5500,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     return;
   }
   if (spec.id === "bounce_kick") {
-    apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn, damage_taken_this_turn);
+    apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
     if (state.players[other_slot(player_slot)].sharedHp <= 0) {
       finalize_move_success();
       return;
@@ -5465,7 +5529,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       return;
     }
     const target_index = Number(self_switch_target_index);
-    const switched = apply_switch(state, log, player_slot, target_index, hp_changed, took_damage_this_turn, damage_taken_this_turn);
+    const switched = apply_switch(state, log, player_slot, target_index, hp_changed, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -5658,7 +5722,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     finalize_move_success();
     return;
   }
-  apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn, damage_taken_this_turn);
+  apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
   finalize_move_success();
 }
 function validate_switch_target(player, target_index) {
@@ -5684,7 +5748,7 @@ function reset_monster_on_switch_out(monster) {
   monster.bellyDrumActive = false;
   monster.screechDebuffActive = false;
 }
-function perform_switch(state, log, slot, target_index, event_type, hp_changed, took_damage_this_turn, damage_taken_this_turn) {
+function perform_switch(state, log, slot, target_index, event_type, hp_changed, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent) {
   const player = state.players[slot];
   const from = player.activeIndex;
   const outgoing = player.team[from];
@@ -5696,7 +5760,7 @@ function perform_switch(state, log, slot, target_index, event_type, hp_changed, 
   sync_player_shared_hp(state, slot, player.sharedHp);
   sync_player_shared_mSPE(state, slot, player.sharedMSPE);
   refresh_active_monster_stats_for_slot(state, slot);
-  apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn, damage_taken_this_turn);
+  apply_spikes_on_switch(state, log, slot, hp_changed, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
   log.push({
     type: event_type,
     turn: state.turn,
@@ -5704,7 +5768,7 @@ function perform_switch(state, log, slot, target_index, event_type, hp_changed, 
     data: { slot, from, to: target_index }
   });
 }
-function apply_switch(state, log, player_slot, targetIndex, hp_changed, took_damage_this_turn, damage_taken_this_turn) {
+function apply_switch(state, log, player_slot, targetIndex, hp_changed, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent) {
   const player = state.players[player_slot];
   const error = validate_switch_target(player, targetIndex);
   if (error) {
@@ -5717,7 +5781,7 @@ function apply_switch(state, log, player_slot, targetIndex, hp_changed, took_dam
     });
     return false;
   }
-  perform_switch(state, log, player_slot, targetIndex, "switch", hp_changed, took_damage_this_turn, damage_taken_this_turn);
+  perform_switch(state, log, player_slot, targetIndex, "switch", hp_changed, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
   return true;
 }
 function build_actions(intents, state) {
@@ -5874,6 +5938,8 @@ function resolve_turn(state, intents) {
   const focus_punch_pending = { player1: false, player2: false };
   const took_damage_this_turn = { player1: false, player2: false };
   const damage_taken_this_turn = { player1: 0, player2: 0 };
+  const hook_run_blocked_this_turn = { player1: false, player2: false };
+  const incoming_damage_multiplier_percent = { player1: 100, player2: 100 };
   const rejuvenation_used_this_turn = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
   sync_all_players_shared_mSPE(next);
@@ -5927,7 +5993,7 @@ function resolve_turn(state, intents) {
       if (progress !== "continue") {
         break;
       }
-      const sovietico_bonus_applied = apply_switch_sovietico_predict_bonus(next, log, switch_sovietico_resolved_this_turn, hp_changed_this_turn, took_damage_this_turn, damage_taken_this_turn);
+      const sovietico_bonus_applied = apply_switch_sovietico_predict_bonus(next, log, switch_sovietico_resolved_this_turn, hp_changed_this_turn, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
       if (!sovietico_bonus_applied) {
         apply_mindgame_bonus_event(next, log, actions);
       }
@@ -5956,7 +6022,7 @@ function resolve_turn(state, intents) {
       if (action.type === "switch") {
         const blocked_switch_reason = switch_block_reason(next, action.player);
         if (!blocked_switch_reason) {
-          const switched = apply_switch(next, log, action.player, action.targetIndex, hp_changed_this_turn, took_damage_this_turn, damage_taken_this_turn);
+          const switched = apply_switch(next, log, action.player, action.targetIndex, hp_changed_this_turn, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
           if (switched) {
             switched_this_turn[action.player] = true;
           }
@@ -5977,9 +6043,9 @@ function resolve_turn(state, intents) {
           });
         }
       } else if (action.type === "move") {
-        apply_move(next, log, action.player, action.moveId, action.moveIndex, action.selfSwitchTargetIndex, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn, rejuvenation_used_this_turn);
+        apply_move(next, log, action.player, action.moveId, action.moveIndex, action.selfSwitchTargetIndex, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn, rejuvenation_used_this_turn, hook_run_blocked_this_turn, incoming_damage_multiplier_percent);
       } else {
-        apply_run_action(next, log, action.player);
+        apply_run_action(next, log, action.player, hook_run_blocked_this_turn[action.player]);
       }
       progress = check_zero_hp_match_result(next, log);
       if (progress !== "continue") {
@@ -5987,14 +6053,14 @@ function resolve_turn(state, intents) {
       }
     }
     if (phase.id === "switch" && progress === "continue") {
-      apply_simultaneous_switch_passives(next, log, switched_this_turn, hp_changed_this_turn, took_damage_this_turn, damage_taken_this_turn);
+      apply_simultaneous_switch_passives(next, log, switched_this_turn, hp_changed_this_turn, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
       progress = check_zero_hp_match_result(next, log);
     } else if (phase.id === "run" && progress === "continue") {
       progress = check_mSPE_match_result(next, log);
     }
   }
   if (progress === "continue") {
-    progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn, switched_this_turn, rejuvenation_used_this_turn, damage_taken_this_turn);
+    progress = apply_end_turn_phase(next, log, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn, switched_this_turn, rejuvenation_used_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
   }
   decrement_cooldowns(next);
   if (next.status === "running") {
@@ -6138,6 +6204,7 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
   punch: "Golpe fisico com multiplicador 93 (passa por DEF e armadura).",
   power: "Aumenta ATK em +1 stage e reduz DEX em 10% do base.",
+  hook: "Impede o Run do adversario neste turno, reduz o mSPE dele em 30% e aumenta em 100% o dano recebido por quem usou neste turno.",
   kick: "Golpe fisico forte de dano escalado.",
   throw: "Golpe com formula fixa (90x90) escalada pelo nivel de formula.",
   agility: "Buff de DEX (x2) ate trocar.",

@@ -73,6 +73,8 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
   punch: "Golpe fisico com multiplicador 93 (passa por DEF e armadura).",
   power: "Aumenta ATK em +1 stage e reduz DEX em 10% do base.",
+  hook:
+    "Impede o Run do adversario neste turno, reduz o mSPE dele em 30% e aumenta em 100% o dano recebido por quem usou neste turno.",
   kick: "Golpe fisico forte de dano escalado.",
   throw: "Golpe com formula fixa (90x90) escalada pelo nivel de formula.",
   agility: "Buff de DEX (x2) ate trocar.",
