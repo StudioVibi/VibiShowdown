@@ -750,10 +750,8 @@ function upsert_curse(
       const before_stack = Math.max(1, normalize_int(existing.stacks, 1, 1));
       const after_stack = before_stack + 1;
       existing.stacks = after_stack;
-      // Sekyps should skip damage only on the first turn it is applied.
-      if (typeof existing.appliedTurn !== "number" || !Number.isFinite(existing.appliedTurn) || existing.appliedTurn <= 0) {
-        existing.appliedTurn = state.turn;
-      }
+      // A newly added Sekyps stack only starts ticking on the next turn.
+      existing.appliedTurn = state.turn;
       log.push({
         type: "curse_apply",
         turn: state.turn,
@@ -2537,12 +2535,14 @@ function apply_curse_end_turn(
         if (switched_this_turn[target_slot]) {
           continue;
         }
-        if (typeof curse.appliedTurn === "number" && curse.appliedTurn === state.turn) {
+        const current_stack = Math.max(1, normalize_int(curse.stacks, 1, 1));
+        const applied_this_turn = typeof curse.appliedTurn === "number" && curse.appliedTurn === state.turn;
+        const ticking_stack = applied_this_turn ? current_stack - 1 : current_stack;
+        if (ticking_stack <= 0) {
           continue;
         }
         const source_slot = curse.sourceSlot ?? other_slot(target_slot);
-        const current_stack = Math.max(1, normalize_int(curse.stacks, 1, 1));
-        const damage_amount = current_stack * SEKYPS_DAMAGE_PER_STACK;
+        const damage_amount = ticking_stack * SEKYPS_DAMAGE_PER_STACK;
         const target_before = target_player.sharedHp;
         const damage = Math.min(target_before, Math.max(0, damage_amount));
         const target_after = target_before - damage;
@@ -2555,7 +2555,7 @@ function apply_curse_end_turn(
           type: "sekyps_tick",
           turn: state.turn,
           phase: END_PHASE_ID,
-          summary: `${target.name} lost ${damage} HP from Sekyps (stack ${current_stack})`,
+          summary: `${target.name} lost ${damage} HP from Sekyps (stack ${ticking_stack})`,
           data: {
             slot: source_slot,
             targetSlot: target_slot,
@@ -2563,9 +2563,11 @@ function apply_curse_end_turn(
             target: target.id,
             damage,
             damageAmount: damage_amount,
-            stack: current_stack,
+            stack: ticking_stack,
+            totalStack: current_stack,
             nextStack: current_stack,
-            nextDamageAmount: damage_amount,
+            nextDamageAmount: current_stack * SEKYPS_DAMAGE_PER_STACK,
+            appliedThisTurn: applied_this_turn,
             before: target_before,
             after: target_after
           }
@@ -4039,7 +4041,7 @@ function apply_move(
       turn: state.turn,
       phase: spec.phaseId,
       summary:
-        "Sekyps (curse): no ending_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no primeiro turno em que e aplicado e nao causa dano no turno em que o alvo troca",
+        "Sekyps (curse): no ending_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, cada stack novo so entra no dano no turno seguinte e nao causa dano no turno em que o alvo troca",
       data: {
         move: spec.id,
         slot: player_slot,

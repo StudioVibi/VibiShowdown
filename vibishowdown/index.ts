@@ -94,7 +94,7 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   seismic_toss: "Dano flat fixo de 50, ignorando DEF.",
   leech_life: "Aplica Leech Seed (dreno no ending_turn) ate o alvo trocar.",
   sekyps:
-    "Aplica o debuff Sekyps: no ending_turn causa dano flat 24 por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no primeiro turno em que e usado e nao causa dano no turno em que o alvo troca.",
+    "Aplica o debuff Sekyps: no ending_turn causa dano flat 24 por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, cada stack novo so entra no dano no turno seguinte e nao causa dano no turno em que o alvo troca.",
   focus_punch: "Carrega e resolve no inicio do ending_turn; falha se tomar dano real antes.",
   pain_split: "Ambos ficam com floor((HP_user + HP_target)/2), respeitando clamp de HP.",
   screech: "Reduz DEF do alvo em 50% ate trocar.",
@@ -4009,7 +4009,7 @@ if (turn_seconds_input) {
       update_turn_duration_input();
       return;
     }
-    send_turn_duration_config(turn_seconds_input.value);
+    send_turn_duration_config(Number(turn_seconds_input.value));
   };
   turn_seconds_input.addEventListener("change", commit_turn_seconds);
   turn_seconds_input.addEventListener("blur", commit_turn_seconds);

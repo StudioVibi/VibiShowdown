@@ -2921,9 +2921,7 @@ function upsert_curse(state, log, target_slot, curse_id, source_slot, source_mov
       const before_stack = Math.max(1, normalize_int(existing.stacks, 1, 1));
       const after_stack = before_stack + 1;
       existing.stacks = after_stack;
-      if (typeof existing.appliedTurn !== "number" || !Number.isFinite(existing.appliedTurn) || existing.appliedTurn <= 0) {
-        existing.appliedTurn = state.turn;
-      }
+      existing.appliedTurn = state.turn;
       log.push({
         type: "curse_apply",
         turn: state.turn,
@@ -4367,12 +4365,14 @@ function apply_curse_end_turn(state, log, hp_changed, switched_this_turn) {
         if (switched_this_turn[target_slot]) {
           continue;
         }
-        if (typeof curse.appliedTurn === "number" && curse.appliedTurn === state.turn) {
+        const current_stack = Math.max(1, normalize_int(curse.stacks, 1, 1));
+        const applied_this_turn = typeof curse.appliedTurn === "number" && curse.appliedTurn === state.turn;
+        const ticking_stack = applied_this_turn ? current_stack - 1 : current_stack;
+        if (ticking_stack <= 0) {
           continue;
         }
         const source_slot = curse.sourceSlot ?? other_slot(target_slot);
-        const current_stack = Math.max(1, normalize_int(curse.stacks, 1, 1));
-        const damage_amount = current_stack * SEKYPS_DAMAGE_PER_STACK;
+        const damage_amount = ticking_stack * SEKYPS_DAMAGE_PER_STACK;
         const target_before = target_player.sharedHp;
         const damage = Math.min(target_before, Math.max(0, damage_amount));
         const target_after = target_before - damage;
@@ -4385,7 +4385,7 @@ function apply_curse_end_turn(state, log, hp_changed, switched_this_turn) {
           type: "sekyps_tick",
           turn: state.turn,
           phase: END_PHASE_ID,
-          summary: `${target.name} lost ${damage} HP from Sekyps (stack ${current_stack})`,
+          summary: `${target.name} lost ${damage} HP from Sekyps (stack ${ticking_stack})`,
           data: {
             slot: source_slot,
             targetSlot: target_slot,
@@ -4393,9 +4393,11 @@ function apply_curse_end_turn(state, log, hp_changed, switched_this_turn) {
             target: target.id,
             damage,
             damageAmount: damage_amount,
-            stack: current_stack,
+            stack: ticking_stack,
+            totalStack: current_stack,
             nextStack: current_stack,
-            nextDamageAmount: damage_amount,
+            nextDamageAmount: current_stack * SEKYPS_DAMAGE_PER_STACK,
+            appliedThisTurn: applied_this_turn,
             before: target_before,
             after: target_after
           }
@@ -5560,7 +5562,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: "Sekyps (curse): no ending_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no primeiro turno em que e aplicado e nao causa dano no turno em que o alvo troca",
+      summary: "Sekyps (curse): no ending_turn causa dano flat por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, cada stack novo so entra no dano no turno seguinte e nao causa dano no turno em que o alvo troca",
       data: {
         move: spec.id,
         slot: player_slot,
@@ -6222,7 +6224,7 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   double_edge: "Golpe forte com recoil de 1/3 do dano final causado.",
   seismic_toss: "Dano flat fixo de 50, ignorando DEF.",
   leech_life: "Aplica Leech Seed (dreno no ending_turn) ate o alvo trocar.",
-  sekyps: "Aplica o debuff Sekyps: no ending_turn causa dano flat 24 por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, nao causa dano no primeiro turno em que e usado e nao causa dano no turno em que o alvo troca.",
+  sekyps: "Aplica o debuff Sekyps: no ending_turn causa dano flat 24 por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, cada stack novo so entra no dano no turno seguinte e nao causa dano no turno em que o alvo troca.",
   focus_punch: "Carrega e resolve no inicio do ending_turn; falha se tomar dano real antes.",
   pain_split: "Ambos ficam com floor((HP_user + HP_target)/2), respeitando clamp de HP.",
   screech: "Reduz DEF do alvo em 50% ate trocar.",
@@ -9695,7 +9697,7 @@ if (turn_seconds_input) {
       update_turn_duration_input();
       return;
     }
-    send_turn_duration_config(turn_seconds_input.value);
+    send_turn_duration_config(Number(turn_seconds_input.value));
   };
   turn_seconds_input.addEventListener("change", commit_turn_seconds);
   turn_seconds_input.addEventListener("blur", commit_turn_seconds);
