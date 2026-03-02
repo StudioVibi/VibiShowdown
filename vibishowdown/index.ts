@@ -2232,6 +2232,16 @@ function effect_chips_for_slot(state: GameState, slot_id: PlayerSlot, opponent_s
   const active_effects = state.activeEffectsBySlot?.[slot_id] ?? [];
   for (const effect of active_effects) {
     const label = EFFECT_UI_LABELS[effect.id] ?? effect.id;
+    if (effect.id === "rejuvenation") {
+      const raw_stack = state.rejuvenationStacks?.[slot_id];
+      const stack =
+        typeof raw_stack === "number" && Number.isFinite(raw_stack) ? Math.max(1, Math.floor(raw_stack)) : 1;
+      chips.push({
+        label: `${label} x${stack}`,
+        kind: "debuff"
+      });
+      continue;
+    }
     const turns = Math.max(1, Number.isFinite(effect.remainingTurns) ? Math.floor(effect.remainingTurns) : 1);
     chips.push({
       label: `${label} (${turns}t)`,
