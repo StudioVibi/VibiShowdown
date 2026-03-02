@@ -4,8 +4,7 @@ import {
   MONSTER_ROSTER as roster,
   MOVE_LABELS
 } from "../src/data/exports.ts";
-import type { MonsterCatalogEntry } from "../src/data/exports.ts";
-import { apply_forced_switch, create_initial_state, resolve_turn, validate_intent } from "../src/engine.ts";
+import { apply_forced_switch } from "../src/engine.ts";
 import {
   BASE_TURN_LIMIT,
   SHARED_MSPE_START,
@@ -31,24 +30,26 @@ import {
   LEVEL_MAX,
   LEVEL_MIN,
   calc_non_hp_stat,
-  calc_final_stats,
-  empty_ev_spread,
   validate_ev_spread
 } from "../src/stats_calc.ts";
+import { render_lobby_config } from "./lobby_render.ts";
+import {
+  type MonsterConfig,
+  base_stats_from_spec,
+  build_team_selection as build_lobby_team_selection,
+  ev_total,
+  get_config as get_lobby_config,
+  load_profile as load_lobby_profile,
+  load_team_selection as load_lobby_team_selection,
+  normalize_ev_spread,
+  normalize_stat_value,
+  reset_profile_stats_to_defaults as reset_lobby_profile_stats,
+  save_profile as save_lobby_profile,
+  save_team_selection as save_lobby_team_selection,
+  stats_from_base_level_ev
+} from "./lobby_state.ts";
+import { RelayRuntime } from "./relay_runtime.ts";
 
-type MonsterConfig = {
-  moves: string[];
-  passive: string;
-  stats: Stats;
-  ev: EVSpread;
-};
-
-type Profile = {
-  monsters: Record<string, MonsterConfig>;
-};
-
-type EVStatKey = keyof EVSpread;
-const EV_KEYS: EVStatKey[] = ["hp", "atk", "def", "spe"];
 const STAT_STAGE_MIN = -6;
 const STAT_STAGE_MAX = 6;
 const TURN_DURATION_SECONDS_DEFAULT = Math.max(1, Math.floor(TURN_DURATION_MS / 1000));
@@ -299,25 +300,9 @@ let move_tooltip_delay_timer: number | null = null;
 let move_tooltip_mouse_x = 0;
 let move_tooltip_mouse_y = 0;
 
-let relay_server_managed = false;
-let relay_ended = false;
-let relay_turn = 0;
-let relay_state: GameState | null = null;
-let relay_turn_timeout_id: number | null = null;
-let relay_turn_duration_ms = TURN_DURATION_MS;
-let relay_local_role: PlayerSlot | "spectator" | null = null;
 const RELAY_WATCHER_TTL_MS = 90_000;
 const RELAY_JOIN_HEARTBEAT_MS = 25_000;
-const relay_seen_indexes = new Set<number>();
-const relay_names_by_id = new Map<string, string>();
-const relay_last_seen_at = new Map<string, number>();
-const relay_slot_by_id = new Map<string, PlayerSlot>();
-const relay_ids_by_slot: Record<PlayerSlot, string | null> = { player1: null, player2: null };
-const relay_join_order: string[] = [];
-const relay_ready_order_ids: string[] = [];
-const relay_team_by_id = new Map<string, TeamSelection>();
-const relay_intents: Record<PlayerSlot, PlayerIntent | null> = { player1: null, player2: null };
-const relay_forced_switch_intents: Record<PlayerSlot, number | null> = { player1: null, player2: null };
+let relay_runtime: RelayRuntime;
 let join_sent = false;
 let room_feed_started = false;
 let chat_ready = false;
@@ -344,14 +329,6 @@ function icon_path(id: string): string {
 
 function is_lobby_enabled_monster(id: string): boolean {
   return STARTER_MONSTER_IDS.has(id);
-}
-
-const LEGACY_MONSTER_ID_ALIASES: Record<string, string> = {
-  night: "night_sekyps"
-};
-
-function canonical_monster_id(id: string): string {
-  return LEGACY_MONSTER_ID_ALIASES[id] ?? id;
 }
 
 function monster_type_description(type: MonsterType): string {
@@ -389,7 +366,7 @@ function normalize_turn_duration_seconds(value: unknown, fallback: number = TURN
 function apply_turn_duration_seconds(next_seconds: number): void {
   const normalized = normalize_turn_duration_seconds(next_seconds, lobby_turn_duration_seconds);
   lobby_turn_duration_seconds = normalized;
-  relay_turn_duration_ms = normalized * 1000;
+  relay_runtime.set_turn_duration_ms(normalized * 1000);
   update_turn_duration_input();
 }
 
@@ -542,596 +519,16 @@ function emit_local_post(data: RoomPost): void {
   handle_post({ data });
 }
 
-function is_server_managed_post(data: RoomPost): boolean {
-  return (
-    data.$ === "assign" ||
-    data.$ === "spectator" ||
-    data.$ === "participants" ||
-    data.$ === "ready_state" ||
-    data.$ === "turn_start" ||
-    data.$ === "state" ||
-    data.$ === "intent_locked"
-  );
-}
+relay_runtime = new RelayRuntime({
+  player_id,
+  relay_watcher_ttl_ms: RELAY_WATCHER_TTL_MS,
+  turn_duration_ms: TURN_DURATION_MS,
+  emit_local_post,
+  append_chat
+});
 
-function legacy_player_id(name: string): string {
-  return `legacy:${name}`;
-}
-
-function relay_identity(data: RoomPost): string | null {
-  const candidate = (data as { player_id?: unknown }).player_id;
-  if (typeof candidate === "string" && candidate.length > 0) {
-    return candidate;
-  }
-  if (data.$ === "join") {
-    return legacy_player_id(data.name);
-  }
-  if (data.$ === "chat") {
-    return legacy_player_id(data.from);
-  }
-  return null;
-}
-
-function relay_name(id: string): string {
-  return relay_names_by_id.get(id) ?? id;
-}
-
-function relay_names_by_slot(): Record<PlayerSlot, string | null> {
-  const p1 = relay_ids_by_slot.player1;
-  const p2 = relay_ids_by_slot.player2;
-  return {
-    player1: p1 ? relay_name(p1) : null,
-    player2: p2 ? relay_name(p2) : null
-  };
-}
-
-function relay_spectator_names(): string[] {
-  return relay_join_order.filter((id) => !relay_slot_by_id.has(id)).map(relay_name);
-}
-
-function relay_emit_snapshots(): void {
-  const names = relay_names_by_slot();
-  const ready: Record<PlayerSlot, boolean> = {
-    player1: !!relay_ids_by_slot.player1,
-    player2: !!relay_ids_by_slot.player2
-  };
-  const order: PlayerSlot[] = [];
-  if (ready.player1) {
-    order.push("player1");
-  }
-  if (ready.player2) {
-    order.push("player2");
-  }
-  emit_local_post({
-    $: "ready_state",
-    ready,
-    names,
-    order
-  });
-  emit_local_post({
-    $: "participants",
-    players: names,
-    spectators: relay_spectator_names()
-  });
-}
-
-function relay_emit_local_role(): void {
-  const local_slot = relay_slot_by_id.get(player_id);
-  if (local_slot) {
-    if (relay_local_role === local_slot) {
-      return;
-    }
-    relay_local_role = local_slot;
-    emit_local_post({ $: "assign", slot: local_slot, token: player_id, name: relay_name(player_id) });
-    return;
-  }
-  if (relay_join_order.includes(player_id)) {
-    if (relay_local_role === "spectator") {
-      return;
-    }
-    relay_local_role = "spectator";
-    emit_local_post({ $: "spectator", name: relay_name(player_id) });
-    return;
-  }
-  relay_local_role = null;
-}
-
-function relay_recompute_slots_from_ready_order(): void {
-  relay_slot_by_id.clear();
-  const p1 = relay_ready_order_ids[0] ?? null;
-  const p2 = relay_ready_order_ids[1] ?? null;
-  relay_ids_by_slot.player1 = p1;
-  relay_ids_by_slot.player2 = p2;
-  if (p1) {
-    relay_slot_by_id.set(p1, "player1");
-  }
-  if (p2) {
-    relay_slot_by_id.set(p2, "player2");
-  }
-}
-
-function relay_reset_match_to_lobby(): void {
-  relay_clear_turn_timer();
-  relay_state = null;
-  relay_ended = false;
-  relay_turn = 0;
-  relay_intents.player1 = null;
-  relay_intents.player2 = null;
-  relay_forced_switch_intents.player1 = null;
-  relay_forced_switch_intents.player2 = null;
-  relay_team_by_id.clear();
-  relay_ready_order_ids.length = 0;
-  relay_recompute_slots_from_ready_order();
-  relay_emit_local_role();
-  relay_emit_snapshots();
-}
-
-function relay_remove_participant(id: string): void {
-  const join_idx = relay_join_order.indexOf(id);
-  if (join_idx >= 0) {
-    relay_join_order.splice(join_idx, 1);
-  }
-  relay_last_seen_at.delete(id);
-  relay_names_by_id.delete(id);
-
-  relay_team_by_id.delete(id);
-  const ready_idx = relay_ready_order_ids.indexOf(id);
-  if (ready_idx >= 0) {
-    relay_ready_order_ids.splice(ready_idx, 1);
-  }
-  relay_recompute_slots_from_ready_order();
-  relay_intents.player1 = null;
-  relay_intents.player2 = null;
-  relay_forced_switch_intents.player1 = null;
-  relay_forced_switch_intents.player2 = null;
-}
-
-function relay_prune_inactive(now_ms: number): void {
-  let changed = false;
-  for (let i = relay_join_order.length - 1; i >= 0; i--) {
-    const id = relay_join_order[i];
-    const seen_at = relay_last_seen_at.get(id);
-    if (typeof seen_at !== "number") {
-      relay_remove_participant(id);
-      changed = true;
-      continue;
-    }
-    if (now_ms - seen_at <= RELAY_WATCHER_TTL_MS) {
-      continue;
-    }
-    const slot_id = relay_slot_by_id.get(id);
-    if (slot_id && relay_state?.status === "running") {
-      continue;
-    }
-    relay_remove_participant(id);
-    changed = true;
-  }
-  if (!changed) {
-    return;
-  }
-  relay_emit_local_role();
-  relay_emit_snapshots();
-}
-
-function relay_clear_turn_timer(): void {
-  if (relay_turn_timeout_id === null) {
-    return;
-  }
-  window.clearTimeout(relay_turn_timeout_id);
-  relay_turn_timeout_id = null;
-}
-
-function relay_default_forced_switch_target(state: GameState, slot_id: PlayerSlot): number | null {
-  const player = state.players[slot_id];
-  for (let index = 0; index < player.team.length; index++) {
-    if (index === player.activeIndex) {
-      continue;
-    }
-    if (player.team[index].hp <= 0) {
-      continue;
-    }
-    return index;
-  }
-  return null;
-}
-
-function relay_default_switch_target(state: GameState, slot_id: PlayerSlot): number | null {
-  const player = state.players[slot_id];
-  for (let index = 0; index < player.team.length; index++) {
-    if (index === player.activeIndex) {
-      continue;
-    }
-    if (player.team[index].hp <= 0) {
-      continue;
-    }
-    return index;
-  }
-  return null;
-}
-
-function relay_default_self_switch_target(
-  state: GameState,
-  slot_id: PlayerSlot,
-  move_id: string
-): number | null {
-  if (move_id !== "bounce_kick") {
-    return null;
-  }
-  return relay_default_switch_target(state, slot_id);
-}
-
-function relay_default_intent(state: GameState, slot_id: PlayerSlot): PlayerIntent {
-  const player = state.players[slot_id];
-  const active = player.team[player.activeIndex];
-  const none_index = active.chosenMoves.findIndex((move_id) => move_id === "none");
-  if (none_index >= 0) {
-    const none_intent: PlayerIntent = { action: "use_move", moveIndex: none_index };
-    if (!validate_intent(state, slot_id, none_intent)) {
-      return none_intent;
-    }
-  }
-  for (let index = 0; index < active.chosenMoves.length; index++) {
-    const move_id = active.chosenMoves[index] ?? "none";
-    const self_switch_target = relay_default_self_switch_target(state, slot_id, move_id);
-    const candidate: PlayerIntent = {
-      action: "use_move",
-      moveIndex: index,
-      ...(typeof self_switch_target === "number" ? { selfSwitchTargetIndex: self_switch_target } : {})
-    };
-    if (!validate_intent(state, slot_id, candidate)) {
-      return candidate;
-    }
-  }
-  const run_intent: PlayerIntent = { action: "run" };
-  if (!validate_intent(state, slot_id, run_intent)) {
-    return run_intent;
-  }
-  const first_move_id = active.chosenMoves[0] ?? "none";
-  const fallback_self_switch_target = relay_default_self_switch_target(state, slot_id, first_move_id);
-  return {
-    action: "use_move",
-    moveIndex: 0,
-    ...(typeof fallback_self_switch_target === "number"
-      ? { selfSwitchTargetIndex: fallback_self_switch_target }
-      : {})
-  };
-}
-
-function relay_try_resolve_turn(trigger: "intent" | "timeout"): void {
-  if (!relay_state || relay_ended) {
-    return;
-  }
-
-  if (trigger === "timeout") {
-    for (const slot_id of PLAYER_SLOTS) {
-      if (relay_intents[slot_id]) {
-        continue;
-      }
-      let validation_state = relay_state;
-      if (relay_state.pendingSwitch[slot_id]) {
-        const forced_target =
-          relay_forced_switch_intents[slot_id] ?? relay_default_forced_switch_target(relay_state, slot_id);
-        if (typeof forced_target === "number") {
-          const forced_preview = apply_forced_switch(relay_state, slot_id, forced_target);
-          if (!forced_preview.error) {
-            relay_forced_switch_intents[slot_id] = forced_target;
-            validation_state = forced_preview.state;
-          }
-        }
-      }
-      relay_intents[slot_id] = relay_default_intent(validation_state, slot_id);
-      emit_local_post({ $: "intent_locked", slot: slot_id, turn: relay_turn });
-    }
-  }
-
-  if (!relay_intents.player1 || !relay_intents.player2) {
-    return;
-  }
-  for (const slot_check of PLAYER_SLOTS) {
-    if (relay_state.pendingSwitch[slot_check] && !Number.isInteger(relay_forced_switch_intents[slot_check])) {
-      return;
-    }
-  }
-
-  let turn_state = relay_state;
-  const pre_turn_log: EventLog[] = [];
-  for (const slot_apply of PLAYER_SLOTS) {
-    if (!turn_state.pendingSwitch[slot_apply]) {
-      continue;
-    }
-    const target_candidate = relay_forced_switch_intents[slot_apply];
-    if (typeof target_candidate !== "number" || !Number.isInteger(target_candidate)) {
-      return;
-    }
-    const switch_result = apply_forced_switch(turn_state, slot_apply, target_candidate);
-    if (switch_result.error) {
-      return;
-    }
-    turn_state = switch_result.state;
-    pre_turn_log.push(...switch_result.log);
-  }
-  const { state, log } = resolve_turn(turn_state, {
-    player1: relay_intents.player1,
-    player2: relay_intents.player2
-  });
-  relay_state = state;
-  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log: [...pre_turn_log, ...log] });
-  if (relay_state.status === "ended") {
-    relay_ended = true;
-    relay_reset_match_to_lobby();
-    return;
-  }
-  relay_start_turn();
-}
-
-function relay_on_turn_timeout(expected_turn: number): void {
-  if (expected_turn !== relay_turn) {
-    return;
-  }
-  relay_try_resolve_turn("timeout");
-}
-
-function relay_start_turn(): void {
-  if (!relay_state || relay_ended) {
-    return;
-  }
-  relay_clear_turn_timer();
-  relay_turn += 1;
-  relay_state.turn = relay_turn;
-  relay_intents.player1 = null;
-  relay_intents.player2 = null;
-  relay_forced_switch_intents.player1 = null;
-  relay_forced_switch_intents.player2 = null;
-  const turn_duration_ms = Math.max(1000, relay_turn_duration_ms);
-  const deadline_at = Date.now() + turn_duration_ms;
-  const scheduled_turn = relay_turn;
-  relay_turn_timeout_id = window.setTimeout(() => relay_on_turn_timeout(scheduled_turn), turn_duration_ms);
-  emit_local_post({
-    $: "turn_start",
-    turn: relay_turn,
-    deadline_at,
-    intents: { player1: false, player2: false }
-  });
-}
-
-function relay_start_match_if_ready(): void {
-  if (relay_state || relay_ended) {
-    return;
-  }
-  const p1 = relay_ids_by_slot.player1;
-  const p2 = relay_ids_by_slot.player2;
-  if (!p1 || !p2) {
-    return;
-  }
-  const p1_team = relay_team_by_id.get(p1);
-  const p2_team = relay_team_by_id.get(p2);
-  if (!p1_team || !p2_team) {
-    return;
-  }
-  const names = relay_names_by_slot();
-  try {
-    relay_state = create_initial_state(
-      {
-        player1: p1_team,
-        player2: p2_team
-      },
-      {
-        player1: names.player1 || "player1",
-        player2: names.player2 || "player2"
-      }
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "invalid team";
-    append_chat(`team error: ${message}`);
-    return;
-  }
-  relay_state.status = "running";
-  relay_turn = 0;
-  emit_local_post({ $: "state", turn: 0, state: relay_state, log: [] });
-  relay_start_turn();
-}
-
-function relay_handle_join(data: Extract<RoomPost, { $: "join" }>): void {
-  const id = relay_identity(data);
-  if (!id) {
-    return;
-  }
-  const is_first_join = !relay_join_order.includes(id);
-  relay_names_by_id.set(id, data.name);
-  if (is_first_join) {
-    relay_join_order.push(id);
-    emit_local_post({ $: "join", name: data.name });
-  }
-  relay_emit_local_role();
-  relay_emit_snapshots();
-}
-
-function relay_handle_ready(data: Extract<RoomPost, { $: "ready" }>): void {
-  if (relay_state?.status === "running") {
-    return;
-  }
-  const id = relay_identity(data);
-  if (!id) {
-    return;
-  }
-  if (!data.ready) {
-    relay_team_by_id.delete(id);
-    const idx = relay_ready_order_ids.indexOf(id);
-    if (idx >= 0) {
-      relay_ready_order_ids.splice(idx, 1);
-    }
-    relay_recompute_slots_from_ready_order();
-    relay_emit_local_role();
-    relay_emit_snapshots();
-    return;
-  }
-  if (!data.team) {
-    return;
-  }
-  relay_team_by_id.set(id, data.team);
-  if (!relay_ready_order_ids.includes(id)) {
-    relay_ready_order_ids.push(id);
-  }
-  relay_recompute_slots_from_ready_order();
-  relay_emit_local_role();
-  relay_emit_snapshots();
-  relay_start_match_if_ready();
-}
-
-function relay_handle_intent(data: Extract<RoomPost, { $: "intent" }>): void {
-  if (!relay_state || relay_ended) {
-    return;
-  }
-  const id = relay_identity(data);
-  if (!id) {
-    return;
-  }
-  const slot_id = relay_slot_by_id.get(id);
-  if (!slot_id) {
-    return;
-  }
-  if (data.turn !== relay_turn) {
-    return;
-  }
-  let validation_state = relay_state;
-  if (relay_state.pendingSwitch[slot_id]) {
-    const forced_target_candidate = Number.isInteger(data.forcedSwitchTargetIndex)
-      ? data.forcedSwitchTargetIndex
-      : relay_forced_switch_intents[slot_id];
-    if (typeof forced_target_candidate !== "number" || !Number.isInteger(forced_target_candidate)) {
-      return;
-    }
-    const forced_target = forced_target_candidate;
-    const forced_preview = apply_forced_switch(relay_state, slot_id, forced_target);
-    if (forced_preview.error) {
-      return;
-    }
-    validation_state = forced_preview.state;
-    relay_forced_switch_intents[slot_id] = forced_target;
-  } else {
-    relay_forced_switch_intents[slot_id] = null;
-  }
-  const validation = validate_intent(validation_state, slot_id, data.intent);
-  if (validation) {
-    return;
-  }
-  // Last selection in the turn wins for the same slot.
-  relay_intents[slot_id] = data.intent;
-  relay_try_resolve_turn("intent");
-}
-
-function relay_handle_forced_switch(data: Extract<RoomPost, { $: "forced_switch" }>): void {
-  if (!relay_state || relay_ended) {
-    return;
-  }
-  const id = relay_identity(data);
-  if (!id) {
-    return;
-  }
-  const slot_id = relay_slot_by_id.get(id);
-  if (!slot_id) {
-    return;
-  }
-  if (!relay_state.pendingSwitch[slot_id]) {
-    return;
-  }
-  const forced_preview = apply_forced_switch(relay_state, slot_id, data.targetIndex);
-  if (forced_preview.error) {
-    return;
-  }
-  relay_forced_switch_intents[slot_id] = data.targetIndex;
-}
-
-function relay_handle_surrender(data: Extract<RoomPost, { $: "surrender" }>): void {
-  if (!relay_state || relay_ended || "loser" in data) {
-    return;
-  }
-  const id = relay_identity(data);
-  if (!id) {
-    return;
-  }
-  const loser = relay_slot_by_id.get(id);
-  if (!loser) {
-    return;
-  }
-  const winner: PlayerSlot = loser === "player1" ? "player2" : "player1";
-  relay_state.status = "ended";
-  relay_state.winner = winner;
-  relay_state.endReason = "surrender";
-  delete relay_state.mSPESlots;
-  relay_ended = true;
-  const log: EventLog[] = [
-    {
-      type: "match_end",
-      turn: relay_turn,
-      summary: `${winner} wins (surrender)`,
-      data: { winner, reason: "surrender" }
-    }
-  ];
-  emit_local_post({ $: "state", turn: relay_turn, state: relay_state, log });
-  emit_local_post({ $: "surrender", turn: relay_turn, loser, winner });
-  relay_reset_match_to_lobby();
-}
-
-function relay_consume_post(data: RoomPost, seen_at: number): void {
-  const id = relay_identity(data);
-  if (id) {
-    relay_last_seen_at.set(id, seen_at);
-  }
-  switch (data.$) {
-    case "join":
-      relay_handle_join(data);
-      return;
-    case "chat":
-      emit_local_post(data);
-      return;
-    case "turn_config":
-      emit_local_post(data);
-      return;
-    case "ready":
-      relay_handle_ready(data);
-      return;
-    case "intent":
-      relay_handle_intent(data);
-      return;
-    case "forced_switch":
-      relay_handle_forced_switch(data);
-      return;
-    case "surrender":
-      relay_handle_surrender(data);
-      return;
-    case "error":
-      emit_local_post(data);
-      return;
-    default:
-      return;
-  }
-}
-
-function consume_network_message(message: any): void {
-  const seen_at = typeof message?.server_time === "number" ? message.server_time : Date.now();
-  const index = typeof message?.index === "number" ? message.index : -1;
-  if (index >= 0) {
-    if (relay_seen_indexes.has(index)) {
-      return;
-    }
-    relay_seen_indexes.add(index);
-  }
-  const data: RoomPost | null = message && typeof message === "object" ? (message.data as RoomPost) : null;
-  if (!data || typeof data !== "object" || typeof data.$ !== "string") {
-    return;
-  }
-  if (is_server_managed_post(data)) {
-    relay_server_managed = true;
-    emit_local_post(data);
-    return;
-  }
-  if (relay_server_managed) {
-    emit_local_post(data);
-    return;
-  }
-  relay_consume_post(data, seen_at);
-  relay_prune_inactive(seen_at);
+function consume_network_message(message: unknown): void {
+  relay_runtime.consume_network_message(message);
 }
 
 function ensure_participants_state(): { players: Record<PlayerSlot, string | null>; spectators: string[] } {
@@ -1238,7 +635,7 @@ function base_stats_for(
   }
   const base_stats = base_stats_from_spec(spec);
   const resolved_level = normalize_stat_value("level", level, base_stats.level);
-  const resolved_ev = normalize_ev_spread(ev, empty_ev_spread());
+  const resolved_ev = normalize_ev_spread(ev);
   const baseline = stats_from_base_level_ev(base_stats, resolved_level, resolved_ev);
   return {
     attack: baseline.attack,
@@ -1732,21 +1129,26 @@ function render_participants(): void {
   ensure_local_participant_visible();
   participants_list.innerHTML = "";
   const state = ensure_participants_state();
+  const create_participant_item = (name: string, meta: string): HTMLDivElement => {
+    const item = document.createElement("div");
+    item.className = "participant";
+    const name_span = document.createElement("span");
+    name_span.textContent = name;
+    const meta_span = document.createElement("span");
+    meta_span.className = "participant-meta";
+    meta_span.textContent = meta;
+    item.append(name_span, meta_span);
+    return item;
+  };
   for (const slot_id of PLAYER_SLOTS) {
     const name = state.players[slot_id];
     if (!name) continue;
-    const item = document.createElement("div");
-    item.className = "participant";
     const meta = slot_id === "player1" ? "P1" : "P2";
-    item.innerHTML = `<span>${name}</span><span class="participant-meta">${meta}</span>`;
-    participants_list.appendChild(item);
+    participants_list.appendChild(create_participant_item(name, meta));
   }
   const spectators = state.spectators.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   for (const name of spectators) {
-    const item = document.createElement("div");
-    item.className = "participant";
-    item.innerHTML = `<span>${name}</span><span class="participant-meta">spec</span>`;
-    participants_list.appendChild(item);
+    participants_list.appendChild(create_participant_item(name, "spec"));
   }
 }
 
@@ -1771,335 +1173,38 @@ function clear_warning(): void {
   config_warning.textContent = "";
 }
 
-function load_json<T>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function save_json<T>(key: string, value: T): void {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
-}
-
-function load_profile(): Profile {
-  const parsed = load_json<Profile | null>(profile_key, null);
-  if (parsed && typeof parsed === "object" && parsed.monsters) {
-    const source = parsed.monsters as Record<string, MonsterConfig>;
-    const migrated: Record<string, MonsterConfig> = {};
-    let changed = false;
-    for (const [raw_id, config] of Object.entries(source)) {
-      const id = canonical_monster_id(raw_id);
-      if (id !== raw_id) {
-        changed = true;
-      }
-      if (!roster_by_id.has(id)) {
-        changed = true;
-        continue;
-      }
-      if (migrated[id]) {
-        changed = true;
-        continue;
-      }
-      migrated[id] = config;
-    }
-    if (changed) {
-      save_json(profile_key, { monsters: migrated });
-    }
-    return { monsters: migrated };
-  }
-  return { monsters: {} };
-}
-
-const profile = load_profile();
+const profile = load_lobby_profile(profile_key, roster_by_id);
 
 function save_profile(): void {
-  save_json(profile_key, profile);
+  save_lobby_profile(profile_key, profile);
 }
 
 function load_team_selection(): void {
-  const parsed = load_json<{ selected?: string[] } | null>(team_key, null);
-  if (parsed && Array.isArray(parsed.selected)) {
-    const filtered = parsed.selected
-      .map((id: string) => canonical_monster_id(id))
-      .filter((id: string) => roster_by_id.has(id) && is_lobby_enabled_monster(id))
-      .slice(0, 3);
-    const changed =
-      filtered.length !== parsed.selected.length || filtered.some((id, index) => id !== parsed.selected?.[index]);
-    selected.splice(0, selected.length, ...filtered);
-    if (changed) {
-      save_team_selection();
-    }
-  }
+  const loaded = load_lobby_team_selection(team_key, roster_by_id, is_lobby_enabled_monster, 3);
+  selected.splice(0, selected.length, ...loaded);
 }
 
 function save_team_selection(): void {
-  save_json(team_key, { selected: selected.slice() });
-}
-
-function normalize_stat_value(key: keyof Stats, value: unknown, fallback: number): number {
-  const candidate = typeof value === "number" ? value : fallback;
-  if (key === "level") {
-    return Math.min(LEVEL_MAX, Math.max(LEVEL_MIN, normalize_int(candidate, fallback, LEVEL_MIN)));
-  }
-  if (key === "maxHp") {
-    return normalize_int(candidate, fallback, 1);
-  }
-  return normalize_int(candidate, fallback, 0);
-}
-
-function read_ev_value(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function ev_total(ev: EVSpread): number {
-  return EV_KEYS.reduce((sum, key) => sum + ev[key], 0);
-}
-
-function normalize_ev_spread(value: unknown, fallback: EVSpread = empty_ev_spread()): EVSpread {
-  const source = (typeof value === "object" && value !== null ? value : {}) as Partial<EVSpread>;
-  return {
-    hp: read_ev_value(source.hp, fallback.hp),
-    atk: read_ev_value(source.atk, fallback.atk),
-    def: read_ev_value(source.def, fallback.def),
-    spe: read_ev_value(source.spe, fallback.spe)
-  };
-}
-
-function normalize_legacy_ev_from_stat_alloc(value: unknown): EVSpread | null {
-  const source =
-    typeof value === "object" && value !== null
-      ? (value as Partial<Record<"maxHp" | "attack" | "defense" | "speed", unknown>>)
-      : null;
-  if (!source) return null;
-  return {
-    hp: read_ev_value(source.maxHp, 0),
-    atk: read_ev_value(source.attack, 0),
-    def: read_ev_value(source.defense, 0),
-    spe: read_ev_value(source.speed, 0)
-  };
-}
-
-function stats_from_base_level_ev(base: Stats, level: number, ev: EVSpread): Stats {
-  const final = calc_final_stats(
-    {
-      hp: base.maxHp,
-      atk: base.attack,
-      def: base.defense,
-      spe: base.speed
-    },
-    level,
-    ev
-  );
-  return {
-    level,
-    maxHp: final.hpMax,
-    attack: final.atk,
-    defense: final.def,
-    speed: final.spe
-  };
-}
-
-function default_lobby_moves_for_spec(spec: MonsterCatalogEntry): string[] {
-  const default_moves = spec.defaultMoves
-    .slice(0, LOBBY_MOVE_SLOTS)
-    .map((move_id) => (move_id === "run" ? "none" : move_id));
-  while (default_moves.length < LOBBY_MOVE_SLOTS) {
-    default_moves.push("none");
-  }
-  return default_moves;
-}
-
-function normalize_stats(value: Partial<Stats> | undefined, fallback: Stats): Stats {
-  const source = value ?? {};
-  return {
-    level: normalize_stat_value("level", source.level, fallback.level),
-    maxHp: normalize_stat_value("maxHp", source.maxHp, fallback.maxHp),
-    attack: normalize_stat_value("attack", source.attack, fallback.attack),
-    defense: normalize_stat_value("defense", source.defense, fallback.defense),
-    speed: normalize_stat_value("speed", source.speed, fallback.speed)
-  };
-}
-
-function base_stats_from_spec(spec: MonsterCatalogEntry): Stats {
-  return normalize_stats(spec.stats, spec.stats);
-}
-
-function stats_equal(left: Stats, right: Stats): boolean {
-  return (
-    left.level === right.level &&
-    left.maxHp === right.maxHp &&
-    left.attack === right.attack &&
-    left.defense === right.defense &&
-    left.speed === right.speed
-  );
-}
-
-function ev_equal(left: EVSpread, right: EVSpread): boolean {
-  return (
-    left.hp === right.hp &&
-    left.atk === right.atk &&
-    left.def === right.def &&
-    left.spe === right.spe
-  );
-}
-
-function coerce_config(spec: MonsterCatalogEntry, value?: MonsterConfig): MonsterConfig {
-  const base_stats = base_stats_from_spec(spec);
-  const base_level = normalize_stat_value("level", base_stats.level, 1);
-  const base_ev = empty_ev_spread();
-  const default_moves = default_lobby_moves_for_spec(spec);
-  const base: MonsterConfig = {
-    moves: default_moves,
-    passive: "none",
-    stats: stats_from_base_level_ev(base_stats, base_level, base_ev),
-    ev: base_ev
-  };
-
-  if (!value) {
-    return base;
-  }
-
-  const moves = Array.isArray(value.moves) ? value.moves.slice(0, LOBBY_MOVE_SLOTS) : base.moves.slice();
-  while (moves.length < LOBBY_MOVE_SLOTS) {
-    moves.push("none");
-  }
-  const allowed = new Set(spec.possibleMoves);
-  allowed.delete("run");
-  let had_disallowed_move = false;
-  for (let i = 0; i < moves.length; i++) {
-    if (moves[i] === "bells_drum") {
-      moves[i] = "belly_drum";
-    }
-    if (moves[i] === "cast") {
-      moves[i] = "throw";
-    }
-    if (!allowed.has(moves[i])) {
-      had_disallowed_move = true;
-      moves[i] = "none";
-    }
-  }
-  if (had_disallowed_move) {
-    const used_moves = new Set(moves.filter((move_id) => move_id !== "none"));
-    for (let i = 0; i < moves.length; i++) {
-      if (moves[i] !== "none") {
-        continue;
-      }
-      const fallback_move = default_moves[i] ?? "none";
-      if (fallback_move === "none") {
-        continue;
-      }
-      if (!allowed.has(fallback_move)) {
-        continue;
-      }
-      if (used_moves.has(fallback_move)) {
-        continue;
-      }
-      moves[i] = fallback_move;
-      used_moves.add(fallback_move);
-    }
-  }
-  const level = normalize_stat_value("level", value.stats?.level, base.stats.level);
-  const legacy_ev = normalize_legacy_ev_from_stat_alloc((value as { statAlloc?: unknown }).statAlloc);
-  const ev = { ...normalize_ev_spread(value.ev ?? legacy_ev ?? base.ev, base.ev), hp: 0 };
-  const stats = stats_from_base_level_ev(base_stats, level, ev);
-
-  return {
-    moves,
-    passive: "none",
-    stats,
-    ev
-  };
+  save_lobby_team_selection(team_key, selected);
 }
 
 function get_config(monster_id: string): MonsterConfig {
-  const spec = roster_by_id.get(monster_id);
-  if (!spec) {
-    throw new Error(`Missing monster spec: ${monster_id}`);
-  }
-  const existing = profile.monsters[monster_id];
-  const coerced = coerce_config(spec, existing);
-  if (!existing) {
-    profile.monsters[monster_id] = coerced;
-    save_profile();
-    return coerced;
-  }
-  const has_existing_shape =
-    Array.isArray(existing.moves) &&
-    typeof existing.passive === "string" &&
-    typeof existing.stats === "object" &&
-    existing.stats !== null &&
-    typeof existing.ev === "object" &&
-    existing.ev !== null;
-  if (!has_existing_shape) {
-    profile.monsters[monster_id] = coerced;
-    save_profile();
-    return coerced;
-  }
-
-  let changed = false;
-  if (existing.passive !== coerced.passive) {
-    existing.passive = coerced.passive;
-    changed = true;
-  }
-  if (!stats_equal(existing.stats, coerced.stats)) {
-    existing.stats = coerced.stats;
-    changed = true;
-  }
-  if (!ev_equal(existing.ev, coerced.ev)) {
-    existing.ev = coerced.ev;
-    changed = true;
-  }
-  const existing_moves = existing.moves.slice(0, LOBBY_MOVE_SLOTS);
-  const coerced_moves = coerced.moves.slice(0, LOBBY_MOVE_SLOTS);
-  if (
-    existing_moves.length !== coerced_moves.length ||
-    existing_moves.some((move, idx) => move !== coerced_moves[idx])
-  ) {
-    existing.moves = coerced_moves;
-    changed = true;
-  }
-
-  if (changed) {
-    save_profile();
-  }
-  return existing;
+  return get_lobby_config({
+    monster_id,
+    roster_by_id,
+    profile,
+    profile_key,
+    lobby_move_slots: LOBBY_MOVE_SLOTS
+  });
 }
 
 function reset_profile_stats_to_defaults(): void {
-  let changed = false;
-  for (const spec of roster) {
-    const config = coerce_config(spec, profile.monsters[spec.id]);
-    const base_stats = base_stats_from_spec(spec);
-    const default_ev = empty_ev_spread();
-    const default_moves = default_lobby_moves_for_spec(spec);
-    const default_stats = stats_from_base_level_ev(base_stats, base_stats.level, default_ev);
-    if (config.moves.some((move, index) => move !== default_moves[index])) {
-      changed = true;
-    }
-    if (config.passive !== "none") {
-      changed = true;
-    }
-    if (!stats_equal(config.stats, default_stats)) {
-      changed = true;
-    }
-    if (!ev_equal(config.ev, default_ev)) {
-      changed = true;
-    }
-    profile.monsters[spec.id] = {
-      moves: default_moves,
-      passive: "none",
-      stats: default_stats,
-      ev: default_ev
-    };
-  }
-
-  save_profile();
+  const changed = reset_lobby_profile_stats({
+    profile,
+    profile_key,
+    roster,
+    lobby_move_slots: LOBBY_MOVE_SLOTS
+  });
   clear_warning();
   if (changed) {
     append_log("status reset to default values");
@@ -2188,329 +1293,32 @@ function render_tabs(): void {
 }
 
 function render_config(): void {
-  moves_grid.innerHTML = "";
-  stats_grid.innerHTML = "";
-
-  if (!active_tab) {
-    show_warning("Select 3 monsters to configure.");
-    return;
-  }
-
-  clear_warning();
-  const spec = roster_by_id.get(active_tab);
-  if (!spec) {
-    show_warning("Unknown monster.");
-    return;
-  }
-
-  const config = get_config(active_tab);
-  const base_stats = base_stats_from_spec(spec);
-  config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
-
-  let changed = false;
-  const unique_moves = new Set<string>();
-  for (let i = 0; i < LOBBY_MOVE_SLOTS; i++) {
-    const move = config.moves[i] ?? "none";
-    if (move === "none") {
-      if (config.moves[i] !== "none") {
-        config.moves[i] = "none";
-        changed = true;
-      }
-      continue;
-    }
-    if (move === "run") {
-      config.moves[i] = "none";
-      changed = true;
-      continue;
-    }
-    if (unique_moves.has(move)) {
-      config.moves[i] = "none";
-      changed = true;
-      continue;
-    }
-    unique_moves.add(move);
-  }
-  while (config.moves.length < LOBBY_MOVE_SLOTS) {
-    config.moves.push("none");
-    changed = true;
-  }
-  if (config.moves.length > LOBBY_MOVE_SLOTS) {
-    config.moves = config.moves.slice(0, LOBBY_MOVE_SLOTS);
-    changed = true;
-  }
-  if (changed) {
-    save_profile();
-  }
-
-  for (let i = 0; i < LOBBY_MOVE_SLOTS; i++) {
-    const label = document.createElement("label");
-    label.textContent = `Move ${i + 1}`;
-    const select = document.createElement("select");
-    select.dataset.index = `${i}`;
-    const current_move = config.moves[i] ?? "none";
-    const used_by_others = new Set(
-      config.moves.filter((move, idx) => idx !== i && move !== "none")
-    );
-    for (const move of spec.possibleMoves) {
-      if (move === "run") {
-        continue;
-      }
-      if (move !== "none" && move !== current_move && used_by_others.has(move)) {
-        continue;
-      }
-      const option = document.createElement("option");
-      option.value = move;
-      option.textContent = MOVE_LABELS[move] || move;
-      select.appendChild(option);
-    }
-    const has_current = Array.from(select.options).some((option) => option.value === current_move);
-    select.value = has_current ? current_move : "none";
-    if (!has_current) {
-      config.moves[i] = "none";
-      save_profile();
-    }
-    select.dataset.prev = select.value;
-    select.disabled = is_ready && !match_started;
-    const apply_move_value = (next_value: string): void => {
-      const idx = Number(select.dataset.index);
-      if (!Number.isInteger(idx)) {
-        return;
-      }
-      select.dataset.prev = next_value;
-      if (config.moves[idx] === next_value) {
-        return;
-      }
-      config.moves[idx] = next_value;
-      save_profile();
-    };
-    select.addEventListener("input", () => {
-      if (is_ready && !match_started) {
-        select.value = select.dataset.prev || "none";
-        return;
-      }
-      apply_move_value(select.value);
-      clear_warning();
-      update_action_controls();
-    });
-    select.addEventListener("change", () => {
-      if (is_ready && !match_started) {
-        select.value = select.dataset.prev || "none";
-        return;
-      }
-      apply_move_value(select.value);
-      clear_warning();
-      render_config();
-      update_action_controls();
-    });
-    label.appendChild(select);
-    moves_grid.appendChild(label);
-  }
-
-  const level_label = document.createElement("label");
-  level_label.textContent = "Lv";
-  const level_input = document.createElement("input");
-  level_input.type = "number";
-  level_input.min = `${LEVEL_MIN}`;
-  level_input.max = `${LEVEL_MAX}`;
-  level_input.value = `${config.stats.level}`;
-  level_input.disabled = is_ready && !match_started;
-  const read_level_input_value = (): number | null => {
-    const raw = level_input.value.trim();
-    if (!raw) {
-      return null;
-    }
-    const parsed = Number(raw);
-    if (!Number.isFinite(parsed)) {
-      return null;
-    }
-    return parsed;
-  };
-  const apply_level_value = (next_value: number): number => {
-    const normalized = normalize_stat_value("level", next_value, config.stats.level);
-    if (normalized !== config.stats.level) {
-      config.stats = stats_from_base_level_ev(base_stats, normalized, config.ev);
-      save_profile();
-      refresh_lobby_tooltips();
-    }
-    return normalized;
-  };
-  level_input.addEventListener("input", () => {
-    if (is_ready && !match_started) return;
-    const value = read_level_input_value();
-    if (value === null) {
-      return;
-    }
-    apply_level_value(value);
-    clear_warning();
+  render_lobby_config({
+    active_tab,
+    moves_grid,
+    stats_grid,
+    roster_by_id,
+    get_config,
+    base_stats_from_spec,
+    stats_from_base_level_ev,
+    save_profile,
+    clear_warning,
+    show_warning,
+    is_ready,
+    match_started,
+    lobby_move_slots: LOBBY_MOVE_SLOTS,
+    move_labels: MOVE_LABELS,
+    level_min: LEVEL_MIN,
+    level_max: LEVEL_MAX,
+    ev_per_stat_max: EV_PER_STAT_MAX,
+    ev_total_max: EV_TOTAL_MAX,
+    ev_total,
+    calc_non_hp_stat,
+    validate_ev_spread,
+    refresh_lobby_tooltips,
+    update_action_controls,
+    rerender: render_config
   });
-  const commit_level_input = (): void => {
-    if (is_ready && !match_started) return;
-    const value = read_level_input_value();
-    if (value === null) {
-      level_input.value = `${config.stats.level}`;
-      return;
-    }
-    const normalized = apply_level_value(value);
-    level_input.value = `${normalized}`;
-    clear_warning();
-    render_config();
-  };
-  level_input.addEventListener("change", commit_level_input);
-  level_input.addEventListener("blur", commit_level_input);
-  level_label.appendChild(level_input);
-  moves_grid.appendChild(level_label);
-
-  const points_summary = document.createElement("div");
-  points_summary.className = "stat-points-summary";
-  stats_grid.appendChild(points_summary);
-
-  const column_header = document.createElement("div");
-  column_header.className = "stat-alloc-header";
-  for (const heading of ["", "Base", "EV's", "", "Total"]) {
-    const header_cell = document.createElement("span");
-    header_cell.className = "stat-alloc-header-cell";
-    if (heading.length === 0) {
-      header_cell.classList.add("is-empty");
-      header_cell.textContent = " ";
-    } else {
-      header_cell.textContent = heading;
-    }
-    column_header.appendChild(header_cell);
-  }
-  stats_grid.appendChild(column_header);
-
-  const update_points_summary = (): void => {
-    const used = ev_total(config.ev);
-    const remaining = EV_TOTAL_MAX - used;
-    points_summary.textContent = `EVs: ${used}/${EV_TOTAL_MAX} (restante: ${Math.max(0, remaining)})`;
-  };
-
-  const stat_rows: Array<[Exclude<EVStatKey, "hp">, string]> = [
-    ["atk", "ATK"],
-    ["def", "DEF"],
-    ["spe", "DEX"]
-  ];
-  const stat_key_by_ev: Record<Exclude<EVStatKey, "hp">, keyof Stats> = {
-    atk: "attack",
-    def: "defense",
-    spe: "speed"
-  };
-  const calc_total_stat = (key: Exclude<EVStatKey, "hp">): number => {
-    const base = base_stats[stat_key_by_ev[key]];
-    const level = config.stats.level;
-    return calc_non_hp_stat(base, level, config.ev[key], 0, 1);
-  };
-
-  for (const [key, label_text] of stat_rows) {
-    const row = document.createElement("div");
-    row.className = "stat-alloc-row";
-
-    const stat_name = document.createElement("span");
-    stat_name.className = "stat-alloc-name";
-    stat_name.textContent = label_text;
-
-    const base_value = document.createElement("span");
-    base_value.className = "stat-static-value";
-    base_value.textContent = `${base_stats[stat_key_by_ev[key]]}`;
-
-    const alloc_input = document.createElement("input");
-    alloc_input.type = "number";
-    alloc_input.className = "stat-alloc-input";
-    alloc_input.min = "0";
-    alloc_input.max = `${EV_PER_STAT_MAX}`;
-    alloc_input.step = "1";
-    alloc_input.value = `${config.ev[key]}`;
-    alloc_input.disabled = is_ready && !match_started;
-
-    const alloc_slider = document.createElement("input");
-    alloc_slider.type = "range";
-    alloc_slider.className = "stat-alloc-slider";
-    alloc_slider.min = "0";
-    alloc_slider.max = `${EV_PER_STAT_MAX}`;
-    alloc_slider.value = `${config.ev[key]}`;
-    alloc_slider.disabled = is_ready && !match_started;
-
-    const result_value = document.createElement("span");
-    result_value.className = "stat-result-value";
-    result_value.textContent = `${calc_total_stat(key)}`;
-
-    const max_ev_for_key = (): number => {
-      const used_without_current = ev_total(config.ev) - config.ev[key];
-      return Math.min(EV_PER_STAT_MAX, Math.max(0, EV_TOTAL_MAX - used_without_current));
-    };
-
-    const apply_allocation_value = (next_raw: number, source: "input" | "slider"): void => {
-      const current = config.ev[key];
-      if (!Number.isFinite(next_raw)) {
-        alloc_input.value = `${current}`;
-        alloc_slider.value = `${current}`;
-        return;
-      }
-
-      if (source === "slider") {
-        const clamped = Math.max(0, Math.min(max_ev_for_key(), Math.floor(next_raw)));
-        const candidate: EVSpread = { ...config.ev, [key]: clamped };
-        config.ev = candidate;
-        config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
-        alloc_input.value = `${clamped}`;
-        alloc_slider.value = `${clamped}`;
-        result_value.textContent = `${calc_total_stat(key)}`;
-        clear_warning();
-        update_points_summary();
-        save_profile();
-        refresh_lobby_tooltips();
-        return;
-      }
-
-      if (!Number.isInteger(next_raw)) {
-        show_warning(`EV ${key} must be integer.`);
-        alloc_input.value = `${current}`;
-        alloc_slider.value = `${current}`;
-        return;
-      }
-      const candidate: EVSpread = { ...config.ev, [key]: next_raw };
-      const ev_error = validate_ev_spread(candidate);
-      if (ev_error) {
-        show_warning(ev_error);
-        alloc_input.value = `${current}`;
-        alloc_slider.value = `${current}`;
-        return;
-      }
-      config.ev = candidate;
-      config.stats = stats_from_base_level_ev(base_stats, config.stats.level, config.ev);
-      alloc_input.value = `${next_raw}`;
-      alloc_slider.value = `${next_raw}`;
-      result_value.textContent = `${calc_total_stat(key)}`;
-      clear_warning();
-      update_points_summary();
-      save_profile();
-      refresh_lobby_tooltips();
-    };
-
-    alloc_input.addEventListener("change", () => {
-      if (is_ready && !match_started) return;
-      const value = Number(alloc_input.value);
-      if (!Number.isFinite(value)) {
-        alloc_input.value = `${config.ev[key]}`;
-        return;
-      }
-      apply_allocation_value(value, "input");
-    });
-
-    alloc_slider.addEventListener("input", () => {
-      if (is_ready && !match_started) return;
-      apply_allocation_value(Number(alloc_slider.value), "slider");
-    });
-
-    row.appendChild(stat_name);
-    row.appendChild(base_value);
-    row.appendChild(alloc_input);
-    row.appendChild(alloc_slider);
-    row.appendChild(result_value);
-    stats_grid.appendChild(row);
-  }
-
-  update_points_summary();
 }
 
 function set_edit_target(index: number): void {
@@ -2976,7 +1784,7 @@ function send_switch_intent(targetIndex: number): void {
   if (has_pending_switch()) {
     forced_switch_target_index = targetIndex;
     forced_switch_target_turn = current_turn;
-    if (relay_server_managed && !try_post({ $: "forced_switch", targetIndex, player_id })) {
+    if (relay_runtime.is_server_managed() && !try_post({ $: "forced_switch", targetIndex, player_id })) {
       clear_forced_switch_target();
       return;
     }
@@ -2985,7 +1793,7 @@ function send_switch_intent(targetIndex: number): void {
     if (latest_state && slot) {
       const forced_preview = apply_forced_switch(latest_state, slot, targetIndex);
       if (!forced_preview.error) {
-        const lock_intent = relay_default_intent(forced_preview.state, slot);
+        const lock_intent = relay_runtime.default_intent(forced_preview.state, slot);
         if (post_turn_intent(lock_intent)) {
           selected_intent = lock_intent;
           selected_intent_turn = current_turn;
@@ -3104,45 +1912,23 @@ function open_switch_modal(mode: SwitchModalMode = "intent", move_index?: number
 }
 
 function build_team_selection(): TeamSelection | null {
-  if (selected.length !== 3) {
-    show_warning("Select exactly 3 monsters before ready.");
+  const result = build_lobby_team_selection({
+    selected,
+    roster_by_id,
+    lobby_move_slots: LOBBY_MOVE_SLOTS,
+    is_lobby_enabled_monster,
+    monster_label,
+    get_config
+  });
+  if (!result.team) {
+    if (result.warning) {
+      show_warning(result.warning);
+    }
     return null;
   }
-
-  const monsters: TeamSelection["monsters"] = [];
-  for (const id of selected) {
-    if (!is_lobby_enabled_monster(id)) {
-      show_warning(`${monster_label(id)} is disabled.`);
-      return null;
-    }
-    const spec = roster_by_id.get(id);
-    if (!spec) {
-      show_warning(`Unknown monster: ${id}`);
-      return null;
-    }
-    const base_stats = base_stats_from_spec(spec);
-    const config = get_config(id);
-    const ev_error = validate_ev_spread(config.ev);
-    if (ev_error) {
-      show_warning(`${monster_label(id)}: ${ev_error}`);
-      return null;
-    }
-    const level = normalize_stat_value("level", config.stats.level, base_stats.level);
-    const stats = stats_from_base_level_ev(base_stats, level, config.ev);
-    config.stats = stats;
-    monsters.push({
-      id,
-      type: spec.type,
-      moves: config.moves.slice(0, LOBBY_MOVE_SLOTS),
-      passive: "none",
-      stats: { ...stats },
-      ev: { ...config.ev }
-    });
-  }
-
   clear_warning();
   save_profile();
-  return { monsters, activeIndex: 0 };
+  return result.team;
 }
 
 function send_ready(next_ready: boolean): void {
@@ -3828,8 +2614,8 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
   }
 }
 
-function handle_post(message: any): void {
-  const data: RoomPost = message.data;
+function handle_post(message: { data: RoomPost }): void {
+  const data = message.data;
   switch (data.$) {
     case "assign":
       slot = data.slot;
@@ -4119,17 +2905,17 @@ setInterval(() => {
 }, 1000);
 
 setInterval(() => {
-  if (!join_sent || relay_server_managed) {
+  if (!join_sent || relay_runtime.is_server_managed()) {
     return;
   }
   try_post({ $: "join", name: player_name, player_id });
 }, RELAY_JOIN_HEARTBEAT_MS);
 
 setInterval(() => {
-  if (relay_server_managed) {
+  if (relay_runtime.is_server_managed()) {
     return;
   }
-  relay_prune_inactive(Date.now());
+  relay_runtime.prune_inactive(Date.now());
 }, 5000);
 
 load_team_selection();
