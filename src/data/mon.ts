@@ -117,7 +117,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Valkyria ATK Template",
     type: "atk",
     stats: { level: 12, maxHp: 242, attack: 115, defense: 75, speed: 75 },
-    possibleMoves: ["punch", "heal", "run", "none"],
+    possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["punch", "heal", "none", "run"],
     defaultPassive: "none"
@@ -128,7 +128,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Baby Dragon BUF Template",
     type: "buf",
     stats: { level: 12, maxHp: 85, attack: 85, defense: 85, speed: 85 },
-    possibleMoves: ["power", "ki_blast", "run", "none"],
+    possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["power", "ki_blast", "none", "run"],
     defaultPassive: "none"
@@ -139,7 +139,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Cloyster Template",
     type: "def",
     stats: { level: 12, maxHp: 117, attack: 50, defense: 160, speed: 70 },
-    possibleMoves: ["bait", "seismic_toss", "run", "none"],
+    possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["bait", "seismic_toss", "none", "run"],
     defaultPassive: "none"
@@ -150,7 +150,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Absol Template",
     type: "atk",
     stats: { level: 12, maxHp: 180, attack: 115, defense: 75, speed: 130 },
-    possibleMoves: ["kick", "throw", "run", "none"],
+    possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["kick", "throw", "none", "run"],
     defaultPassive: "none"
@@ -161,7 +161,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     role: "Celebi Template",
     type: "buf",
     stats: { level: 12, maxHp: 325, attack: 100, defense: 100, speed: 100 },
-    possibleMoves: ["switch_sovietico", "team_cure", "run", "none"],
+    possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["switch_sovietico", "team_cure", "none", "run"],
     defaultPassive: "none"
