@@ -1,40 +1,28 @@
 import { create_client, gen_name } from "vibinet";
 import type { RoomPost } from "./shared.ts";
+import { is_raw_info_post_envelope, parse_room_post_json } from "./room_post_guards.ts";
 
-type MessageHandler = (message: {
+export type RoomInfoPostMessage = {
   $: "info_post";
   room: string;
   index: number;
   server_time: number;
   client_time: number;
-  name: string;
+  name?: string;
   data: RoomPost;
-}) => void;
+};
+
+type MessageHandler = (message: RoomInfoPostMessage) => void;
 
 const ROOM_POST_PACKER = { $: "String" } as const;
 const client = create_client<string>();
 const room_watchers = new Map<string, MessageHandler>();
 
-function decode_room_post(raw: unknown): RoomPost | null {
-  if (typeof raw !== "string") {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(raw) as RoomPost;
-    if (!parsed || typeof parsed !== "object" || typeof parsed.$ !== "string") {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function emit_if_valid(room: string, message: any): void {
-  if (!message || message.$ !== "info_post") {
+function emit_if_valid(room: string, message: unknown): void {
+  if (!is_raw_info_post_envelope(message)) {
     return;
   }
-  const data = decode_room_post(message.data);
+  const data = parse_room_post_json(message.data);
   if (!data) {
     return;
   }
@@ -48,7 +36,7 @@ function emit_if_valid(room: string, message: any): void {
     index: message.index,
     server_time: message.server_time,
     client_time: message.client_time,
-    name: message.name,
+    ...(typeof message.name === "string" ? { name: message.name } : {}),
     data,
   });
 }
@@ -74,7 +62,7 @@ export function watch(room: string, handler?: MessageHandler): void {
   if (handler) {
     room_watchers.set(room, handler);
   }
-  client.watch(room, ROOM_POST_PACKER, (message: any) => {
+  client.watch(room, ROOM_POST_PACKER, (message: unknown) => {
     emit_if_valid(room, message);
   });
 }
