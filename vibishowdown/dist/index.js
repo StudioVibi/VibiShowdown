@@ -7230,14 +7230,15 @@ function stat_mod_feedback(entry) {
   }
   return `modificador aplicado: ${target_name} ${label}${multiplier_text} (${before} -> ${after})`;
 }
-function base_stats_for(monster_id, level) {
+function base_stats_for(monster_id, level, ev) {
   const spec = MONSTER_BY_ID.get(monster_id);
   if (!spec) {
     return { attack: 0, defense: 0, speed: 0 };
   }
   const base_stats = base_stats_from_spec(spec);
   const resolved_level = normalize_stat_value("level", level, base_stats.level);
-  const baseline = stats_from_base_level_ev(base_stats, resolved_level, empty_ev_spread());
+  const resolved_ev = normalize_ev_spread(ev, empty_ev_spread());
+  const baseline = stats_from_base_level_ev(base_stats, resolved_level, resolved_ev);
   return {
     attack: baseline.attack,
     defense: baseline.defense,
@@ -7321,7 +7322,7 @@ function attack_percent_from_stage(stage) {
 }
 function tooltip_from_config(monster_id) {
   const config = get_config(monster_id);
-  const base = base_stats_for(monster_id, config.stats.level);
+  const base = base_stats_for(monster_id, config.stats.level, config.ev);
   const spec = MONSTER_BY_ID.get(monster_id);
   const type = spec?.type ?? "atk";
   return {
@@ -7343,7 +7344,12 @@ function tooltip_from_config(monster_id) {
   };
 }
 function tooltip_from_state(state, slot_id, mon) {
-  const base = base_stats_for(mon.id, mon.level);
+  const fallback_base = base_stats_for(mon.id, mon.level);
+  const base = {
+    attack: Math.max(0, Number.isFinite(mon.baseAttack) ? Math.trunc(mon.baseAttack) : fallback_base.attack),
+    defense: Math.max(0, Number.isFinite(mon.baseDefense) ? Math.trunc(mon.baseDefense) : fallback_base.defense),
+    speed: Math.max(0, Number.isFinite(mon.baseSpeed) ? Math.trunc(mon.baseSpeed) : fallback_base.speed)
+  };
   const entries = active_buff_debuffs_for_slot(state, slot_id);
   const attack_total_percent = tooltip_total_percent_for_stat(state, slot_id, "attack", entries);
   const defense_total_percent = tooltip_total_percent_for_stat(state, slot_id, "defense", entries);
@@ -7352,7 +7358,7 @@ function tooltip_from_state(state, slot_id, mon) {
   const defense_blocked = has_active_effect(state, slot_id, "deterioration");
   const speed_blocked = has_active_effect(state, slot_id, "paralyse");
   const attack_value = tooltip_stat_value_from_percent(base.attack, attack_total_percent);
-  const base_attack_for_stage = Math.max(0, Number.isFinite(mon.baseAttack) ? Math.trunc(mon.baseAttack) : base.attack);
+  const base_attack_for_stage = base.attack;
   const stage_attack = Number.isFinite(mon.attackStage) ? mon.attackStage : 0;
   const weakened_stage_attack = stage_attack - 2;
   const weakened_attack_value = attack_from_stage2(base_attack_for_stage, weakened_stage_attack);
