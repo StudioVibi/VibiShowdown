@@ -706,7 +706,7 @@
 
       .stat-tooltip-row {
         display: grid;
-        grid-template-columns: 34px minmax(36px, auto) minmax(98px, 1fr);
+        grid-template-columns: 34px minmax(36px, auto) minmax(58px, auto) minmax(54px, 1fr);
         align-items: center;
         gap: 8px;
         border-radius: 7px;
@@ -734,20 +734,25 @@
         color: #fff;
       }
 
-      .stat-tooltip-multiplier {
+      .stat-tooltip-stage {
         text-align: right;
         color: #c7d2f0;
       }
 
-      .stat-tooltip-multiplier.up {
+      .stat-tooltip-percent {
+        text-align: right;
+        color: #c7d2f0;
+      }
+
+      .stat-tooltip-percent.up {
         color: #6ff7b0;
       }
 
-      .stat-tooltip-multiplier.down {
+      .stat-tooltip-percent.down {
         color: #ff8e8e;
       }
 
-      .stat-tooltip-multiplier.neutral {
+      .stat-tooltip-percent.neutral {
         color: #c7d2f0;
       }
 

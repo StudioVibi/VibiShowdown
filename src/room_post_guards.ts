@@ -242,7 +242,9 @@ function is_monster_state(value: unknown): value is MonsterState {
     is_number(value.attack) &&
     is_number(value.attackStage) &&
     is_number(value.defense) &&
+    is_number(value.defenseStage) &&
     is_number(value.speed) &&
+    is_number(value.speedStage) &&
     typeof value.agilityBoostActive === "boolean" &&
     typeof value.endureSpeedBoostActive === "boolean" &&
     typeof value.bellyDrumActive === "boolean" &&

@@ -66,6 +66,7 @@ type MonsterTooltipPayload = {
   current: { attack: number; defense: number; speed: number };
   base: { attack: number; defense: number; speed: number };
   totalPercent: { attack: number; defense: number; speed: number };
+  stages: { attack: number; defense: number; speed: number };
 };
 
 type SwitchModalMode = "intent" | "forced" | "bounce_kick";
@@ -729,14 +730,6 @@ function attack_from_stage(base_attack: number, stage: number): number {
   return Math.max(0, mul_div_round(base_attack, 2, 2 - normalized));
 }
 
-function attack_percent_from_stage(stage: number): number {
-  const normalized = clamp_stage(stage);
-  if (normalized >= 0) {
-    return Math.round(((2 + normalized) * 100) / 2);
-  }
-  return Math.round((2 * 100) / (2 - normalized));
-}
-
 function tooltip_from_config(monster_id: string): MonsterTooltipPayload {
   const config = get_config(monster_id);
   const base = base_stats_for(monster_id, config.stats.level, config.ev);
@@ -757,6 +750,11 @@ function tooltip_from_config(monster_id: string): MonsterTooltipPayload {
       attack: 100,
       defense: 100,
       speed: 100
+    },
+    stages: {
+      attack: 0,
+      defense: 0,
+      speed: 0
     }
   };
 }
@@ -775,30 +773,36 @@ function tooltip_from_state(state: GameState, slot_id: PlayerSlot, mon: MonsterS
   const weakness_active = has_active_effect(state, slot_id, "weakness");
   const defense_blocked = has_active_effect(state, slot_id, "deterioration");
   const speed_blocked = has_active_effect(state, slot_id, "paralyse");
-  const attack_value = tooltip_stat_value_from_percent(base.attack, attack_total_percent);
-  const base_attack_for_stage = base.attack;
-  const stage_attack = Number.isFinite(mon.attackStage) ? mon.attackStage : 0;
-  const weakened_stage_attack = stage_attack - 2;
-  const weakened_attack_value = attack_from_stage(base_attack_for_stage, weakened_stage_attack);
-  const attack_percent_with_stage =
-    weakness_active && base_attack_for_stage > 0
-      ? clamp_tooltip_total_percent(attack_percent_from_stage(weakened_stage_attack))
-      : attack_total_percent;
+  const attack_percented_base = tooltip_stat_value_from_percent(base.attack, attack_total_percent);
+  const defense_percented_base = tooltip_stat_value_from_percent(base.defense, defense_total_percent);
+  const speed_percented_base = tooltip_stat_value_from_percent(base.speed, speed_total_percent);
+  const attack_stage_base = clamp_stage(Number.isFinite(mon.attackStage) ? mon.attackStage : 0);
+  const defense_stage_base = clamp_stage(Number.isFinite(mon.defenseStage) ? mon.defenseStage : 0);
+  const speed_stage_base = clamp_stage(Number.isFinite(mon.speedStage) ? mon.speedStage : 0);
+  const attack_stage_for_display = weakness_active ? clamp_stage(attack_stage_base - 2) : attack_stage_base;
+  const attack_value = attack_from_stage(attack_percented_base, attack_stage_for_display);
+  const defense_value = attack_from_stage(defense_percented_base, defense_stage_base);
+  const speed_value = attack_from_stage(speed_percented_base, speed_stage_base);
   return {
     id: mon.id,
     name: monster_label(mon.id),
     type: mon.type,
     moves: mon.chosenMoves.slice(0, LOBBY_MOVE_SLOTS),
     current: {
-      attack: weakness_active ? weakened_attack_value : attack_value,
-      defense: defense_blocked ? 0 : tooltip_stat_value_from_percent(base.defense, defense_total_percent),
-      speed: speed_blocked ? 0 : tooltip_stat_value_from_percent(base.speed, speed_total_percent)
+      attack: attack_value,
+      defense: defense_blocked ? 0 : defense_value,
+      speed: speed_blocked ? 0 : speed_value
     },
     base,
     totalPercent: {
-      attack: attack_percent_with_stage,
+      attack: attack_total_percent,
       defense: defense_total_percent,
       speed: speed_total_percent
+    },
+    stages: {
+      attack: attack_stage_for_display,
+      defense: defense_stage_base,
+      speed: speed_stage_base
     }
   };
 }
@@ -821,42 +825,47 @@ function set_monster_tooltip(target: HTMLElement | null, payload: MonsterTooltip
   target.dataset.monsterTooltip = "1";
 }
 
-function multiplier_value_state(percent: number): TooltipValueState {
+function percent_value_state(percent: number): TooltipValueState {
   if (percent > 100) return "up";
   if (percent < 100) return "down";
   return "neutral";
 }
 
-function tooltip_stat_row(label: string, current: number, base: number, total_percent: number): HTMLDivElement {
+function tooltip_stat_row(label: string, current: number, base: number, stage: number, total_percent: number): HTMLDivElement {
   const row = document.createElement("div");
   row.className = "stat-tooltip-row";
 
   const label_el = document.createElement("span");
   label_el.className = "stat-tooltip-label";
-  label_el.textContent = label;
+  label_el.textContent = `${label} |`;
 
   const value_el = document.createElement("span");
   value_el.className = `stat-tooltip-value ${tooltip_value_state(current, base)}`;
-  value_el.textContent = `${current}`;
+  value_el.textContent = `${current} |`;
 
-  const mult_el = document.createElement("span");
-  mult_el.className = `stat-tooltip-multiplier ${multiplier_value_state(total_percent)}`;
-  mult_el.textContent = format_tooltip_multiplier(total_percent);
+  const stage_el = document.createElement("span");
+  stage_el.className = "stat-tooltip-stage";
+  stage_el.textContent = `${format_tooltip_stage(stage)} |`;
+
+  const percent_el = document.createElement("span");
+  percent_el.className = `stat-tooltip-percent ${percent_value_state(total_percent)}`;
+  percent_el.textContent = format_tooltip_percent(total_percent);
 
   row.appendChild(label_el);
   row.appendChild(value_el);
-  row.appendChild(mult_el);
+  row.appendChild(stage_el);
+  row.appendChild(percent_el);
   return row;
 }
 
-function format_tooltip_multiplier(percent: number): string {
-  const mult = percent / 100;
-  const mult_text = Number.isInteger(mult)
-    ? `${mult}`
-    : mult.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+function format_tooltip_stage(stage: number): string {
+  const normalized = clamp_stage(stage);
+  return `stg ${normalized >= 0 ? `+${normalized}` : `${normalized}`}`;
+}
+
+function format_tooltip_percent(percent: number): string {
   const delta = percent - 100;
-  const delta_text = `${delta >= 0 ? "+" : ""}${delta}%`;
-  return `x${mult_text} (${delta_text})`;
+  return `${delta >= 0 ? "+" : ""}${delta}%`;
 }
 
 function render_monster_tooltip(payload: MonsterTooltipPayload): void {
@@ -875,9 +884,15 @@ function render_monster_tooltip(payload: MonsterTooltipPayload): void {
 
   const stats_grid = document.createElement("div");
   stats_grid.className = "stat-tooltip-grid";
-  stats_grid.appendChild(tooltip_stat_row("ATK", payload.current.attack, payload.base.attack, payload.totalPercent.attack));
-  stats_grid.appendChild(tooltip_stat_row("DEF", payload.current.defense, payload.base.defense, payload.totalPercent.defense));
-  stats_grid.appendChild(tooltip_stat_row("DEX", payload.current.speed, payload.base.speed, payload.totalPercent.speed));
+  stats_grid.appendChild(
+    tooltip_stat_row("ATK", payload.current.attack, payload.base.attack, payload.stages.attack, payload.totalPercent.attack)
+  );
+  stats_grid.appendChild(
+    tooltip_stat_row("DEF", payload.current.defense, payload.base.defense, payload.stages.defense, payload.totalPercent.defense)
+  );
+  stats_grid.appendChild(
+    tooltip_stat_row("DEX", payload.current.speed, payload.base.speed, payload.stages.speed, payload.totalPercent.speed)
+  );
   stat_tooltip.appendChild(stats_grid);
 
   const moves_box = document.createElement("div");

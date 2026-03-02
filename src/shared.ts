@@ -54,7 +54,9 @@ export type MonsterState = {
   attack: number;
   attackStage: number;
   defense: number;
+  defenseStage: number;
   speed: number;
+  speedStage: number;
   agilityBoostActive: boolean;
   endureSpeedBoostActive: boolean;
   bellyDrumActive: boolean;
