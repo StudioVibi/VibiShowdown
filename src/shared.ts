@@ -103,7 +103,8 @@ export type ActiveBuffDebuffState = {
   source: string;
   stat: BuffDebuffStat;
   deltaPercent: number;
-  clearsOnSwitch: true;
+  clearsOnSwitch: boolean;
+  targetMonsterId?: string;
 };
 
 export type ActiveHealBuffState = {

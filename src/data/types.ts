@@ -43,7 +43,7 @@ export type BuffDebuffCollateral = {
   target: BuffDebuffTarget;
   stat: BuffDebuffStat;
   deltaPercent: number;
-  clearsOnSwitch: true;
+  clearsOnSwitch: boolean;
 };
 
 export type CurseCollateral = {

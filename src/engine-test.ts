@@ -138,4 +138,27 @@ function first_player_damage(log: EventLog[]): number | null {
   assert_equal(after, 110, "run should increase shared mSPE by 10%");
 }
 
+{
+  const state = create_running_state(["power", "none", "none"], ["none", "none", "none"]);
+  const after_power = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 })).state;
+  const armoth = after_power.players.player1.team[0];
+  const kairus = after_power.players.player1.team[1];
+  assert(armoth.attack > armoth.baseAttack, "power should boost attack for the caster");
+  assert(armoth.speed < armoth.baseSpeed, "power should reduce speed for the caster");
+  assert_equal(kairus.attack, kairus.baseAttack, "power should not affect bench monster attack");
+  assert_equal(kairus.speed, kairus.baseSpeed, "power should not affect bench monster speed");
+
+  const after_switch_out = resolve_turn(after_power, p1_intent({ action: "switch", targetIndex: 1 })).state;
+  assert_equal(after_switch_out.players.player1.activeIndex, 1, "switch should move to bench slot 1");
+  const kairus_active = after_switch_out.players.player1.team[1];
+  assert_equal(kairus_active.attack, kairus_active.baseAttack, "active replacement should not inherit power attack buff");
+  assert_equal(kairus_active.speed, kairus_active.baseSpeed, "active replacement should not inherit power speed debuff");
+
+  const after_switch_back = resolve_turn(after_switch_out, p1_intent({ action: "switch", targetIndex: 0 })).state;
+  assert_equal(after_switch_back.players.player1.activeIndex, 0, "switch back should return to caster monster");
+  const armoth_back = after_switch_back.players.player1.team[0];
+  assert(armoth_back.attack > armoth_back.baseAttack, "power attack boost should persist after switching out and back");
+  assert(armoth_back.speed < armoth_back.baseSpeed, "power speed debuff should persist after switching out and back");
+}
+
 console.log("[engine-test] ok");

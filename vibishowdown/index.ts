@@ -680,8 +680,18 @@ function active_buff_debuffs_for_slot(state: GameState, slot_id: PlayerSlot): Ui
   if (!Array.isArray(raw)) {
     return [];
   }
+  const player = state.players[slot_id];
+  const active_monster_id = player.team[player.activeIndex]?.id ?? null;
   const normalized: UiBuffDebuffEntry[] = [];
   for (const row of raw) {
+    const target_monster_id =
+      typeof row.targetMonsterId === "string" && row.targetMonsterId.trim().length > 0 ? row.targetMonsterId : null;
+    if (target_monster_id && active_monster_id && target_monster_id !== active_monster_id) {
+      continue;
+    }
+    if (target_monster_id && !active_monster_id) {
+      continue;
+    }
     const id = typeof row.id === "string" && row.id.trim().length > 0 ? row.id : "buff_debuff";
     const stat = row.stat;
     if (stat !== "attack" && stat !== "defense" && stat !== "speed") {
