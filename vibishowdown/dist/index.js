@@ -6514,6 +6514,38 @@ function validate_intent(state, slot, intent) {
 }
 
 // vibishowdown/lobby_render.ts
+function move_display_label(move_id, move_labels) {
+  return move_labels[move_id] || move_id;
+}
+function compare_move_ids(left_id, right_id, move_labels) {
+  const left = move_display_label(left_id, move_labels);
+  const right = move_display_label(right_id, move_labels);
+  return left.localeCompare(right, undefined, { sensitivity: "base" });
+}
+function ordered_move_options(possible_moves, move_labels, priority_move_ids) {
+  const unique = [];
+  const seen = new Set;
+  for (const move of possible_moves) {
+    if (move === "run") {
+      continue;
+    }
+    if (seen.has(move)) {
+      continue;
+    }
+    seen.add(move);
+    unique.push(move);
+  }
+  const has_none = unique.includes("none");
+  const non_none_moves = unique.filter((move) => move !== "none");
+  const priority_set = new Set(priority_move_ids.filter((move) => move !== "none" && move !== "run"));
+  const priority = non_none_moves.filter((move) => priority_set.has(move)).sort((left, right) => compare_move_ids(left, right, move_labels));
+  const others = non_none_moves.filter((move) => !priority_set.has(move)).sort((left, right) => compare_move_ids(left, right, move_labels));
+  const ordered = [...priority, ...others];
+  if (has_none) {
+    ordered.push("none");
+  }
+  return ordered;
+}
 function render_lobby_config(ctx) {
   ctx.moves_grid.innerHTML = "";
   ctx.stats_grid.innerHTML = "";
@@ -6571,16 +6603,14 @@ function render_lobby_config(ctx) {
     select.dataset.index = `${i}`;
     const current_move = config.moves[i] ?? "none";
     const used_by_others = new Set(config.moves.filter((move, idx) => idx !== i && move !== "none"));
-    for (const move of spec.possibleMoves) {
-      if (move === "run") {
-        continue;
-      }
+    const sorted_move_options = ordered_move_options(spec.possibleMoves, ctx.move_labels, ctx.priority_move_ids);
+    for (const move of sorted_move_options) {
       if (move !== "none" && move !== current_move && used_by_others.has(move)) {
         continue;
       }
       const option = document.createElement("option");
       option.value = move;
-      option.textContent = ctx.move_labels[move] || move;
+      option.textContent = move_display_label(move, ctx.move_labels);
       select.appendChild(option);
     }
     const has_current = Array.from(select.options).some((option) => option.value === current_move);
@@ -7730,6 +7760,22 @@ var TURN_DURATION_SECONDS_MIN = 5;
 var TURN_DURATION_SECONDS_MAX = 300;
 var LOBBY_MOVE_SLOTS = 3;
 var STARTER_MONSTER_IDS = new Set(["armoth", "kairus", "farien", "knight", "vealkiria", "babydragonbuf"]);
+var STARTER_DEFAULT_PRIORITY_MOVE_IDS = (() => {
+  const move_ids = new Set;
+  for (const monster_id of STARTER_MONSTER_IDS) {
+    const spec = MONSTER_BY_ID.get(monster_id);
+    if (!spec) {
+      continue;
+    }
+    for (const move_id of spec.defaultMoves) {
+      if (move_id === "none" || move_id === "run") {
+        continue;
+      }
+      move_ids.add(move_id);
+    }
+  }
+  return Array.from(move_ids).sort((left, right) => (MOVE_LABELS[left] || left).localeCompare(MOVE_LABELS[right] || right, undefined, { sensitivity: "base" }));
+})();
 var MOVE_TOOLTIP_DELAY_MS = 2000;
 var MOVE_TOOLTIP_DESCRIPTIONS = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
@@ -8871,6 +8917,7 @@ function render_config() {
     match_started,
     lobby_move_slots: LOBBY_MOVE_SLOTS,
     move_labels: MOVE_LABELS,
+    priority_move_ids: STARTER_DEFAULT_PRIORITY_MOVE_IDS,
     level_min: LEVEL_MIN,
     level_max: LEVEL_MAX,
     ev_per_stat_max: EV_PER_STAT_MAX,

@@ -17,6 +17,7 @@ export type RenderLobbyConfigContext = {
   match_started: boolean;
   lobby_move_slots: number;
   move_labels: Record<string, string>;
+  priority_move_ids: readonly string[];
   level_min: number;
   level_max: number;
   ev_per_stat_max: number;
@@ -28,6 +29,57 @@ export type RenderLobbyConfigContext = {
   update_action_controls: () => void;
   rerender: () => void;
 };
+
+function move_display_label(move_id: string, move_labels: Record<string, string>): string {
+  return move_labels[move_id] || move_id;
+}
+
+function compare_move_ids(
+  left_id: string,
+  right_id: string,
+  move_labels: Record<string, string>
+): number {
+  const left = move_display_label(left_id, move_labels);
+  const right = move_display_label(right_id, move_labels);
+  return left.localeCompare(right, undefined, { sensitivity: "base" });
+}
+
+function ordered_move_options(
+  possible_moves: readonly string[],
+  move_labels: Record<string, string>,
+  priority_move_ids: readonly string[]
+): string[] {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const move of possible_moves) {
+    if (move === "run") {
+      continue;
+    }
+    if (seen.has(move)) {
+      continue;
+    }
+    seen.add(move);
+    unique.push(move);
+  }
+
+  const has_none = unique.includes("none");
+  const non_none_moves = unique.filter((move) => move !== "none");
+  const priority_set = new Set(
+    priority_move_ids.filter((move) => move !== "none" && move !== "run")
+  );
+  const priority = non_none_moves
+    .filter((move) => priority_set.has(move))
+    .sort((left, right) => compare_move_ids(left, right, move_labels));
+  const others = non_none_moves
+    .filter((move) => !priority_set.has(move))
+    .sort((left, right) => compare_move_ids(left, right, move_labels));
+
+  const ordered = [...priority, ...others];
+  if (has_none) {
+    ordered.push("none");
+  }
+  return ordered;
+}
 
 export function render_lobby_config(ctx: RenderLobbyConfigContext): void {
   ctx.moves_grid.innerHTML = "";
@@ -93,16 +145,14 @@ export function render_lobby_config(ctx: RenderLobbyConfigContext): void {
     const used_by_others = new Set(
       config.moves.filter((move, idx) => idx !== i && move !== "none")
     );
-    for (const move of spec.possibleMoves) {
-      if (move === "run") {
-        continue;
-      }
+    const sorted_move_options = ordered_move_options(spec.possibleMoves, ctx.move_labels, ctx.priority_move_ids);
+    for (const move of sorted_move_options) {
       if (move !== "none" && move !== current_move && used_by_others.has(move)) {
         continue;
       }
       const option = document.createElement("option");
       option.value = move;
-      option.textContent = ctx.move_labels[move] || move;
+      option.textContent = move_display_label(move, ctx.move_labels);
       select.appendChild(option);
     }
     const has_current = Array.from(select.options).some((option) => option.value === current_move);

@@ -74,6 +74,24 @@ type SwitchModalMode = "intent" | "forced" | "bounce_kick";
 
 const LOBBY_MOVE_SLOTS = 3;
 const STARTER_MONSTER_IDS = new Set<string>(["armoth", "kairus", "farien", "knight", "vealkiria", "babydragonbuf"]);
+const STARTER_DEFAULT_PRIORITY_MOVE_IDS: string[] = (() => {
+  const move_ids = new Set<string>();
+  for (const monster_id of STARTER_MONSTER_IDS) {
+    const spec = roster_by_id.get(monster_id);
+    if (!spec) {
+      continue;
+    }
+    for (const move_id of spec.defaultMoves) {
+      if (move_id === "none" || move_id === "run") {
+        continue;
+      }
+      move_ids.add(move_id);
+    }
+  }
+  return Array.from(move_ids).sort((left, right) =>
+    (MOVE_LABELS[left] || left).localeCompare(MOVE_LABELS[right] || right, undefined, { sensitivity: "base" })
+  );
+})();
 const MOVE_TOOLTIP_DELAY_MS = 2000;
 const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
@@ -1375,6 +1393,7 @@ function render_config(): void {
     match_started,
     lobby_move_slots: LOBBY_MOVE_SLOTS,
     move_labels: MOVE_LABELS,
+    priority_move_ids: STARTER_DEFAULT_PRIORITY_MOVE_IDS,
     level_min: LEVEL_MIN,
     level_max: LEVEL_MAX,
     ev_per_stat_max: EV_PER_STAT_MAX,
