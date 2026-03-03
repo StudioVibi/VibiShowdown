@@ -2708,6 +2708,9 @@ var TAUNT_BLOCKED_MOVE_IDS = new Set([
   "sekyps",
   "hook"
 ]);
+function is_attack_damage_phase(phase) {
+  return phase === "attack_01" || phase === "attack_02";
+}
 var INITIATIVE_WITHOUT_SPEED = ["attack", "hp", "defense"];
 var STAT_STAGE_MIN = -6;
 var STAT_STAGE_MAX = 6;
@@ -2723,8 +2726,9 @@ var STAT_MULTIPLIER_MAX_PERCENT = 400;
 var MSPE_VALUE_GOAL = 500;
 var MSPE_GAP_GOAL_PERCENT = 33;
 var RUN_MSPE_GAIN_PERCENT = 10;
-var HOOK_MSPE_REDUCTION_PERCENT = 30;
-var HOOK_INCOMING_DAMAGE_MULTIPLIER_PERCENT = 200;
+var HOOK_RUN_MSPE_REDUCTION_PERCENT = 20;
+var HOOK_EXPOSURE_INCOMING_DAMAGE_MULTIPLIER_PERCENT = 166;
+var HOOK_SELF_SPEED_REDUCTION_PERCENT = 10;
 var SEKYPS_DAMAGE_PER_STACK = 24;
 var REJUVENATION_REGEN_FLAT_PER_STACK = 30;
 var REJUVENATION_REGEN_STACK_MAX = 3;
@@ -4867,7 +4871,7 @@ function apply_damage_with_endure(state, log, phase, slot, monster, attempted_da
     return { before, after: before, applied: 0 };
   }
   const incoming_multiplier_raw = incoming_damage_multiplier_percent ? incoming_damage_multiplier_percent[slot] : 100;
-  const incoming_multiplier = Math.max(0, normalize_int(incoming_multiplier_raw, 100, 0));
+  const incoming_multiplier = is_attack_damage_phase(phase) ? Math.max(0, normalize_int(incoming_multiplier_raw, 100, 0)) : 100;
   const adjusted_attempted_damage = incoming_multiplier === 100 ? attempted_damage : Math.max(0, mul_div_floor(attempted_damage, incoming_multiplier, 100));
   const ignore_armor = !!options?.ignoreArmor;
   const armor_stack = ignore_armor ? 0 : type_passive_armor_stack(state, slot);
@@ -5161,12 +5165,46 @@ function apply_run_action(state, log, player_slot, blocked_by_hook_this_turn = f
     return;
   }
   if (blocked_by_hook_this_turn) {
+    const before_mSPE2 = Math.max(0, player.sharedMSPE);
+    const reduction = before_mSPE2 > 0 ? Math.max(1, mul_div_floor(before_mSPE2, HOOK_RUN_MSPE_REDUCTION_PERCENT, 100)) : 0;
+    const after_mSPE2 = sync_player_shared_mSPE(state, player_slot, before_mSPE2 - reduction);
+    log.push({
+      type: "stat_mod",
+      turn: state.turn,
+      phase: "run",
+      summary: `${player_slot} mSPE reduced by Hook (${before_mSPE2} -> ${after_mSPE2})`,
+      data: {
+        slot: player_slot,
+        target: actor.id,
+        stat: "mSPE",
+        amountPercent: -HOOK_RUN_MSPE_REDUCTION_PERCENT,
+        amount: reduction,
+        before: before_mSPE2,
+        after: after_mSPE2
+      }
+    });
     log.push({
       type: "action_skipped",
       turn: state.turn,
       phase: "run",
       summary: `${player_slot} run failed (Hook)`,
-      data: { slot: player_slot, action: "run", reason: "hook" }
+      data: { slot: player_slot, action: "run", reason: "hook", mSPEBefore: before_mSPE2, mSPEAfter: after_mSPE2 }
+    });
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: "run",
+      summary: `Hook penalty on Run attempt: -${HOOK_RUN_MSPE_REDUCTION_PERCENT}% mSPE (${before_mSPE2} -> ${after_mSPE2})`,
+      data: {
+        action: "run",
+        slot: player_slot,
+        target: actor.id,
+        reason: "hook",
+        amountPercent: -HOOK_RUN_MSPE_REDUCTION_PERCENT,
+        amount: reduction,
+        before: before_mSPE2,
+        after: after_mSPE2
+      }
     });
     return;
   }
@@ -5534,32 +5572,24 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     const target_player = state.players[target_slot];
     const target = active_monster(target_player);
     hook_run_blocked_this_turn[target_slot] = true;
-    incoming_damage_multiplier_percent[player_slot] = Math.max(HOOK_INCOMING_DAMAGE_MULTIPLIER_PERCENT, normalize_int(incoming_damage_multiplier_percent[player_slot], 100, 0));
-    const before_mSPE = Math.max(0, normalize_int(target_player.sharedMSPE, SHARED_MSPE_START, 0));
-    const reduction = before_mSPE > 0 ? Math.max(1, mul_div_floor(before_mSPE, HOOK_MSPE_REDUCTION_PERCENT, 100)) : 0;
-    const after_mSPE = sync_player_shared_mSPE(state, target_slot, before_mSPE - reduction);
-    log.push({
-      type: "stat_mod",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: `${target.name} had mSPE reduced by Hook (${before_mSPE} -> ${after_mSPE})`,
-      data: {
-        slot: player_slot,
-        targetSlot: target_slot,
-        source: attacker.id,
-        target: target.id,
-        stat: "mSPE",
-        amountPercent: -HOOK_MSPE_REDUCTION_PERCENT,
-        amount: reduction,
-        before: before_mSPE,
-        after: after_mSPE
-      }
-    });
+    incoming_damage_multiplier_percent[player_slot] = Math.max(HOOK_EXPOSURE_INCOMING_DAMAGE_MULTIPLIER_PERCENT, normalize_int(incoming_damage_multiplier_percent[player_slot], 100, 0));
+    refresh_active_monster_stats_for_slot(state, player_slot);
+    const before_self_speed = attacker.speed;
+    apply_buff_debuff_component(state, log, player_slot, {
+      kind: "buff_debuff",
+      id: "hook_self_speed_down",
+      target: "self",
+      stat: "speed",
+      deltaPercent: -HOOK_SELF_SPEED_REDUCTION_PERCENT,
+      clearsOnSwitch: false
+    }, player_slot, spec.id, { targetMonsterId: attacker.id });
+    refresh_active_monster_stats_for_slot(state, player_slot);
+    const after_self_speed = attacker.speed;
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Hook: blocks enemy Run this turn, reduces enemy mSPE by ${HOOK_MSPE_REDUCTION_PERCENT}% and increases self incoming damage by +100% this turn`,
+      summary: `Hook: blocks enemy Run; if target attempts Run then mSPE -${HOOK_RUN_MSPE_REDUCTION_PERCENT}% | ` + `self gains Exposicao (+66% incoming damage in attack phases) and DEX -${HOOK_SELF_SPEED_REDUCTION_PERCENT}%`,
       data: {
         move: spec.id,
         slot: player_slot,
@@ -5567,10 +5597,11 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
         source: attacker.id,
         target: target.id,
         blocksRunThisTurn: true,
-        mSPEReductionPercent: HOOK_MSPE_REDUCTION_PERCENT,
-        mSPEBefore: before_mSPE,
-        mSPEAfter: after_mSPE,
-        selfIncomingDamageMultiplierPercent: incoming_damage_multiplier_percent[player_slot]
+        runMSPEReductionPercentOnAttempt: HOOK_RUN_MSPE_REDUCTION_PERCENT,
+        selfIncomingDamagePercentInAttackPhases: incoming_damage_multiplier_percent[player_slot],
+        selfSpeedBefore: before_self_speed,
+        selfSpeedAfter: after_self_speed,
+        selfSpeedDeltaPercent: -HOOK_SELF_SPEED_REDUCTION_PERCENT
       }
     });
     finalize_move_success();
@@ -7781,7 +7812,7 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
   punch: "Golpe fisico com multiplicador 93 (passa por DEF e armadura).",
   power: "Aumenta ATK em +1 stage e reduz DEX em 10% do base.",
-  hook: "Impede o Run do adversario neste turno, reduz o mSPE dele em 30% e aumenta em 100% o dano recebido por quem usou neste turno.",
+  hook: "Impede o Run do adversario neste turno; se ele tentar Run, recebe -20% de mSPE. Aplica Exposicao no usuario (+66% dano recebido em fases de ataque) e auto-aplica -10% de DEX (stackavel, permanente).",
   kick: "Golpe fisico forte de dano escalado.",
   throw: "Golpe com formula fixa (90x90) escalada pelo nivel de formula.",
   agility: "Buff de DEX (x2) ate trocar.",

@@ -70,6 +70,10 @@ function p1_intent(intent: PlayerIntent): Record<PlayerSlot, PlayerIntent | null
   return { player1: intent, player2: null };
 }
 
+function intents(p1: PlayerIntent | null, p2: PlayerIntent | null): Record<PlayerSlot, PlayerIntent | null> {
+  return { player1: p1, player2: p2 };
+}
+
 function first_player_damage(log: EventLog[]): number | null {
   for (const entry of log) {
     if (entry.type !== "damage") continue;
@@ -136,6 +140,77 @@ function first_player_damage(log: EventLog[]): number | null {
   const after = result.state.players.player1.sharedMSPE;
   assert_equal(before, 100, "baseline shared mSPE should start at 100");
   assert_equal(after, 110, "run should increase shared mSPE by 10%");
+}
+
+{
+  const state = create_running_state(["hook", "none", "none"], ["none", "none", "none"]);
+  const before_target = state.players.player2.sharedMSPE;
+  const after_hook = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 })).state;
+  const after_target = after_hook.players.player2.sharedMSPE;
+  assert_equal(after_target, before_target, "hook should not reduce mSPE immediately when enemy does not attempt run");
+}
+
+{
+  const state = create_running_state(["hook", "none", "none"], ["none", "none", "none"]);
+  const before_target = state.players.player2.sharedMSPE;
+  const result = resolve_turn(
+    state,
+    intents(
+      { action: "use_move", moveIndex: 0 },
+      { action: "run" }
+    )
+  );
+  const after_target = result.state.players.player2.sharedMSPE;
+  assert_equal(after_target, 80, "hook should apply -20% mSPE when enemy attempts run");
+  assert(after_target < before_target, "hook run penalty should lower target mSPE");
+  const player2_run_blocked = result.log.some((entry) => {
+    if (entry.type !== "action_skipped") return false;
+    const data = entry.data as { slot?: unknown; reason?: unknown } | undefined;
+    return data?.slot === "player2" && data?.reason === "hook";
+  });
+  assert(player2_run_blocked, "hook should still block enemy run");
+}
+
+{
+  const state = create_running_state(["hook", "none", "none"], ["none", "none", "none"]);
+  const after_hook = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 })).state;
+  const armoth = after_hook.players.player1.team[0];
+  const kairus = after_hook.players.player1.team[1];
+  assert(armoth.speed < armoth.baseSpeed, "hook should reduce speed for the caster");
+  assert_equal(kairus.speed, kairus.baseSpeed, "hook should not affect bench monster speed");
+
+  const after_switch_out = resolve_turn(after_hook, p1_intent({ action: "switch", targetIndex: 1 })).state;
+  const after_switch_back = resolve_turn(after_switch_out, p1_intent({ action: "switch", targetIndex: 0 })).state;
+  const armoth_back = after_switch_back.players.player1.team[0];
+  assert(armoth_back.speed < armoth_back.baseSpeed, "hook speed debuff should persist after switching out and back");
+}
+
+{
+  const baseline_state = create_running_state(["none", "none", "none"], ["punch", "none", "none"]);
+  const baseline_before = baseline_state.players.player1.sharedHp;
+  const baseline_after = resolve_turn(
+    baseline_state,
+    intents(
+      { action: "use_move", moveIndex: 0 },
+      { action: "use_move", moveIndex: 0 }
+    )
+  ).state;
+  const baseline_damage_to_p1 = baseline_before - baseline_after.players.player1.sharedHp;
+
+  const hook_state = create_running_state(["hook", "none", "none"], ["punch", "none", "none"]);
+  const hook_before = hook_state.players.player1.sharedHp;
+  const hook_after = resolve_turn(
+    hook_state,
+    intents(
+      { action: "use_move", moveIndex: 0 },
+      { action: "use_move", moveIndex: 0 }
+    )
+  ).state;
+  const hook_damage_to_p1 = hook_before - hook_after.players.player1.sharedHp;
+  assert(
+    hook_damage_to_p1 > baseline_damage_to_p1,
+    "hook exposure should increase incoming damage in attack phase"
+  );
 }
 
 {
