@@ -94,8 +94,8 @@ export function calc_hp_max(base_hp: number, level: number, ev_hp: number, iv_hp
 
 export function calc_non_hp_stat(base: number, level: number, ev: number, iv: number, nature: number): number {
   const effective_level = scaled_level_for_formula(level);
-  const term = Math.floor(((2 * base + iv + ev_bonus(ev)) * effective_level) / 24) + 5;
-  return Math.floor(term * nature);
+  const term = (4 * base * ev_bonus(ev) * effective_level) / 2400;
+  return Math.floor(term);
 }
 
 export function calc_final_stats(
