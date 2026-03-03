@@ -8270,6 +8270,8 @@ var TOOLTIP_ARMOR_STACK_MAX = 5;
 var TOOLTIP_ARMOR_BONUS_PERCENT_PER_STACK = 10;
 var TOOLTIP_STAT_MULTIPLIER_MIN_PERCENT = 25;
 var TOOLTIP_STAT_MULTIPLIER_MAX_PERCENT = 400;
+var REJUVENATION_REGEN_PER_STACK = 30;
+var POWER_ATTACK_STAGE_UI_IDS = new Set(["power_attack_up", "power_attack_stage_up"]);
 function armor_stacks_for_slot(state, slot_id) {
   const raw = state.typePassiveArmorStacks?.[slot_id] ?? 0;
   if (!Number.isFinite(raw)) {
@@ -8289,6 +8291,31 @@ function tooltip_stat_delta_sum(entries, stat) {
     total += entry.deltaPercent;
   }
   return total;
+}
+function stage_delta_from_buff_entry(entry) {
+  if (entry.stat === "attack" && POWER_ATTACK_STAGE_UI_IDS.has(entry.id)) {
+    return 1;
+  }
+  return 0;
+}
+function stat_aggregates_from_entries(entries) {
+  const by_stat = {
+    attack: { stat: "attack", totalDeltaPercent: 0, totalStageDelta: 0 },
+    defense: { stat: "defense", totalDeltaPercent: 0, totalStageDelta: 0 },
+    speed: { stat: "speed", totalDeltaPercent: 0, totalStageDelta: 0 }
+  };
+  for (const entry of entries) {
+    by_stat[entry.stat].totalDeltaPercent += entry.deltaPercent;
+    by_stat[entry.stat].totalStageDelta += stage_delta_from_buff_entry(entry);
+  }
+  return [by_stat.attack, by_stat.defense, by_stat.speed];
+}
+function stat_aggregate_for(entries, stat) {
+  return stat_aggregates_from_entries(entries).find((entry) => entry.stat === stat) ?? {
+    stat,
+    totalDeltaPercent: 0,
+    totalStageDelta: 0
+  };
 }
 function active_buff_debuffs_for_slot(state, slot_id) {
   const raw = state.activeBuffDebuffsBySlot?.[slot_id];
@@ -8379,6 +8406,7 @@ function tooltip_from_state(state, slot_id, mon) {
     speed: Math.max(0, Number.isFinite(mon.baseSpeed) ? Math.trunc(mon.baseSpeed) : fallback_base.speed)
   };
   const entries = active_buff_debuffs_for_slot(state, slot_id);
+  const attack_aggregate = stat_aggregate_for(entries, "attack");
   const attack_total_percent = tooltip_total_percent_for_stat(state, slot_id, "attack", entries);
   const defense_total_percent = tooltip_total_percent_for_stat(state, slot_id, "defense", entries);
   const speed_total_percent = tooltip_total_percent_for_stat(state, slot_id, "speed", entries);
@@ -8389,9 +8417,10 @@ function tooltip_from_state(state, slot_id, mon) {
   const defense_percented_base = tooltip_stat_value_from_percent(base.defense, defense_total_percent);
   const speed_percented_base = tooltip_stat_value_from_percent(base.speed, speed_total_percent);
   const attack_stage_base = clamp_stage(Number.isFinite(mon.attackStage) ? mon.attackStage : 0);
+  const attack_stage_with_buff_entries = clamp_stage(attack_stage_base + attack_aggregate.totalStageDelta);
   const defense_stage_base = clamp_stage(Number.isFinite(mon.defenseStage) ? mon.defenseStage : 0);
   const speed_stage_base = clamp_stage(Number.isFinite(mon.speedStage) ? mon.speedStage : 0);
-  const attack_stage_for_display = weakness_active ? clamp_stage(attack_stage_base - 2) : attack_stage_base;
+  const attack_stage_for_display = weakness_active ? clamp_stage(attack_stage_with_buff_entries - 2) : attack_stage_with_buff_entries;
   const attack_value = attack_from_stage2(attack_percented_base, attack_stage_for_display);
   const defense_value = attack_from_stage2(defense_percented_base, defense_stage_base);
   const speed_value = attack_from_stage2(speed_percented_base, speed_stage_base);
@@ -9678,11 +9707,17 @@ function stat_short_label(stat) {
 function format_delta_percent(delta) {
   return `${delta >= 0 ? "+" : ""}${delta}%`;
 }
-function format_entry_multiplier(delta_percent) {
-  const percent = 100 + delta_percent;
-  const mult = percent / 100;
-  const text = Number.isInteger(mult) ? `${mult}` : mult.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
-  return `x${text}`;
+function format_stage_delta(stage_delta) {
+  return `${stage_delta >= 0 ? "+" : ""}${stage_delta} stg`;
+}
+function effect_kind_for_stat_aggregate(entry) {
+  if (entry.totalStageDelta !== 0) {
+    return entry.totalStageDelta > 0 ? "buff" : "debuff";
+  }
+  if (entry.totalDeltaPercent !== 0) {
+    return entry.totalDeltaPercent > 0 ? "buff" : "debuff";
+  }
+  return "buff";
 }
 function active_curses_for_slot(state, slot_id) {
   const input = state.activeCursesBySlot?.[slot_id];
@@ -9698,6 +9733,7 @@ function active_curses_for_slot(state, slot_id) {
 function effect_chips_for_slot(state, slot_id, opponent_slot) {
   const chips = [];
   const buff_entries = active_buff_debuffs_for_slot(state, slot_id);
+  const stat_aggregates = stat_aggregates_from_entries(buff_entries);
   const my_curses = active_curses_for_slot(state, slot_id);
   const enemy_curses = active_curses_for_slot(state, opponent_slot);
   const seeded = my_curses.some((curse) => curse.id === "leech_seed");
@@ -9721,9 +9757,22 @@ function effect_chips_for_slot(state, slot_id, opponent_slot) {
   if (arena_trapped) {
     chips.push({ label: `Arena Trap (${arena_trap_turns}t sem troca)`, kind: "debuff" });
   }
-  for (const entry of buff_entries) {
-    const label = `${stat_short_label(entry.stat)} ${format_entry_multiplier(entry.deltaPercent)} (${format_delta_percent(entry.deltaPercent)})`;
-    chips.push({ label, kind: entry.deltaPercent >= 0 ? "buff" : "debuff" });
+  for (const entry of stat_aggregates) {
+    if (entry.totalStageDelta === 0 && entry.totalDeltaPercent === 0) {
+      continue;
+    }
+    const stat_label2 = stat_short_label(entry.stat);
+    const has_stage = entry.totalStageDelta !== 0;
+    const has_percent = entry.totalDeltaPercent !== 0;
+    let label = stat_label2;
+    if (has_stage && has_percent) {
+      label = `${stat_label2} ${format_stage_delta(entry.totalStageDelta)} | ${format_delta_percent(entry.totalDeltaPercent)}`;
+    } else if (has_stage) {
+      label = `${stat_label2} ${format_stage_delta(entry.totalStageDelta)}`;
+    } else {
+      label = `${stat_label2} ${format_delta_percent(entry.totalDeltaPercent)}`;
+    }
+    chips.push({ label, kind: effect_kind_for_stat_aggregate(entry) });
   }
   const active_effects = state.activeEffectsBySlot?.[slot_id] ?? [];
   for (const effect of active_effects) {
@@ -9731,8 +9780,9 @@ function effect_chips_for_slot(state, slot_id, opponent_slot) {
     if (effect.id === "rejuvenation") {
       const raw_stack = state.rejuvenationStacks?.[slot_id];
       const stack = typeof raw_stack === "number" && Number.isFinite(raw_stack) ? Math.max(1, Math.floor(raw_stack)) : 1;
+      const regen_per_turn = stack * REJUVENATION_REGEN_PER_STACK;
       chips.push({
-        label: `${label} x${stack}`,
+        label: `Rejuv +${regen_per_turn}HP/t`,
         kind: "debuff"
       });
       continue;
