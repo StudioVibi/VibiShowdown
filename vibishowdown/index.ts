@@ -669,6 +669,8 @@ const TOOLTIP_ARMOR_BONUS_PERCENT_PER_STACK = 10;
 const TOOLTIP_STAT_MULTIPLIER_MIN_PERCENT = 25;
 const TOOLTIP_STAT_MULTIPLIER_MAX_PERCENT = 400;
 const REJUVENATION_REGEN_PER_STACK = 30;
+const LEECH_SEED_HP_DIVISOR = 8;
+const SEKYPS_DAMAGE_PER_STACK_UI = 24;
 type TooltipStatKey = "attack" | "defense" | "speed";
 type UiBuffDebuffEntry = { id: string; stat: TooltipStatKey; deltaPercent: number };
 type UiStatAggregate = {
@@ -2245,6 +2247,26 @@ function effect_chip(label: string, kind: "seeded" | "drain" | "buff" | "debuff"
 
 type EffectChipKind = "seeded" | "drain" | "buff" | "debuff";
 type EffectChipDef = { label: string; kind: EffectChipKind };
+type TagCategory = "control" | "stat" | "sustain" | "curse" | "misc";
+type TagChip = {
+  id: string;
+  label: string;
+  kind: EffectChipKind;
+  category: TagCategory;
+  order: number;
+};
+type TagContext = {
+  state: GameState;
+  slotId: PlayerSlot;
+  opponentSlot: PlayerSlot;
+  statAggregates: UiStatAggregate[];
+  myCurses: ActiveCurseUi[];
+  enemyCurses: ActiveCurseUi[];
+};
+type ActiveEffectUi = { id: string; remainingTurns: number };
+type EffectTagBuilder = (effect: ActiveEffectUi, ctx: TagContext) => TagChip[];
+type CurseTagBuilder = (curse: ActiveCurseUi, ctx: TagContext) => TagChip[];
+
 const EFFECT_UI_LABELS: Record<string, string> = {
   confuse: "Confuse",
   sleep: "Sleep",
@@ -2290,7 +2312,7 @@ function effect_kind_for_stat_aggregate(entry: UiStatAggregate): EffectChipKind 
   return "buff";
 }
 
-type ActiveCurseUi = { id: string; sourceSlot: PlayerSlot | null; stacks: number };
+type ActiveCurseUi = { id: string; sourceSlot: PlayerSlot | null; stacks: number; appliedTurn?: number };
 
 function active_curses_for_slot(state: GameState, slot_id: PlayerSlot): ActiveCurseUi[] {
   const input = state.activeCursesBySlot?.[slot_id];
@@ -2300,82 +2322,278 @@ function active_curses_for_slot(state: GameState, slot_id: PlayerSlot): ActiveCu
   return input.map((row) => ({
     id: typeof row.id === "string" ? row.id : "unknown",
     sourceSlot: row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null,
-    stacks: typeof row.stacks === "number" && Number.isFinite(row.stacks) ? Math.max(1, Math.floor(row.stacks)) : 1
+    stacks: typeof row.stacks === "number" && Number.isFinite(row.stacks) ? Math.max(1, Math.floor(row.stacks)) : 1,
+    appliedTurn:
+      typeof row.appliedTurn === "number" && Number.isFinite(row.appliedTurn) ? Math.floor(row.appliedTurn) : undefined
   }));
 }
 
+function active_effects_for_slot(state: GameState, slot_id: PlayerSlot): ActiveEffectUi[] {
+  const input = state.activeEffectsBySlot?.[slot_id];
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const normalized: ActiveEffectUi[] = [];
+  for (const row of input) {
+    const id = typeof row?.id === "string" && row.id.trim().length > 0 ? row.id : "unknown";
+    const remaining_turns =
+      typeof row?.remainingTurns === "number" && Number.isFinite(row.remainingTurns)
+        ? Math.max(1, Math.floor(row.remainingTurns))
+        : 1;
+    normalized.push({ id, remainingTurns: remaining_turns });
+  }
+  return normalized;
+}
+
+function tag_category_order(category: TagCategory): number {
+  if (category === "control") return 100;
+  if (category === "stat") return 200;
+  if (category === "sustain") return 300;
+  if (category === "curse") return 400;
+  return 500;
+}
+
+function dedupe_and_sort_tag_chips(chips: TagChip[]): TagChip[] {
+  const unique = new Map<string, TagChip>();
+  for (const chip of chips) {
+    const key = `${chip.id}|${chip.label}|${chip.kind}|${chip.category}|${chip.order}`;
+    if (!unique.has(key)) {
+      unique.set(key, chip);
+    }
+  }
+  const sorted = Array.from(unique.values());
+  sorted.sort((left, right) => {
+    const category_diff = tag_category_order(left.category) - tag_category_order(right.category);
+    if (category_diff !== 0) {
+      return category_diff;
+    }
+    if (left.order !== right.order) {
+      return left.order - right.order;
+    }
+    return left.label.localeCompare(right.label);
+  });
+  return sorted;
+}
+
+function stat_chip_label(entry: UiStatAggregate): string {
+  const parts: string[] = [stat_short_label(entry.stat)];
+  if (entry.totalStageDelta !== 0) {
+    parts.push(`stg ${entry.totalStageDelta >= 0 ? "+" : ""}${entry.totalStageDelta}`);
+  }
+  if (entry.totalDeltaPercent !== 0) {
+    parts.push(format_delta_percent(entry.totalDeltaPercent));
+  }
+  return parts.join(" | ");
+}
+
+function build_state_relation_chips(ctx: TagContext): TagChip[] {
+  const chips: TagChip[] = [];
+  const seeded = ctx.myCurses.some((curse) => curse.id === "leech_seed");
+  const draining_enemy = ctx.enemyCurses.some((curse) => curse.id === "leech_seed" && curse.sourceSlot === ctx.slotId);
+  if (seeded) {
+    chips.push({
+      id: "state_seeded",
+      label: "Seeded",
+      kind: "seeded",
+      category: "curse",
+      order: 400
+    });
+  }
+  if (draining_enemy) {
+    chips.push({
+      id: "state_drain",
+      label: "Leech+",
+      kind: "drain",
+      category: "sustain",
+      order: 320
+    });
+  }
+  return chips;
+}
+
+function build_passive_stat_chips(ctx: TagContext): TagChip[] {
+  const chips: TagChip[] = [];
+  const armor_stacks = Math.max(0, ctx.state.typePassiveArmorStacks?.[ctx.slotId] ?? 0);
+  const regen_stacks = Math.max(0, ctx.state.typePassiveRegenStacks?.[ctx.slotId] ?? 0);
+  const arena_trapped = is_slot_arena_trapped_for_ui(ctx.state, ctx.slotId);
+  const arena_trap_turns = arena_trap_remaining_turns(ctx.state, ctx.slotId);
+
+  if (armor_stacks > 0) {
+    chips.push({
+      id: "passive_armor",
+      label: `Armor | +${armor_stacks * 10}%`,
+      kind: "buff",
+      category: "stat",
+      order: 210
+    });
+  }
+  if (regen_stacks > 0) {
+    chips.push({
+      id: "passive_regen",
+      label: `Regen | +${regen_stacks * 5}/turn`,
+      kind: "buff",
+      category: "sustain",
+      order: 330
+    });
+  }
+  if (arena_trapped) {
+    chips.push({
+      id: "debuff_arena_trap",
+      label: `Arena Trap | ${arena_trap_turns}t sem troca`,
+      kind: "debuff",
+      category: "control",
+      order: 110
+    });
+  }
+  return chips;
+}
+
+function build_stat_aggregate_chips(ctx: TagContext): TagChip[] {
+  const chips: TagChip[] = [];
+  for (const entry of ctx.statAggregates) {
+    if (entry.totalStageDelta === 0 && entry.totalDeltaPercent === 0) {
+      continue;
+    }
+    chips.push({
+      id: `stat_${entry.stat}`,
+      label: stat_chip_label(entry),
+      kind: effect_kind_for_stat_aggregate(entry),
+      category: "stat",
+      order: entry.stat === "attack" ? 201 : entry.stat === "defense" ? 202 : 203
+    });
+  }
+  return chips;
+}
+
+function effect_default_tag_builder(effect: ActiveEffectUi): TagChip[] {
+  const label = EFFECT_UI_LABELS[effect.id] ?? effect.id;
+  return [
+    {
+      id: `effect_${effect.id}`,
+      label: `${label} | ${effect.remainingTurns}t`,
+      kind: "debuff",
+      category: "control",
+      order: 120
+    }
+  ];
+}
+
+function effect_rejuvenation_tag_builder(_: ActiveEffectUi, ctx: TagContext): TagChip[] {
+  const raw_stack = ctx.state.rejuvenationStacks?.[ctx.slotId];
+  const stack = typeof raw_stack === "number" && Number.isFinite(raw_stack) ? Math.max(1, Math.floor(raw_stack)) : 1;
+  const regen_per_turn = stack * REJUVENATION_REGEN_PER_STACK;
+  return [
+    {
+      id: "effect_rejuvenation",
+      label: `Rejuv | +${regen_per_turn} HP/t`,
+      kind: "buff",
+      category: "sustain",
+      order: 310
+    }
+  ];
+}
+
+const EFFECT_TAG_BUILDERS: Record<string, EffectTagBuilder> = {
+  rejuvenation: effect_rejuvenation_tag_builder
+};
+
+function build_effect_chips(ctx: TagContext): TagChip[] {
+  const chips: TagChip[] = [];
+  const effects = active_effects_for_slot(ctx.state, ctx.slotId);
+  for (const effect of effects) {
+    const builder = EFFECT_TAG_BUILDERS[effect.id] ?? effect_default_tag_builder;
+    chips.push(...builder(effect, ctx));
+  }
+  return chips;
+}
+
+function curse_default_tag_builder(curse: ActiveCurseUi): TagChip[] {
+  const label = CURSE_UI_LABELS[curse.id] ?? curse.id;
+  const suffix = curse.stacks > 1 ? ` | x${curse.stacks}` : "";
+  return [
+    {
+      id: `curse_${curse.id}`,
+      label: `${label}${suffix}`,
+      kind: "debuff",
+      category: "curse",
+      order: 410
+    }
+  ];
+}
+
+function curse_leech_seed_tag_builder(curse: ActiveCurseUi, ctx: TagContext): TagChip[] {
+  const max_hp = Math.max(1, Math.floor(ctx.state.players[ctx.slotId]?.sharedHpMax ?? 1));
+  const stacks = Math.max(1, Math.floor(curse.stacks));
+  const hp_per_turn = Math.max(0, Math.floor(max_hp / LEECH_SEED_HP_DIVISOR) * stacks);
+  return [
+    {
+      id: "curse_leech_seed",
+      label: `Leech Seed | -${hp_per_turn} HP/t`,
+      kind: "debuff",
+      category: "curse",
+      order: 405
+    }
+  ];
+}
+
+function curse_sekyps_tag_builder(curse: ActiveCurseUi, ctx: TagContext): TagChip[] {
+  const stacks = Math.max(1, Math.floor(curse.stacks));
+  const state_turn = Number.isFinite(ctx.state.turn) ? Math.floor(ctx.state.turn) : 0;
+  const applied_this_turn = typeof curse.appliedTurn === "number" && curse.appliedTurn === state_turn;
+  const ticking_stacks = applied_this_turn ? Math.max(0, stacks - 1) : stacks;
+  const hp_per_turn = Math.max(0, ticking_stacks * SEKYPS_DAMAGE_PER_STACK_UI);
+  return [
+    {
+      id: "curse_sekyps",
+      label: `Sekyps | -${hp_per_turn} HP/t`,
+      kind: "debuff",
+      category: "curse",
+      order: 406
+    }
+  ];
+}
+
+const CURSE_TAG_BUILDERS: Record<string, CurseTagBuilder> = {
+  leech_seed: curse_leech_seed_tag_builder,
+  sekyps: curse_sekyps_tag_builder
+};
+
+function build_curse_chips(ctx: TagContext): TagChip[] {
+  const chips: TagChip[] = [];
+  for (const curse of ctx.myCurses) {
+    const builder = CURSE_TAG_BUILDERS[curse.id] ?? curse_default_tag_builder;
+    chips.push(...builder(curse, ctx));
+  }
+  return chips;
+}
+
+function build_tag_chips(ctx: TagContext): TagChip[] {
+  return dedupe_and_sort_tag_chips([
+    ...build_state_relation_chips(ctx),
+    ...build_passive_stat_chips(ctx),
+    ...build_stat_aggregate_chips(ctx),
+    ...build_effect_chips(ctx),
+    ...build_curse_chips(ctx)
+  ]);
+}
+
 function effect_chips_for_slot(state: GameState, slot_id: PlayerSlot, opponent_slot: PlayerSlot): EffectChipDef[] {
-  const chips: EffectChipDef[] = [];
   const buff_entries = active_buff_debuffs_for_slot(state, slot_id);
   const stat_aggregates = stat_aggregates_from_entries(buff_entries);
   const my_curses = active_curses_for_slot(state, slot_id);
   const enemy_curses = active_curses_for_slot(state, opponent_slot);
-  const seeded = my_curses.some((curse) => curse.id === "leech_seed");
-  const draining_enemy =
-    enemy_curses.find((curse) => curse.id === "leech_seed" && curse.sourceSlot === slot_id) ?? null;
-  const armor_stacks = Math.max(0, state.typePassiveArmorStacks?.[slot_id] ?? 0);
-  const regen_stacks = Math.max(0, state.typePassiveRegenStacks?.[slot_id] ?? 0);
-  const arena_trapped = is_slot_arena_trapped_for_ui(state, slot_id);
-  const arena_trap_turns = arena_trap_remaining_turns(state, slot_id);
-
-  if (seeded) {
-    chips.push({ label: "Seeded", kind: "seeded" });
-  }
-  if (draining_enemy) {
-    chips.push({ label: `Leech+${draining_enemy.stacks > 1 ? ` x${draining_enemy.stacks}` : ""}`, kind: "drain" });
-  }
-  if (armor_stacks > 0) {
-    chips.push({ label: `Armor +${armor_stacks * 10}%`, kind: "buff" });
-  }
-  if (regen_stacks > 0) {
-    chips.push({ label: `Regen +${regen_stacks * 5}/turn`, kind: "buff" });
-  }
-  if (arena_trapped) {
-    chips.push({ label: `Arena Trap (${arena_trap_turns}t sem troca)`, kind: "debuff" });
-  }
-  for (const entry of stat_aggregates) {
-    if (entry.totalStageDelta === 0 && entry.totalDeltaPercent === 0) {
-      continue;
-    }
-    const stat_label = stat_short_label(entry.stat);
-    const has_stage = entry.totalStageDelta !== 0;
-    const has_percent = entry.totalDeltaPercent !== 0;
-    let label = stat_label;
-    if (has_stage && has_percent) {
-      label = `${stat_label} ${format_stage_delta(entry.totalStageDelta)} | ${format_delta_percent(entry.totalDeltaPercent)}`;
-    } else if (has_stage) {
-      label = `${stat_label} ${format_stage_delta(entry.totalStageDelta)}`;
-    } else {
-      label = `${stat_label} ${format_delta_percent(entry.totalDeltaPercent)}`;
-    }
-    chips.push({ label, kind: effect_kind_for_stat_aggregate(entry) });
-  }
-  const active_effects = state.activeEffectsBySlot?.[slot_id] ?? [];
-  for (const effect of active_effects) {
-    const label = EFFECT_UI_LABELS[effect.id] ?? effect.id;
-    if (effect.id === "rejuvenation") {
-      const raw_stack = state.rejuvenationStacks?.[slot_id];
-      const stack =
-        typeof raw_stack === "number" && Number.isFinite(raw_stack) ? Math.max(1, Math.floor(raw_stack)) : 1;
-      const regen_per_turn = stack * REJUVENATION_REGEN_PER_STACK;
-      chips.push({
-        label: `Rejuv +${regen_per_turn}HP/t`,
-        kind: "debuff"
-      });
-      continue;
-    }
-    const turns = Math.max(1, Number.isFinite(effect.remainingTurns) ? Math.floor(effect.remainingTurns) : 1);
-    chips.push({
-      label: `${label} (${turns}t)`,
-      kind: "debuff"
-    });
-  }
-  for (const curse of my_curses) {
-    const label = CURSE_UI_LABELS[curse.id] ?? curse.id;
-    const suffix = curse.stacks > 1 ? ` x${curse.stacks}` : "";
-    chips.push({ label: `${label}${suffix}`, kind: "debuff" });
-  }
-  return chips;
+  const tag_chips = build_tag_chips({
+    state,
+    slotId: slot_id,
+    opponentSlot: opponent_slot,
+    statAggregates: stat_aggregates,
+    myCurses: my_curses,
+    enemyCurses: enemy_curses
+  });
+  return tag_chips.map((chip) => ({
+    label: chip.label,
+    kind: chip.kind
+  }));
 }
 
 function render_effect_chip_list(container: HTMLDivElement | null, chips: EffectChipDef[]): void {
