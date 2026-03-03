@@ -123,7 +123,7 @@ const MSPE_GAP_GOAL_PERCENT = 33;
 const RUN_MSPE_GAIN_PERCENT = 10;
 const HOOK_RUN_MSPE_REDUCTION_PERCENT = 20;
 const HOOK_EXPOSURE_INCOMING_DAMAGE_MULTIPLIER_PERCENT = 166;
-const HOOK_SELF_SPEED_REDUCTION_PERCENT = 10;
+const HOOK_SELF_MSPE_REDUCTION_PERCENT = 10;
 const SEKYPS_DAMAGE_PER_STACK = 24;
 const REJUVENATION_REGEN_FLAT_PER_STACK = 30;
 const REJUVENATION_REGEN_STACK_MAX = 3;
@@ -3699,38 +3699,25 @@ function apply_move(
     const target_slot = other_slot(player_slot);
     const target_player = state.players[target_slot];
     const target = active_monster(target_player);
+    const self_player = state.players[player_slot];
     hook_run_blocked_this_turn[target_slot] = true;
     incoming_damage_multiplier_percent[player_slot] = Math.max(
       HOOK_EXPOSURE_INCOMING_DAMAGE_MULTIPLIER_PERCENT,
       normalize_int(incoming_damage_multiplier_percent[player_slot], 100, 0)
     );
-    refresh_active_monster_stats_for_slot(state, player_slot);
-    const before_self_speed = attacker.speed;
-    apply_buff_debuff_component(
-      state,
-      log,
-      player_slot,
-      {
-        kind: "buff_debuff",
-        id: "hook_self_speed_down",
-        target: "self",
-        stat: "speed",
-        deltaPercent: -HOOK_SELF_SPEED_REDUCTION_PERCENT,
-        clearsOnSwitch: false
-      },
-      player_slot,
-      spec.id,
-      { targetMonsterId: attacker.id }
-    );
-    refresh_active_monster_stats_for_slot(state, player_slot);
-    const after_self_speed = attacker.speed;
+    const before_self_mSPE = Math.max(0, normalize_int(self_player.sharedMSPE, SHARED_MSPE_START, 0));
+    const self_mSPE_reduction =
+      before_self_mSPE > 0
+        ? Math.max(1, mul_div_floor(before_self_mSPE, HOOK_SELF_MSPE_REDUCTION_PERCENT, 100))
+        : 0;
+    const after_self_mSPE = sync_player_shared_mSPE(state, player_slot, before_self_mSPE - self_mSPE_reduction);
     log.push({
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
       summary:
         `Hook: blocks enemy Run; if target attempts Run then mSPE -${HOOK_RUN_MSPE_REDUCTION_PERCENT}% | ` +
-        `self gains Exposicao (+66% incoming damage in attack phases) and DEX -${HOOK_SELF_SPEED_REDUCTION_PERCENT}%`,
+        `self gains Exposicao (+66% incoming damage in attack phases) and mSPE -${HOOK_SELF_MSPE_REDUCTION_PERCENT}%`,
       data: {
         move: spec.id,
         slot: player_slot,
@@ -3740,9 +3727,9 @@ function apply_move(
         blocksRunThisTurn: true,
         runMSPEReductionPercentOnAttempt: HOOK_RUN_MSPE_REDUCTION_PERCENT,
         selfIncomingDamagePercentInAttackPhases: incoming_damage_multiplier_percent[player_slot],
-        selfSpeedBefore: before_self_speed,
-        selfSpeedAfter: after_self_speed,
-        selfSpeedDeltaPercent: -HOOK_SELF_SPEED_REDUCTION_PERCENT
+        selfMSPEBefore: before_self_mSPE,
+        selfMSPEAfter: after_self_mSPE,
+        selfMSPEDeltaPercent: -HOOK_SELF_MSPE_REDUCTION_PERCENT
       }
     });
     finalize_move_success();

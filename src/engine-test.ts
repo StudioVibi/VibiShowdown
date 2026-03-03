@@ -173,16 +173,25 @@ function first_player_damage(log: EventLog[]): number | null {
 
 {
   const state = create_running_state(["hook", "none", "none"], ["none", "none", "none"]);
+  const before_self_mSPE = state.players.player1.sharedMSPE;
   const after_hook = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 })).state;
+  const after_self_mSPE = after_hook.players.player1.sharedMSPE;
   const armoth = after_hook.players.player1.team[0];
   const kairus = after_hook.players.player1.team[1];
-  assert(armoth.speed < armoth.baseSpeed, "hook should reduce speed for the caster");
-  assert_equal(kairus.speed, kairus.baseSpeed, "hook should not affect bench monster speed");
+  assert_equal(after_self_mSPE, 90, "hook should reduce caster shared mSPE by 10%");
+  assert(after_self_mSPE < before_self_mSPE, "hook should lower caster shared mSPE");
+  assert_equal(armoth.mSPE, after_self_mSPE, "hook mSPE penalty should affect active monster");
+  assert_equal(kairus.mSPE, after_self_mSPE, "hook mSPE penalty should affect bench monster (shared resource)");
+  assert_equal(armoth.speed, armoth.baseSpeed, "hook should not change caster DEX");
+  assert_equal(kairus.speed, kairus.baseSpeed, "hook should not change bench DEX");
 
   const after_switch_out = resolve_turn(after_hook, p1_intent({ action: "switch", targetIndex: 1 })).state;
   const after_switch_back = resolve_turn(after_switch_out, p1_intent({ action: "switch", targetIndex: 0 })).state;
-  const armoth_back = after_switch_back.players.player1.team[0];
-  assert(armoth_back.speed < armoth_back.baseSpeed, "hook speed debuff should persist after switching out and back");
+  assert_equal(
+    after_switch_back.players.player1.sharedMSPE,
+    after_self_mSPE,
+    "hook self mSPE penalty should persist after switching out and back"
+  );
 }
 
 {
