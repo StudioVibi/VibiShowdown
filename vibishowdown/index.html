@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Vibi Showdown</title>
     <style>
-      @import url("https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=Space+Mono:wght@400;700&display=swap");
+      @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&display=swap");
 
       :root {
         --bg-1: #0f1014;
@@ -1679,6 +1679,184 @@
             0 0 0 rgba(255, 92, 92, 0),
             0 0 0 rgba(255, 92, 92, 0);
         }
+      }
+
+      /* Solarized Light + Vim-like Mono theme overrides */
+      :root {
+        --bg-1: #fdf6e3;
+        --bg-2: #eee8d5;
+        --panel: #f4ecd8;
+        --panel-2: #eee4cf;
+        --accent: #b58900;
+        --accent-2: #268bd2;
+        --text: #586e75;
+        --muted: #657b83;
+        --danger: #dc322f;
+        --ok: #859900;
+        --shadow: rgba(88, 110, 117, 0.2);
+      }
+
+      body,
+      button,
+      input,
+      select,
+      textarea {
+        font-family: "JetBrains Mono", "Fira Code", "Iosevka", "Cascadia Mono", monospace;
+      }
+
+      body {
+        color: var(--text);
+        background:
+          radial-gradient(circle at 8% 0%, rgba(38, 139, 210, 0.15) 0%, rgba(38, 139, 210, 0) 44%),
+          radial-gradient(circle at 92% 100%, rgba(181, 137, 0, 0.16) 0%, rgba(181, 137, 0, 0) 48%),
+          linear-gradient(180deg, #fdf6e3 0%, #f4edd9 100%);
+      }
+
+      #game {
+        background: linear-gradient(160deg, #fdf6e3 0%, #efe4cd 72%);
+        border: 1px solid rgba(101, 123, 131, 0.24);
+        box-shadow: 0 22px 52px var(--shadow);
+      }
+
+      .panel,
+      .arena,
+      .setup-card,
+      .side-panel > *,
+      .chat,
+      .switch-panel {
+        background: rgba(253, 246, 227, 0.9);
+        border: 1px solid rgba(101, 123, 131, 0.2);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
+      }
+
+      .arena {
+        background: linear-gradient(155deg, rgba(253, 246, 227, 0.98) 0%, rgba(238, 232, 213, 0.94) 100%);
+      }
+
+      .sprite {
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.65), rgba(238, 232, 213, 0.9));
+      }
+
+      .sprite img {
+        filter: drop-shadow(0 8px 14px rgba(88, 110, 117, 0.25));
+      }
+
+      .hp-bar {
+        background: rgba(101, 123, 131, 0.18);
+      }
+
+      .hp-bar span {
+        background: linear-gradient(90deg, #859900 0%, #b58900 62%, #dc322f 100%);
+      }
+
+      .bench-slot,
+      .action-pad,
+      .chat-input input,
+      .chat-input button,
+      .switch-option,
+      .switch-close,
+      .spec-view-btn,
+      #reset-status-btn,
+      #turn-seconds-input,
+      .chat-messages p,
+      .participants-list li,
+      .config-grid input,
+      .config-grid select {
+        background: rgba(238, 232, 213, 0.85);
+        border-color: rgba(101, 123, 131, 0.24);
+        color: var(--text);
+      }
+
+      .action-pad .action-btn {
+        background: linear-gradient(180deg, #fdf6e3 0%, #eee8d5 100%);
+        border: 1px solid rgba(101, 123, 131, 0.26);
+        color: var(--text);
+      }
+
+      .action-pad .action-btn.selected-intent {
+        box-shadow:
+          inset 0 0 0 2px rgba(38, 139, 210, 0.72),
+          0 0 0 1px rgba(255, 255, 255, 0.55);
+      }
+
+      .action-pad .action-btn.danger {
+        background: linear-gradient(140deg, #dc322f, #cb4b16);
+        color: #fdf6e3;
+      }
+
+      #ready-btn {
+        background: linear-gradient(135deg, #b58900, #cb4b16);
+        color: #fdf6e3;
+      }
+
+      .status-line,
+      #status-mSPE {
+        color: var(--accent-2);
+      }
+
+      .status-pill {
+        border-color: rgba(101, 123, 131, 0.25);
+        color: var(--text);
+      }
+
+      .status-pill.ok {
+        background: rgba(133, 153, 0, 0.2);
+        border-color: rgba(133, 153, 0, 0.44);
+      }
+
+      .status-pill.warn {
+        background: rgba(181, 137, 0, 0.2);
+        border-color: rgba(181, 137, 0, 0.45);
+      }
+
+      .status-pill.off {
+        background: rgba(101, 123, 131, 0.12);
+      }
+
+      .effect-chip {
+        border-color: rgba(101, 123, 131, 0.24);
+        background: rgba(238, 232, 213, 0.95);
+        color: var(--text);
+      }
+
+      .effect-chip.seeded,
+      .effect-chip.buff {
+        background: rgba(133, 153, 0, 0.2);
+        border-color: rgba(133, 153, 0, 0.44);
+      }
+
+      .effect-chip.drain {
+        background: rgba(42, 161, 152, 0.2);
+        border-color: rgba(42, 161, 152, 0.44);
+      }
+
+      .effect-chip.debuff {
+        background: rgba(220, 50, 47, 0.17);
+        border-color: rgba(220, 50, 47, 0.4);
+      }
+
+      .effect-dot {
+        background: #859900;
+      }
+
+      .effect-chip.debuff .effect-dot {
+        background: #dc322f;
+      }
+
+      .effect-chip.drain .effect-dot {
+        background: #2aa198;
+      }
+
+      .chat-messages p.log-user {
+        background: rgba(181, 137, 0, 0.18);
+      }
+
+      .chat-messages p.log-clear-body {
+        background: rgba(42, 161, 152, 0.16);
+      }
+
+      .chat-input input::placeholder {
+        color: rgba(88, 110, 117, 0.68);
       }
 
       @media (max-width: 680px) {
