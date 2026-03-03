@@ -2362,7 +2362,7 @@ var MONSTER_ROSTER = [
     role: "Valkyria ATK Template",
     type: "atk",
     stats: { level: 12, maxHp: 242, attack: 115, defense: 75, speed: 75 },
-    possibleMoves: ["punch", "heal", "run", "none"],
+    possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["punch", "heal", "none", "run"],
     defaultPassive: "none"
@@ -2373,7 +2373,7 @@ var MONSTER_ROSTER = [
     role: "Baby Dragon BUF Template",
     type: "buf",
     stats: { level: 12, maxHp: 85, attack: 85, defense: 85, speed: 85 },
-    possibleMoves: ["power", "ki_blast", "run", "none"],
+    possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["power", "ki_blast", "none", "run"],
     defaultPassive: "none"
@@ -2384,7 +2384,7 @@ var MONSTER_ROSTER = [
     role: "Cloyster Template",
     type: "def",
     stats: { level: 12, maxHp: 117, attack: 50, defense: 160, speed: 70 },
-    possibleMoves: ["bait", "seismic_toss", "run", "none"],
+    possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["bait", "seismic_toss", "none", "run"],
     defaultPassive: "none"
@@ -2395,7 +2395,7 @@ var MONSTER_ROSTER = [
     role: "Absol Template",
     type: "atk",
     stats: { level: 12, maxHp: 180, attack: 115, defense: 75, speed: 130 },
-    possibleMoves: ["kick", "throw", "run", "none"],
+    possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["kick", "throw", "none", "run"],
     defaultPassive: "none"
@@ -2406,7 +2406,7 @@ var MONSTER_ROSTER = [
     role: "Celebi Template",
     type: "buf",
     stats: { level: 12, maxHp: 325, attack: 100, defense: 100, speed: 100 },
-    possibleMoves: ["switch_sovietico", "team_cure", "run", "none"],
+    possibleMoves: all_move_options(),
     possiblePassives: ["none"],
     defaultMoves: ["switch_sovietico", "team_cure", "none", "run"],
     defaultPassive: "none"
@@ -2780,7 +2780,13 @@ var CURSE_LABELS = {
   endure: "Endure"
 };
 var NEGATIVE_STAT_EFFECT_ID_SET = new Set(["weakness", "deterioration", "paralyse"]);
-var LEGACY_ATTACK_STAGE_BUFF_IDS = new Set(["power_attack_up", "meditate_attack_up", "belly_drum_attack_up"]);
+var ATTACK_STAGE_BUFF_IDS = new Set([
+  "power_attack_up",
+  "power_attack_stage_up",
+  "meditate_attack_up",
+  "belly_drum_attack_up"
+]);
+var POWER_ATTACK_STAGE_BUFF_IDS = new Set(["power_attack_up", "power_attack_stage_up"]);
 function clamp_stat_stage(value) {
   return Math.max(STAT_STAGE_MIN, Math.min(STAT_STAGE_MAX, value));
 }
@@ -2822,13 +2828,41 @@ function stat_value_from_delta_percent_and_stage(base_value, delta_percent, stag
   const value_after_percent = stat_value_from_delta_percent(base_value, delta_percent);
   return stat_value_from_stage(value_after_percent, stage);
 }
-function total_delta_percent_from_buff_debuffs(state, slot, stat) {
+function entry_targets_monster(entry, monster_id) {
+  return typeof entry.targetMonsterId !== "string" || entry.targetMonsterId.length === 0 || entry.targetMonsterId === monster_id;
+}
+function buff_debuff_entries_for_monster(state, slot, monster_id) {
+  return buff_debuff_list(state, slot).filter((entry) => entry_targets_monster(entry, monster_id));
+}
+function power_attack_stage_bonus_from_entries(entries) {
+  let bonus = 0;
+  for (const entry of entries) {
+    if (entry.stat !== "attack") {
+      continue;
+    }
+    if (!POWER_ATTACK_STAGE_BUFF_IDS.has(entry.id)) {
+      continue;
+    }
+    bonus += POWER_ATTACK_STAGE_PER_CAST;
+  }
+  return bonus;
+}
+function effective_attack_stage_for_monster(state, slot, monster) {
+  const attack_delta = total_delta_percent_from_buff_debuffs(state, slot, "attack", monster.id);
+  const attack_base_after_percent = stat_value_from_delta_percent(monster.baseAttack, attack_delta);
+  const attack_stage_fallback = infer_stage_from_attack(monster.attack, attack_base_after_percent);
+  const attack_stage = normalize_stat_stage(monster.attackStage, attack_stage_fallback);
+  const power_bonus = power_attack_stage_bonus_from_entries(buff_debuff_entries_for_monster(state, slot, monster.id));
+  return clamp_stat_stage(attack_stage + power_bonus);
+}
+function total_delta_percent_from_buff_debuffs(state, slot, stat, monster_id) {
+  const resolved_monster_id = monster_id ?? active_monster(state.players[slot]).id;
   let total = 0;
-  for (const entry of buff_debuff_list(state, slot)) {
+  for (const entry of buff_debuff_entries_for_monster(state, slot, resolved_monster_id)) {
     if (entry.stat !== stat) {
       continue;
     }
-    if (stat === "attack" && LEGACY_ATTACK_STAGE_BUFF_IDS.has(entry.id)) {
+    if (stat === "attack" && ATTACK_STAGE_BUFF_IDS.has(entry.id)) {
       continue;
     }
     total += entry.deltaPercent;
@@ -2837,24 +2871,27 @@ function total_delta_percent_from_buff_debuffs(state, slot, stat) {
 }
 function refresh_active_monster_stats_for_slot(state, slot) {
   const monster = active_monster(state.players[slot]);
-  const attack_delta = total_delta_percent_from_buff_debuffs(state, slot, "attack");
-  const defense_delta = total_delta_percent_from_buff_debuffs(state, slot, "defense");
-  const speed_delta = total_delta_percent_from_buff_debuffs(state, slot, "speed");
+  const entries = buff_debuff_entries_for_monster(state, slot, monster.id);
+  const attack_delta = total_delta_percent_from_buff_debuffs(state, slot, "attack", monster.id);
+  const defense_delta = total_delta_percent_from_buff_debuffs(state, slot, "defense", monster.id);
+  const speed_delta = total_delta_percent_from_buff_debuffs(state, slot, "speed", monster.id);
   const attack_base_after_percent = stat_value_from_delta_percent(monster.baseAttack, attack_delta);
   const attack_stage_fallback = infer_stage_from_attack(monster.attack, attack_base_after_percent);
   const attack_stage = normalize_stat_stage(monster.attackStage, attack_stage_fallback);
+  const power_attack_stage_bonus = power_attack_stage_bonus_from_entries(entries);
+  const effective_attack_stage = clamp_stat_stage(attack_stage + power_attack_stage_bonus);
   const defense_stage = normalize_stat_stage(monster.defenseStage, 0);
   const speed_stage = normalize_stat_stage(monster.speedStage, 0);
   monster.attackStage = attack_stage;
   monster.defenseStage = defense_stage;
   monster.speedStage = speed_stage;
-  monster.attack = stat_value_from_delta_percent_and_stage(monster.baseAttack, attack_delta, attack_stage);
+  monster.attack = stat_value_from_delta_percent_and_stage(monster.baseAttack, attack_delta, effective_attack_stage);
   monster.defense = stat_value_from_delta_percent_and_stage(monster.baseDefense, defense_delta, defense_stage);
   monster.speed = stat_value_from_delta_percent_and_stage(monster.baseSpeed, speed_delta, speed_stage);
-  monster.agilityBoostActive = buff_debuff_list(state, slot).some((entry) => entry.id === "agility_speed_up");
-  monster.endureSpeedBoostActive = buff_debuff_list(state, slot).some((entry) => entry.id === "endure_speed_up");
-  monster.bellyDrumActive = attack_stage >= STAT_STAGE_MAX || buff_debuff_list(state, slot).some((entry) => entry.id === "belly_drum_attack_up");
-  monster.screechDebuffActive = buff_debuff_list(state, slot).some((entry) => entry.id === "screech_def_down");
+  monster.agilityBoostActive = entries.some((entry) => entry.id === "agility_speed_up");
+  monster.endureSpeedBoostActive = entries.some((entry) => entry.id === "endure_speed_up");
+  monster.bellyDrumActive = effective_attack_stage >= STAT_STAGE_MAX || entries.some((entry) => entry.id === "belly_drum_attack_up");
+  monster.screechDebuffActive = entries.some((entry) => entry.id === "screech_def_down");
 }
 function refresh_active_monster_stats(state) {
   refresh_active_monster_stats_for_slot(state, "player1");
@@ -3089,16 +3126,15 @@ function normalize_active_buff_debuffs(input) {
     const raw_delta = typeof row.deltaPercent === "number" ? row.deltaPercent : 0;
     const delta = normalize_int(raw_delta, 0, -1e6);
     const clears_on_switch = row.clearsOnSwitch === true;
-    if (!clears_on_switch) {
-      continue;
-    }
+    const target_monster_id = typeof row.targetMonsterId === "string" && row.targetMonsterId.trim().length > 0 ? row.targetMonsterId : undefined;
     normalized.push({
       id: row.id,
       sourceSlot: source_slot,
       source,
       stat: row.stat,
       deltaPercent: delta,
-      clearsOnSwitch: true
+      clearsOnSwitch: clears_on_switch,
+      ...target_monster_id ? { targetMonsterId: target_monster_id } : {}
     });
   }
   return normalized;
@@ -3544,18 +3580,21 @@ function stat_value_for_active_monster(monster, stat) {
     return monster.defense;
   return monster.speed;
 }
-function apply_buff_debuff_component(state, log, target_slot, collateral, source_slot, source_move_id) {
+function apply_buff_debuff_component(state, log, target_slot, collateral, source_slot, source_move_id, options) {
   ensure_state_runtime_defaults(state);
   const target = active_monster(state.players[target_slot]);
   refresh_active_monster_stats_for_slot(state, target_slot);
   const before = stat_value_for_active_monster(target, collateral.stat);
+  const clears_on_switch = collateral.clearsOnSwitch === true;
+  const target_monster_id = typeof options?.targetMonsterId === "string" ? options.targetMonsterId : undefined;
   state.activeBuffDebuffsBySlot[target_slot].push({
     id: collateral.id,
     sourceSlot: source_slot,
     source: source_move_id,
     stat: collateral.stat,
     deltaPercent: collateral.deltaPercent,
-    clearsOnSwitch: true
+    clearsOnSwitch: clears_on_switch,
+    ...target_monster_id ? { targetMonsterId: target_monster_id } : {}
   });
   refresh_active_monster_stats_for_slot(state, target_slot);
   const after = stat_value_for_active_monster(target, collateral.stat);
@@ -4339,9 +4378,10 @@ function check_zero_hp_match_result(state, log) {
 }
 function effective_attack_for_slot(state, slot, monster) {
   refresh_active_monster_stats_for_slot(state, slot);
+  const effective_stage = effective_attack_stage_for_monster(state, slot, monster);
   if (has_effect(state, slot, "weakness")) {
-    const weakened_stage = clamp_stat_stage(monster.attackStage - 2);
-    const attack_delta = total_delta_percent_from_buff_debuffs(state, slot, "attack");
+    const weakened_stage = clamp_stat_stage(effective_stage - 2);
+    const attack_delta = total_delta_percent_from_buff_debuffs(state, slot, "attack", monster.id);
     const attack_base_after_percent = stat_value_from_delta_percent(monster.baseAttack, attack_delta);
     return attack_from_stage(attack_base_after_percent, weakened_stage);
   }
@@ -4562,8 +4602,12 @@ function clear_buff_debuffs_on_target_switch(state, log, target_slot) {
   if (!Array.isArray(active) || active.length === 0) {
     return;
   }
-  const removed = active.length;
-  state.activeBuffDebuffsBySlot[target_slot] = [];
+  const kept = active.filter((entry) => entry.clearsOnSwitch !== true);
+  const removed = active.length - kept.length;
+  if (removed <= 0) {
+    return;
+  }
+  state.activeBuffDebuffsBySlot[target_slot] = kept;
   refresh_active_monster_stats_for_slot(state, target_slot);
   log.push({
     type: "buff_debuff_end",
@@ -4597,7 +4641,7 @@ function clear_buff_debuffs_for_stat(state, slot, stat) {
   if (!Array.isArray(before) || before.length === 0) {
     return 0;
   }
-  const filtered = before.filter((entry) => entry.stat !== stat);
+  const filtered = before.filter((entry) => entry.stat !== stat || entry.clearsOnSwitch !== true);
   const removed = before.length - filtered.length;
   if (removed > 0) {
     state.activeBuffDebuffsBySlot[slot] = filtered;
@@ -5351,28 +5395,19 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
   }
   if (spec.id === "power") {
     ensure_state_runtime_defaults(state);
-    state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter((entry) => !(entry.id === "power_attack_up" && entry.stat === "attack"));
     refresh_active_monster_stats_for_slot(state, player_slot);
-    const before_stage = attacker.attackStage;
+    const before_stage = effective_attack_stage_for_monster(state, player_slot, attacker);
     const before_attack = attacker.attack;
     const before_speed = attacker.speed;
-    if (before_stage < STAT_STAGE_MAX && POWER_ATTACK_STAGE_PER_CAST > 0) {
-      attacker.attackStage = clamp_stat_stage(before_stage + POWER_ATTACK_STAGE_PER_CAST);
-      refresh_active_monster_stats_for_slot(state, player_slot);
-      log.push({
-        type: "stat_mod",
-        turn: state.turn,
-        phase: spec.phaseId,
-        summary: `${attacker.name} ATK stage ${before_stage} -> ${attacker.attackStage}`,
-        data: {
-          slot: player_slot,
-          target: attacker.id,
-          stat: "attack",
-          stageBefore: before_stage,
-          stageAfter: attacker.attackStage,
-          before: before_attack,
-          after: attacker.attack
-        }
+    if (before_stage < STAT_STAGE_MAX) {
+      state.activeBuffDebuffsBySlot[player_slot].push({
+        id: "power_attack_stage_up",
+        sourceSlot: player_slot,
+        source: spec.id,
+        stat: "attack",
+        deltaPercent: 0,
+        clearsOnSwitch: false,
+        targetMonsterId: attacker.id
       });
     }
     apply_buff_debuff_component(state, log, player_slot, {
@@ -5381,11 +5416,29 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
       target: "self",
       stat: "speed",
       deltaPercent: -10,
-      clearsOnSwitch: true
-    }, player_slot, spec.id);
-    const after_stage = attacker.attackStage;
+      clearsOnSwitch: false
+    }, player_slot, spec.id, { targetMonsterId: attacker.id });
+    refresh_active_monster_stats_for_slot(state, player_slot);
+    const after_stage = effective_attack_stage_for_monster(state, player_slot, attacker);
     const after_attack = attacker.attack;
     const after_speed = attacker.speed;
+    if (after_stage !== before_stage || after_attack !== before_attack) {
+      log.push({
+        type: "stat_mod",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `${attacker.name} ATK stage ${before_stage} -> ${after_stage}`,
+        data: {
+          slot: player_slot,
+          target: attacker.id,
+          stat: "attack",
+          stageBefore: before_stage,
+          stageAfter: after_stage,
+          before: before_attack,
+          after: after_attack
+        }
+      });
+    }
     log.push({
       type: "move_detail",
       turn: state.turn,
@@ -5453,7 +5506,7 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     const buff_debuffs_before = state.activeBuffDebuffsBySlot[player_slot].length;
     state.activeEffectsBySlot[player_slot] = effects_before.filter((entry) => !is_negative_stat_effect_id(entry.id));
     const effects_removed = Math.max(0, effects_before.length - state.activeEffectsBySlot[player_slot].length);
-    state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter((entry) => !is_negative_stat_buff_debuff(entry));
+    state.activeBuffDebuffsBySlot[player_slot] = state.activeBuffDebuffsBySlot[player_slot].filter((entry) => !(entry.clearsOnSwitch === true && is_negative_stat_buff_debuff(entry)));
     const buff_debuffs_removed = Math.max(0, buff_debuffs_before - state.activeBuffDebuffsBySlot[player_slot].length);
     refresh_active_monster_stats_for_slot(state, player_slot);
     log.push({
@@ -8196,8 +8249,17 @@ function active_buff_debuffs_for_slot(state, slot_id) {
   if (!Array.isArray(raw)) {
     return [];
   }
+  const player = state.players[slot_id];
+  const active_monster_id = player.team[player.activeIndex]?.id ?? null;
   const normalized = [];
   for (const row of raw) {
+    const target_monster_id = typeof row.targetMonsterId === "string" && row.targetMonsterId.trim().length > 0 ? row.targetMonsterId : null;
+    if (target_monster_id && active_monster_id && target_monster_id !== active_monster_id) {
+      continue;
+    }
+    if (target_monster_id && !active_monster_id) {
+      continue;
+    }
     const id = typeof row.id === "string" && row.id.trim().length > 0 ? row.id : "buff_debuff";
     const stat = row.stat;
     if (stat !== "attack" && stat !== "defense" && stat !== "speed") {
@@ -9582,6 +9644,15 @@ function effect_chips_for_slot(state, slot_id, opponent_slot) {
   const active_effects = state.activeEffectsBySlot?.[slot_id] ?? [];
   for (const effect of active_effects) {
     const label = EFFECT_UI_LABELS[effect.id] ?? effect.id;
+    if (effect.id === "rejuvenation") {
+      const raw_stack = state.rejuvenationStacks?.[slot_id];
+      const stack = typeof raw_stack === "number" && Number.isFinite(raw_stack) ? Math.max(1, Math.floor(raw_stack)) : 1;
+      chips.push({
+        label: `${label} x${stack}`,
+        kind: "debuff"
+      });
+      continue;
+    }
     const turns = Math.max(1, Number.isFinite(effect.remainingTurns) ? Math.floor(effect.remainingTurns) : 1);
     chips.push({
       label: `${label} (${turns}t)`,
