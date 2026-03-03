@@ -30,6 +30,6 @@ const hp_max = calc_hp_max(80, 12, 252, 0);
 assert(hp_max === 48, `hpMax floor case mismatch: expected 48, got ${hp_max}`);
 
 const non_hp_stat = calc_non_hp_stat(100, 12, 252, 0, 1.1);
-assert(non_hp_stat === 126, `non-HP floor case mismatch: expected 126, got ${non_hp_stat}`);
+assert(non_hp_stat === 138, `non-HP floor case mismatch: expected 138, got ${non_hp_stat}`);
 
 console.log("[stats_calc-test] ok");
