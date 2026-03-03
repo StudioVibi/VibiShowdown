@@ -8718,6 +8718,43 @@ function clear_warning() {
   config_warning.textContent = "";
 }
 var profile = load_profile(profile_key, MONSTER_BY_ID);
+var LOBBY_DEFAULT_MOVES_RESTORE_MIGRATION_V1 = "vibi_showdown_migration_restore_defaults_v1";
+function restore_starter_default_moves_once() {
+  const migration_key = `${LOBBY_DEFAULT_MOVES_RESTORE_MIGRATION_V1}:${profile_key}`;
+  try {
+    if (localStorage.getItem(migration_key) === "1") {
+      return;
+    }
+  } catch {}
+  let changed = false;
+  for (const monster_id of STARTER_MONSTER_IDS) {
+    const spec = MONSTER_BY_ID.get(monster_id);
+    if (!spec) {
+      continue;
+    }
+    const config = profile.monsters[monster_id];
+    if (!config || !Array.isArray(config.moves)) {
+      continue;
+    }
+    const moves = config.moves.slice(0, LOBBY_MOVE_SLOTS);
+    while (moves.length < LOBBY_MOVE_SLOTS) {
+      moves.push("none");
+    }
+    const all_none = moves.every((move_id) => move_id === "none");
+    if (!all_none) {
+      continue;
+    }
+    config.moves = default_lobby_moves_for_spec(spec, LOBBY_MOVE_SLOTS);
+    changed = true;
+  }
+  if (changed) {
+    save_profile(profile_key, profile);
+  }
+  try {
+    localStorage.setItem(migration_key, "1");
+  } catch {}
+}
+restore_starter_default_moves_once();
 function save_profile2() {
   save_profile(profile_key, profile);
 }

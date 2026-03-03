@@ -37,6 +37,7 @@ import {
   type MonsterConfig,
   base_stats_from_spec,
   build_team_selection as build_lobby_team_selection,
+  default_lobby_moves_for_spec,
   ev_total,
   get_config as get_lobby_config,
   load_profile as load_lobby_profile,
@@ -1199,6 +1200,47 @@ function clear_warning(): void {
 }
 
 const profile = load_lobby_profile(profile_key, roster_by_id);
+const LOBBY_DEFAULT_MOVES_RESTORE_MIGRATION_V1 = "vibi_showdown_migration_restore_defaults_v1";
+
+function restore_starter_default_moves_once(): void {
+  const migration_key = `${LOBBY_DEFAULT_MOVES_RESTORE_MIGRATION_V1}:${profile_key}`;
+  try {
+    if (localStorage.getItem(migration_key) === "1") {
+      return;
+    }
+  } catch {}
+
+  let changed = false;
+  for (const monster_id of STARTER_MONSTER_IDS) {
+    const spec = roster_by_id.get(monster_id);
+    if (!spec) {
+      continue;
+    }
+    const config = profile.monsters[monster_id];
+    if (!config || !Array.isArray(config.moves)) {
+      continue;
+    }
+    const moves = config.moves.slice(0, LOBBY_MOVE_SLOTS);
+    while (moves.length < LOBBY_MOVE_SLOTS) {
+      moves.push("none");
+    }
+    const all_none = moves.every((move_id) => move_id === "none");
+    if (!all_none) {
+      continue;
+    }
+    config.moves = default_lobby_moves_for_spec(spec, LOBBY_MOVE_SLOTS);
+    changed = true;
+  }
+
+  if (changed) {
+    save_lobby_profile(profile_key, profile);
+  }
+  try {
+    localStorage.setItem(migration_key, "1");
+  } catch {}
+}
+
+restore_starter_default_moves_once();
 
 function save_profile(): void {
   save_lobby_profile(profile_key, profile);
