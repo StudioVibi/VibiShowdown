@@ -132,6 +132,8 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   ki_blast: "Dano verdadeiro baseado na STR efetiva: 75% da STR (ignora DEF/armor).",
   endure: "Sobrevive ao dano letal no turno (minimo 1% HP) e ganha DEX ao ativar.",
   protect: "Bloqueia dano no turno. Compartilha cooldown com Endure.",
+  special_protect:
+    "Entra na phase Immune: bloqueia 100% do dano e efeitos de Attack_01/Attack_02, mas nao bloqueia ending_turn. Aplica Frustration (1 turno) no usuario.",
   none: "Nao faz acao neste turno."
 };
 
@@ -1706,6 +1708,7 @@ function update_action_controls(): void {
   const active_id = selected[0];
   const config = get_config(active_id);
   let guard_on_cooldown = false;
+  let special_protect_on_cooldown = false;
   let active_moves = config.moves;
   let self_switch_has_target = true;
   const run_blocked_reason = latest_state && slot ? run_block_reason_for_ui(latest_state, slot) : null;
@@ -1721,6 +1724,7 @@ function update_action_controls(): void {
         ? player_state.team[forced_switch_target_index] ?? fallback_active
         : fallback_active;
     guard_on_cooldown = Math.max(preview_active.protectCooldownTurns, preview_active.endureCooldownTurns) > 0;
+    special_protect_on_cooldown = Math.max(0, preview_active.specialProtectCooldownTurns ?? 0) > 0;
     active_moves = preview_active.chosenMoves;
     self_switch_has_target = player_state.team.some((mon, index) => index !== preview_active_index && mon.hp > 0);
   }
@@ -1734,6 +1738,9 @@ function update_action_controls(): void {
       btn.disabled = true;
     } else if (move === "endure" && guard_on_cooldown) {
       btn.textContent = `${index + 1}. Endure (cooldown)`;
+      btn.disabled = true;
+    } else if (move === "special_protect" && special_protect_on_cooldown) {
+      btn.textContent = `${index + 1}. Special Protect (cooldown)`;
       btn.disabled = true;
     } else if (move === "switch_sovietico" && !self_switch_has_target) {
       btn.textContent = `${index + 1}. ${label} (no switch target)`;
@@ -2224,7 +2231,6 @@ const EFFECT_UI_LABELS: Record<string, string> = {
   sleep: "Sleep",
   stun: "Stun",
   taunt: "Taunt",
-  frustration: "Frustration",
   nocaute: "Nocaute",
   immobilize: "Immobilize",
   weakness: "Weakness",
@@ -2235,6 +2241,7 @@ const EFFECT_UI_LABELS: Record<string, string> = {
 const CURSE_UI_LABELS: Record<string, string> = {
   madness: "Madness",
   happiness: "Happiness",
+  frustration: "Frustration",
   leech_seed: "Leech Seed",
   sekyps: "Sekyps",
   mirror: "Mirror",
@@ -2533,8 +2540,25 @@ function curse_happiness_tag_builder(curse: ActiveCurseUi): TagChip[] {
   ];
 }
 
+function curse_frustration_tag_builder(curse: ActiveCurseUi): TagChip[] {
+  const remaining_turns =
+    typeof curse.remainingTurns === "number" && Number.isFinite(curse.remainingTurns)
+      ? Math.max(1, Math.floor(curse.remainingTurns))
+      : 1;
+  return [
+    {
+      id: "curse_frustration",
+      label: `Frustration | ${remaining_turns}t`,
+      kind: "debuff",
+      category: "control",
+      order: 126
+    }
+  ];
+}
+
 const CURSE_TAG_BUILDERS: Record<string, CurseTagBuilder> = {
   happiness: curse_happiness_tag_builder,
+  frustration: curse_frustration_tag_builder,
   leech_seed: curse_leech_seed_tag_builder,
   sekyps: curse_sekyps_tag_builder
 };

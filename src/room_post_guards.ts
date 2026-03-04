@@ -254,9 +254,11 @@ function is_monster_state(value: unknown): value is MonsterState {
     is_string_array(value.chosenMoves) &&
     is_string(value.chosenPassive) &&
     typeof value.protectActiveThisTurn === "boolean" &&
+    typeof value.specialProtectActiveThisTurn === "boolean" &&
     typeof value.endureActiveThisTurn === "boolean" &&
     typeof value.baitActiveThisTurn === "boolean" &&
     is_number(value.protectCooldownTurns) &&
+    is_number(value.specialProtectCooldownTurns) &&
     is_number(value.endureCooldownTurns)
   );
 }

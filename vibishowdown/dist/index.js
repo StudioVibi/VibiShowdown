@@ -1931,7 +1931,7 @@ function is_turn_config_post(value) {
 function is_monster_state(value) {
   if (!is_record(value))
     return false;
-  return is_string(value.id) && is_string(value.name) && is_monster_type(value.type) && is_number(value.hp) && is_number(value.maxHp) && is_number(value.mSPE) && is_number(value.level) && is_number(value.baseAttack) && is_number(value.baseDefense) && is_number(value.baseSpeed) && is_number(value.attack) && is_number(value.attackStage) && is_number(value.defense) && is_number(value.defenseStage) && is_number(value.speed) && is_number(value.speedStage) && typeof value.agilityBoostActive === "boolean" && typeof value.endureSpeedBoostActive === "boolean" && typeof value.bellyDrumActive === "boolean" && typeof value.screechDebuffActive === "boolean" && is_string_array(value.possibleMoves) && is_string_array(value.possiblePassives) && is_string_array(value.chosenMoves) && is_string(value.chosenPassive) && typeof value.protectActiveThisTurn === "boolean" && typeof value.endureActiveThisTurn === "boolean" && typeof value.baitActiveThisTurn === "boolean" && is_number(value.protectCooldownTurns) && is_number(value.endureCooldownTurns);
+  return is_string(value.id) && is_string(value.name) && is_monster_type(value.type) && is_number(value.hp) && is_number(value.maxHp) && is_number(value.mSPE) && is_number(value.level) && is_number(value.baseAttack) && is_number(value.baseDefense) && is_number(value.baseSpeed) && is_number(value.attack) && is_number(value.attackStage) && is_number(value.defense) && is_number(value.defenseStage) && is_number(value.speed) && is_number(value.speedStage) && typeof value.agilityBoostActive === "boolean" && typeof value.endureSpeedBoostActive === "boolean" && typeof value.bellyDrumActive === "boolean" && typeof value.screechDebuffActive === "boolean" && is_string_array(value.possibleMoves) && is_string_array(value.possiblePassives) && is_string_array(value.chosenMoves) && is_string(value.chosenPassive) && typeof value.protectActiveThisTurn === "boolean" && typeof value.specialProtectActiveThisTurn === "boolean" && typeof value.endureActiveThisTurn === "boolean" && typeof value.baitActiveThisTurn === "boolean" && is_number(value.protectCooldownTurns) && is_number(value.specialProtectCooldownTurns) && is_number(value.endureCooldownTurns);
 }
 function is_player_state(value) {
   if (!is_record(value))
@@ -2199,6 +2199,7 @@ var MOVE_CATALOG = [
   { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },
   { id: "protect", label: "Protect", phaseId: "guard", attackMultiplier100: 100 },
+  { id: "special_protect", label: "Special Protect", phaseId: "immune", attackMultiplier100: 0 },
   { id: "none", label: "none", phaseId: "attack_01", attackMultiplier100: 100 }
 ];
 var MOVE_OPTIONS = MOVE_CATALOG.map((entry) => entry.id);
@@ -2375,7 +2376,7 @@ var MONSTER_ROSTER = [
     stats: { level: 12, maxHp: 85, attack: 85, defense: 85, speed: 85 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["power", "ki_blast", "none", "run"],
+    defaultMoves: ["power", "ki_blast", "fervor", "run"],
     defaultPassive: "none"
   },
   {
@@ -2675,6 +2676,7 @@ var INITIATIVE_NONE = [];
 var PHASES = [
   { id: "switch", name: "Switch", order: 0, initiative: INITIATIVE_DEFAULT },
   { id: "guard", name: "Guard", order: 1, initiative: INITIATIVE_DEFAULT },
+  { id: "immune", name: "Immune", order: 1.5, initiative: INITIATIVE_DEFAULT },
   { id: "attack_01", name: "Attack 01", order: 2, initiative: INITIATIVE_DEFAULT },
   { id: "run", name: "Run", order: 3, initiative: INITIATIVE_NONE }
 ];
@@ -2714,6 +2716,31 @@ var TAUNT_BLOCKED_MOVE_IDS = new Set([
 function is_attack_damage_phase(phase) {
   return phase === "attack_01" || phase === "attack_02";
 }
+function is_special_protect_blocking_target_effect(state, source_slot, target_slot, source_phase_id) {
+  if (source_slot === target_slot) {
+    return false;
+  }
+  if (!is_attack_damage_phase(source_phase_id)) {
+    return false;
+  }
+  const target = active_monster(state.players[target_slot]);
+  return target.specialProtectActiveThisTurn === true;
+}
+function log_special_protect_block(state, log, source_slot, target_slot, source_move_id, source_phase_id, context) {
+  const target = active_monster(state.players[target_slot]);
+  log.push({
+    type: "special_protect_blocked",
+    turn: state.turn,
+    phase: source_phase_id,
+    summary: `${target.name} blocked ${source_move_id} ${context} with Special Protect`,
+    data: {
+      slot: source_slot,
+      targetSlot: target_slot,
+      move: source_move_id,
+      context
+    }
+  });
+}
 var INITIATIVE_WITHOUT_SPEED = ["attack", "hp", "defense"];
 var STAT_STAGE_MIN = -6;
 var STAT_STAGE_MAX = 6;
@@ -2748,7 +2775,6 @@ var EFFECT_IDS = [
   "sleep",
   "stun",
   "taunt",
-  "frustration",
   "nocaute",
   "immobilize",
   "weakness",
@@ -2760,6 +2786,7 @@ var EFFECT_IDS = [
 var EFFECT_ID_SET = new Set(EFFECT_IDS);
 var CURSE_IDS = [
   "madness",
+  "frustration",
   "happiness",
   "leech_seed",
   "sekyps",
@@ -2773,7 +2800,6 @@ var EFFECT_LABELS = {
   sleep: "Sleep",
   stun: "Stun",
   taunt: "Taunt",
-  frustration: "Frustration",
   nocaute: "Nocaute",
   immobilize: "Immobilize",
   weakness: "Weakness",
@@ -2784,6 +2810,7 @@ var EFFECT_LABELS = {
 };
 var CURSE_LABELS = {
   madness: "Madness",
+  frustration: "Frustration",
   happiness: "Happiness",
   leech_seed: "Leech Seed",
   sekyps: "Sekyps",
@@ -3016,9 +3043,11 @@ function clone_monster(monster) {
     chosenMoves: monster.chosenMoves.slice(),
     chosenPassive: monster.chosenPassive,
     protectActiveThisTurn: monster.protectActiveThisTurn,
+    specialProtectActiveThisTurn: !!monster.specialProtectActiveThisTurn,
     endureActiveThisTurn: monster.endureActiveThisTurn,
     baitActiveThisTurn: !!monster.baitActiveThisTurn,
     protectCooldownTurns: monster.protectCooldownTurns,
+    specialProtectCooldownTurns: Math.max(0, normalize_int(monster.specialProtectCooldownTurns, 0, 0)),
     endureCooldownTurns: monster.endureCooldownTurns
   };
 }
@@ -3310,12 +3339,16 @@ function upsert_effect(state, log, target_slot, effect_id, duration_turns, sourc
     }
   });
 }
-function apply_move_effects_from_collateral(state, log, source_slot, collaterals, source_move_id) {
+function apply_move_effects_from_collateral(state, log, source_slot, collaterals, source_move_id, source_phase_id) {
   if (collaterals.length === 0) {
     return;
   }
   for (const collateral of collaterals) {
     const target_slot = collateral.target === "self" ? source_slot : other_slot(source_slot);
+    if (is_special_protect_blocking_target_effect(state, source_slot, target_slot, source_phase_id)) {
+      log_special_protect_block(state, log, source_slot, target_slot, source_move_id, source_phase_id, "effects");
+      continue;
+    }
     upsert_effect(state, log, target_slot, collateral.id, collateral.maxDurationTurns, source_slot, source_move_id);
   }
 }
@@ -3620,12 +3653,16 @@ function apply_heal_buffs_end_turn_by_id(state, log, slot, hp_changed, heal_buff
     state.rejuvenationStartTurn[slot] = 0;
   }
 }
-function apply_move_curses_from_collateral(state, log, source_slot, collaterals, source_move_id) {
+function apply_move_curses_from_collateral(state, log, source_slot, collaterals, source_move_id, source_phase_id) {
   if (collaterals.length === 0) {
     return;
   }
   for (const collateral of collaterals) {
     const target_slot = source_slot === "player1" ? "player2" : "player1";
+    if (is_special_protect_blocking_target_effect(state, source_slot, target_slot, source_phase_id)) {
+      log_special_protect_block(state, log, source_slot, target_slot, source_move_id, source_phase_id, "curse");
+      continue;
+    }
     upsert_curse(state, log, target_slot, collateral.id, source_slot, source_move_id);
   }
 }
@@ -3681,21 +3718,29 @@ function apply_buff_debuff_component(state, log, target_slot, collateral, source
     }
   });
 }
-function apply_move_buff_debuffs_from_collateral(state, log, source_slot, collaterals, source_move_id) {
+function apply_move_buff_debuffs_from_collateral(state, log, source_slot, collaterals, source_move_id, source_phase_id) {
   if (collaterals.length === 0) {
     return;
   }
   for (const collateral of collaterals) {
     const target_slot = collateral.target === "self" ? source_slot : other_slot(source_slot);
+    if (is_special_protect_blocking_target_effect(state, source_slot, target_slot, source_phase_id)) {
+      log_special_protect_block(state, log, source_slot, target_slot, source_move_id, source_phase_id, "buff/debuff");
+      continue;
+    }
     apply_buff_debuff_component(state, log, target_slot, collateral, source_slot, source_move_id);
   }
 }
-function apply_move_instants_from_collateral(state, log, source_slot, collaterals, source_move_id) {
+function apply_move_instants_from_collateral(state, log, source_slot, collaterals, source_move_id, source_phase_id) {
   if (collaterals.length === 0) {
     return;
   }
   for (const collateral of collaterals) {
     const target_slot = collateral.target === "self" ? source_slot : other_slot(source_slot);
+    if (is_special_protect_blocking_target_effect(state, source_slot, target_slot, source_phase_id)) {
+      log_special_protect_block(state, log, source_slot, target_slot, source_move_id, source_phase_id, "instant");
+      continue;
+    }
     log.push({
       type: "instant_trigger",
       turn: state.turn,
@@ -3853,7 +3898,7 @@ function move_block_reason(state, slot, move_index, spec) {
     return "taunt";
   }
   const last_move = state.lastMoveIndexBySlot?.[slot] ?? null;
-  if (typeof last_move === "number" && has_effect(state, slot, "frustration") && move_index === last_move) {
+  if (typeof last_move === "number" && has_curse(state, slot, "frustration") && move_index === last_move) {
     return "frustration";
   }
   if (typeof last_move === "number" && has_curse(state, slot, "happiness") && move_index !== last_move) {
@@ -4605,6 +4650,7 @@ function reset_protect_flags(state) {
   for_each_player(state, (player) => {
     for (const monster of player.team) {
       monster.protectActiveThisTurn = false;
+      monster.specialProtectActiveThisTurn = false;
       monster.endureActiveThisTurn = false;
       monster.baitActiveThisTurn = false;
     }
@@ -4618,6 +4664,10 @@ function decrement_cooldowns(state) {
         const next_guard_cooldown = guard_cooldown - 1;
         monster.protectCooldownTurns = next_guard_cooldown;
         monster.endureCooldownTurns = next_guard_cooldown;
+      }
+      const special_protect_cooldown = Math.max(0, normalize_int(monster.specialProtectCooldownTurns, 0, 0));
+      if (special_protect_cooldown > 0) {
+        monster.specialProtectCooldownTurns = special_protect_cooldown - 1;
       }
     }
   });
@@ -5158,7 +5208,7 @@ function apply_damage_move(state, log, player_slot, spec, hp_changed, phase_id, 
     }
   }
   let damage = Math.max(0, raw_damage);
-  const was_blocked = defender.protectActiveThisTurn;
+  const was_blocked = defender.protectActiveThisTurn || defender.specialProtectActiveThisTurn && is_attack_damage_phase(phase_id);
   if (was_blocked) {
     damage = 0;
     log.push({
@@ -5400,15 +5450,15 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
   const finalize_move_success = () => {
     update_fervor_chain_after_move_success(state, player_slot, move_id);
     mark_last_move_used(state, player_slot, move_id, move_index);
-    apply_move_effects_from_collateral(state, log, player_slot, effect_collaterals, spec.id);
-    apply_move_curses_from_collateral(state, log, player_slot, curse_collaterals, spec.id);
-    apply_move_buff_debuffs_from_collateral(state, log, player_slot, buff_debuff_collaterals, spec.id);
-    apply_move_instants_from_collateral(state, log, player_slot, instant_collaterals, spec.id);
+    apply_move_effects_from_collateral(state, log, player_slot, effect_collaterals, spec.id, spec.phaseId);
+    apply_move_curses_from_collateral(state, log, player_slot, curse_collaterals, spec.id, spec.phaseId);
+    apply_move_buff_debuffs_from_collateral(state, log, player_slot, buff_debuff_collaterals, spec.id, spec.phaseId);
+    apply_move_instants_from_collateral(state, log, player_slot, instant_collaterals, spec.id, spec.phaseId);
   };
   const blocked_by = move_block_reason(state, player_slot, move_index, spec);
   if (blocked_by) {
     const type = blocked_by === "taunt" ? "taunt_blocked" : "effect_blocked";
-    const turns_remaining = blocked_by === "happiness" ? curse_turns_remaining(state, player_slot, "happiness") : EFFECT_ID_SET.has(blocked_by) ? effect_turns_remaining(state, player_slot, blocked_by) : 0;
+    const turns_remaining = blocked_by === "happiness" ? curse_turns_remaining(state, player_slot, "happiness") : blocked_by === "frustration" ? curse_turns_remaining(state, player_slot, "frustration") : EFFECT_ID_SET.has(blocked_by) ? effect_turns_remaining(state, player_slot, blocked_by) : 0;
     log.push({
       type,
       turn: state.turn,
@@ -5459,6 +5509,31 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     finalize_move_success();
     return;
   }
+  if (spec.id === "special_protect") {
+    const special_protect_cooldown = Math.max(0, normalize_int(attacker.specialProtectCooldownTurns, 0, 0));
+    if (special_protect_cooldown > 0) {
+      log.push({
+        type: "special_protect_blocked",
+        turn: state.turn,
+        phase: spec.phaseId,
+        summary: `${player_slot} tried Special Protect but is on cooldown`,
+        data: { slot: player_slot, reason: "cooldown" }
+      });
+      return;
+    }
+    attacker.specialProtectActiveThisTurn = true;
+    attacker.specialProtectCooldownTurns = 2;
+    upsert_curse(state, log, player_slot, "frustration", player_slot, spec.id, { remainingTurns: 1 });
+    log.push({
+      type: "special_protect",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary: `${player_slot} used Special Protect (Immune + Frustration 1 turn)`,
+      data: { slot: player_slot, target: attacker.id, cooldownTurns: 1, drawback: "frustration" }
+    });
+    finalize_move_success();
+    return;
+  }
   if (spec.id === "endure") {
     const guard_cooldown = Math.max(attacker.protectCooldownTurns, attacker.endureCooldownTurns);
     if (guard_cooldown > 0) {
@@ -5503,6 +5578,11 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
         summary: `${player_slot} used Bait but failed (no prior damage this turn)`,
         data: { slot: player_slot, target: attacker.id, move: spec.id, reason: "no_prior_damage" }
       });
+      finalize_move_success();
+      return;
+    }
+    if (is_special_protect_blocking_target_effect(state, player_slot, opponent_slot, spec.phaseId)) {
+      log_special_protect_block(state, log, player_slot, opponent_slot, spec.id, spec.phaseId, "debuff");
       finalize_move_success();
       return;
     }
@@ -5637,6 +5717,13 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     ensure_state_runtime_defaults(state);
     const queued_slots = [];
     for (const slot_id of SLOT_ORDER) {
+      if (slot_id === other_slot(player_slot) && is_special_protect_blocking_target_effect(state, player_slot, slot_id, spec.phaseId)) {
+        log_special_protect_block(state, log, player_slot, slot_id, spec.id, spec.phaseId, "forced switch");
+        state.pendingSwitch[slot_id] = false;
+        state.pendingSwitchReason[slot_id] = "none";
+        state.pendingSwitchResolvedThisTurn[slot_id] = false;
+        continue;
+      }
       const switch_player = state.players[slot_id];
       if (first_available_switch_target(switch_player) === null) {
         state.pendingSwitch[slot_id] = false;
@@ -5708,7 +5795,12 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     const target_player = state.players[target_slot];
     const target = active_monster(target_player);
     const self_player = state.players[player_slot];
-    hook_run_blocked_this_turn[target_slot] = true;
+    const run_lock_blocked_by_special_protect = is_special_protect_blocking_target_effect(state, player_slot, target_slot, spec.phaseId);
+    if (run_lock_blocked_by_special_protect) {
+      log_special_protect_block(state, log, player_slot, target_slot, spec.id, spec.phaseId, "run lock");
+    } else {
+      hook_run_blocked_this_turn[target_slot] = true;
+    }
     incoming_damage_multiplier_percent[player_slot] = Math.max(HOOK_EXPOSURE_INCOMING_DAMAGE_MULTIPLIER_PERCENT, normalize_int(incoming_damage_multiplier_percent[player_slot], 100, 0));
     const before_self_mSPE = Math.max(0, normalize_int(self_player.sharedMSPE, SHARED_MSPE_START, 0));
     const self_mSPE_reduction = before_self_mSPE > 0 ? Math.max(1, mul_div_floor(before_self_mSPE, HOOK_SELF_MSPE_REDUCTION_PERCENT, 100)) : 0;
@@ -5717,14 +5809,14 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
       type: "move_detail",
       turn: state.turn,
       phase: spec.phaseId,
-      summary: `Hook: blocks enemy Run; if target attempts Run then mSPE -${HOOK_RUN_MSPE_REDUCTION_PERCENT}% | ` + `self gains Exposicao (+66% incoming damage in attack phases) and mSPE -${HOOK_SELF_MSPE_REDUCTION_PERCENT}%`,
+      summary: `Hook: ${run_lock_blocked_by_special_protect ? "run lock blocked by Special Protect" : "blocks enemy Run"}; if target attempts Run then mSPE -${HOOK_RUN_MSPE_REDUCTION_PERCENT}% | ` + `self gains Exposicao (+66% incoming damage in attack phases) and mSPE -${HOOK_SELF_MSPE_REDUCTION_PERCENT}%`,
       data: {
         move: spec.id,
         slot: player_slot,
         targetSlot: target_slot,
         source: attacker.id,
         target: target.id,
-        blocksRunThisTurn: true,
+        blocksRunThisTurn: !run_lock_blocked_by_special_protect,
         runMSPEReductionPercentOnAttempt: HOOK_RUN_MSPE_REDUCTION_PERCENT,
         selfIncomingDamagePercentInAttackPhases: incoming_damage_multiplier_percent[player_slot],
         selfMSPEBefore: before_self_mSPE,
@@ -5804,6 +5896,11 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
   }
   if (spec.id === "spikes") {
     const target_slot = other_slot(player_slot);
+    if (is_special_protect_blocking_target_effect(state, player_slot, target_slot, spec.phaseId)) {
+      log_special_protect_block(state, log, player_slot, target_slot, spec.id, spec.phaseId, "hazard");
+      finalize_move_success();
+      return;
+    }
     state.spikesArmedByTarget[target_slot] = true;
     log.push({
       type: "spikes_set",
@@ -6089,6 +6186,11 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
   }
   if (spec.id === "screech") {
     const defender_slot = other_slot(player_slot);
+    if (is_special_protect_blocking_target_effect(state, player_slot, defender_slot, spec.phaseId)) {
+      log_special_protect_block(state, log, player_slot, defender_slot, spec.id, spec.phaseId, "defense debuff");
+      finalize_move_success();
+      return;
+    }
     if (is_slot_clear_body_active(state, defender_slot)) {
       const armor_stack = type_passive_armor_stack(state, defender_slot);
       log.push({
@@ -6169,6 +6271,12 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
     return;
   }
   if (spec.id === "pain_split") {
+    const target_slot = other_slot(player_slot);
+    if (is_special_protect_blocking_target_effect(state, player_slot, target_slot, spec.phaseId)) {
+      log_special_protect_block(state, log, player_slot, target_slot, spec.id, spec.phaseId, "hp split");
+      finalize_move_success();
+      return;
+    }
     const before_user_hp = player.sharedHp;
     const before_target_hp = opponent.sharedHp;
     const shared_hp = Math.max(1, mul_div_floor(before_user_hp + before_target_hp, 1, 2));
@@ -6240,6 +6348,7 @@ function reset_monster_on_switch_out(monster) {
   monster.speed = monster.baseSpeed;
   monster.speedStage = 0;
   monster.agilityBoostActive = false;
+  monster.specialProtectActiveThisTurn = false;
   monster.endureSpeedBoostActive = false;
   monster.baitActiveThisTurn = false;
   monster.bellyDrumActive = false;
@@ -6380,9 +6489,11 @@ function create_initial_state(teams, names) {
         chosenMoves: monster.moves.slice(0, 3),
         chosenPassive: monster.passive,
         protectActiveThisTurn: false,
+        specialProtectActiveThisTurn: false,
         endureActiveThisTurn: false,
         baitActiveThisTurn: false,
         protectCooldownTurns: 0,
+        specialProtectCooldownTurns: 0,
         endureCooldownTurns: 0
       };
     });
@@ -6667,6 +6778,9 @@ function validate_intent(state, slot, intent) {
   }
   if (moveId === "endure" && guard_cooldown > 0) {
     return "endure on cooldown";
+  }
+  if (moveId === "special_protect" && Math.max(0, normalize_int(active.specialProtectCooldownTurns, 0, 0)) > 0) {
+    return "special protect on cooldown";
   }
   if (moveId === "switch_sovietico") {
     if (!has_available_switch_target(player)) {
@@ -7956,6 +8070,7 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   ki_blast: "Dano verdadeiro baseado na STR efetiva: 75% da STR (ignora DEF/armor).",
   endure: "Sobrevive ao dano letal no turno (minimo 1% HP) e ganha DEX ao ativar.",
   protect: "Bloqueia dano no turno. Compartilha cooldown com Endure.",
+  special_protect: "Entra na phase Immune: bloqueia 100% do dano e efeitos de Attack_01/Attack_02, mas nao bloqueia ending_turn. Aplica Frustration (1 turno) no usuario.",
   none: "Nao faz acao neste turno."
 };
 var PLAYER_SLOTS2 = ["player1", "player2"];
@@ -9316,6 +9431,7 @@ function update_action_controls() {
   const active_id = selected[0];
   const config = get_config2(active_id);
   let guard_on_cooldown = false;
+  let special_protect_on_cooldown = false;
   let active_moves = config.moves;
   let self_switch_has_target = true;
   const run_blocked_reason = latest_state && slot ? run_block_reason_for_ui(latest_state, slot) : null;
@@ -9325,6 +9441,7 @@ function update_action_controls() {
     const preview_active_index = pending_switch && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number" ? forced_switch_target_index : player_state.activeIndex;
     const preview_active = pending_switch && has_forced_switch_target_for_current_turn() && typeof forced_switch_target_index === "number" ? player_state.team[forced_switch_target_index] ?? fallback_active : fallback_active;
     guard_on_cooldown = Math.max(preview_active.protectCooldownTurns, preview_active.endureCooldownTurns) > 0;
+    special_protect_on_cooldown = Math.max(0, preview_active.specialProtectCooldownTurns ?? 0) > 0;
     active_moves = preview_active.chosenMoves;
     self_switch_has_target = player_state.team.some((mon, index) => index !== preview_active_index && mon.hp > 0);
   }
@@ -9338,6 +9455,9 @@ function update_action_controls() {
       btn.disabled = true;
     } else if (move === "endure" && guard_on_cooldown) {
       btn.textContent = `${index + 1}. Endure (cooldown)`;
+      btn.disabled = true;
+    } else if (move === "special_protect" && special_protect_on_cooldown) {
+      btn.textContent = `${index + 1}. Special Protect (cooldown)`;
       btn.disabled = true;
     } else if (move === "switch_sovietico" && !self_switch_has_target) {
       btn.textContent = `${index + 1}. ${label} (no switch target)`;
@@ -9769,7 +9889,6 @@ var EFFECT_UI_LABELS = {
   sleep: "Sleep",
   stun: "Stun",
   taunt: "Taunt",
-  frustration: "Frustration",
   nocaute: "Nocaute",
   immobilize: "Immobilize",
   weakness: "Weakness",
@@ -9780,6 +9899,7 @@ var EFFECT_UI_LABELS = {
 var CURSE_UI_LABELS = {
   madness: "Madness",
   happiness: "Happiness",
+  frustration: "Frustration",
   leech_seed: "Leech Seed",
   sekyps: "Sekyps",
   mirror: "Mirror",
@@ -10041,8 +10161,21 @@ function curse_happiness_tag_builder(curse) {
     }
   ];
 }
+function curse_frustration_tag_builder(curse) {
+  const remaining_turns = typeof curse.remainingTurns === "number" && Number.isFinite(curse.remainingTurns) ? Math.max(1, Math.floor(curse.remainingTurns)) : 1;
+  return [
+    {
+      id: "curse_frustration",
+      label: `Frustration | ${remaining_turns}t`,
+      kind: "debuff",
+      category: "control",
+      order: 126
+    }
+  ];
+}
 var CURSE_TAG_BUILDERS = {
   happiness: curse_happiness_tag_builder,
+  frustration: curse_frustration_tag_builder,
   leech_seed: curse_leech_seed_tag_builder,
   sekyps: curse_sekyps_tag_builder
 };

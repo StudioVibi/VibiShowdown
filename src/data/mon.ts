@@ -64,7 +64,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     stats: { level: 12, maxHp: 242, attack: 80, defense: 160, speed: 65 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["sekyps", "rejuvenation", "none", "run"],
+    defaultMoves: ["sekyps", "rejuvenation", "special_protect", "run"],
     defaultPassive: "none"
   },
   {
@@ -130,7 +130,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     stats: { level: 12, maxHp: 85, attack: 85, defense: 85, speed: 85 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["power", "ki_blast", "none", "run"],
+    defaultMoves: ["power", "ki_blast", "fervor", "run"],
     defaultPassive: "none"
   },
   {
@@ -141,7 +141,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     stats: { level: 12, maxHp: 117, attack: 50, defense: 160, speed: 70 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["bait", "seismic_toss", "none", "run"],
+    defaultMoves: ["bait", "seismic_toss", "special_protect", "run"],
     defaultPassive: "none"
   },
   {

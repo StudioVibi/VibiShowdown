@@ -381,4 +381,73 @@ function happiness_remaining_turns(state: GameState, slot: PlayerSlot): number |
   assert_equal(after_punch.fervorChainBySlot.player1, 0, "non-fervor successful move should reset fervor chain");
 }
 
+{
+  const state = create_running_state(["special_protect", "none", "none"], ["punch", "none", "none"]);
+  const before_hp = state.players.player1.sharedHp;
+  const result = resolve_turn(
+    state,
+    intents(
+      { action: "use_move", moveIndex: 0 },
+      { action: "use_move", moveIndex: 0 }
+    )
+  );
+  const after_hp = result.state.players.player1.sharedHp;
+  assert_equal(after_hp, before_hp, "special protect should block attack-phase damage");
+  assert(
+    result.log.some((entry) => entry.type === "damage_blocked"),
+    "special protect should produce damage_blocked log"
+  );
+  assert_equal(
+    result.state.players.player1.team[0].specialProtectCooldownTurns,
+    1,
+    "special protect should leave 1 turn cooldown after turn end"
+  );
+}
+
+{
+  const state = create_running_state(["special_protect", "none", "none"], ["taunt", "none", "none"]);
+  const result = resolve_turn(
+    state,
+    intents(
+      { action: "use_move", moveIndex: 0 },
+      { action: "use_move", moveIndex: 0 }
+    )
+  );
+  assert(
+    !result.state.activeEffectsBySlot.player1.some((entry) => entry.id === "taunt"),
+    "special protect should block attack-phase effect application"
+  );
+}
+
+{
+  const state = create_running_state(["special_protect", "none", "none"], ["focus_punch", "none", "none"]);
+  const before_hp = state.players.player1.sharedHp;
+  const result = resolve_turn(
+    state,
+    intents(
+      { action: "use_move", moveIndex: 0 },
+      { action: "use_move", moveIndex: 0 }
+    )
+  );
+  const after_hp = result.state.players.player1.sharedHp;
+  assert(after_hp < before_hp, "special protect should not block ending_turn damage");
+}
+
+{
+  const state = create_running_state(["special_protect", "punch", "none"], ["none", "none", "none"]);
+  const turn1 = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 })).state;
+  assert(
+    turn1.activeCursesBySlot.player1.some((entry) => entry.id === "frustration"),
+    "special protect should apply frustration curse to user"
+  );
+  const blocked = validate_intent(turn1, "player1", { action: "use_move", moveIndex: 0 });
+  assert_equal(blocked, "frustration", "frustration should block repeating last move");
+
+  const after_switch = resolve_turn(turn1, p1_intent({ action: "switch", targetIndex: 1 })).state;
+  assert(
+    !after_switch.activeCursesBySlot.player1.some((entry) => entry.id === "frustration"),
+    "frustration should be removed on switch"
+  );
+}
+
 console.log("[engine-test] ok");

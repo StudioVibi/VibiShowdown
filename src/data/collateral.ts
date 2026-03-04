@@ -48,7 +48,6 @@ export const EFFECT_COLLATERAL_TEMPLATES: readonly EffectCollateralTemplate[] = 
   { id: "sleep", label: "Sleep", rank: "S", summary: "Impede skills e moves." },
   { id: "stun", label: "Stun", rank: "A", summary: "Impede moves." },
   { id: "taunt", label: "Taunt", rank: "B", summary: "Forca moves de ataque." },
-  { id: "frustration", label: "Frustration", rank: "B", summary: "Bloqueia o ultimo move utilizado." },
   { id: "nocaute", label: "Nocaute", rank: "C", summary: "Forca switch." },
   { id: "immobilize", label: "Immobilize", rank: "C", summary: "Impede switch." },
   { id: "weakness", label: "Weakness", rank: "C", summary: "ATK -2 stages." },
@@ -67,6 +66,7 @@ export const EFFECT_COLLATERAL_TEMPLATES: readonly EffectCollateralTemplate[] = 
 export const CURSE_COLLATERAL_TEMPLATES: readonly CurseCollateralTemplate[] = [
   { id: "madness", label: "Madness", rank: "?", summary: "Maldição removida ao trocar." },
   { id: "happiness", label: "Happiness", rank: "B", summary: "Permite apenas o ultimo move utilizado." },
+  { id: "frustration", label: "Frustration", rank: "B", summary: "Bloqueia o ultimo move utilizado." },
   { id: "leech_seed", label: "Leech Seed", rank: "?", summary: "Maldição removida ao trocar." },
   { id: "sekyps", label: "Sekyps", rank: "?", summary: "Dano flat no ending_turn (acumulativo por stack) e removida ao trocar." },
   { id: "destiny_bond", label: "Destiny Bond", rank: "?", summary: "Maldição removida ao trocar." },

@@ -78,6 +78,7 @@ export const MOVE_CATALOG: readonly MoveCatalogEntry[] = [
   { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },
   { id: "protect", label: "Protect", phaseId: "guard", attackMultiplier100: 100 },
+  { id: "special_protect", label: "Special Protect", phaseId: "immune", attackMultiplier100: 0 },
   { id: "none", label: "none", phaseId: "attack_01", attackMultiplier100: 100 }
 ];
 

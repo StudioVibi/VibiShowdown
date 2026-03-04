@@ -16,7 +16,6 @@ export type EffectCollateralId =
   | "sleep"
   | "stun"
   | "taunt"
-  | "frustration"
   | "nocaute"
   | "immobilize"
   | "weakness"
@@ -27,6 +26,7 @@ export type EffectCollateralId =
 
 export type CurseCollateralId =
   | "madness"
+  | "frustration"
   | "leech_seed"
   | "destiny_bond"
   | "endure"
