@@ -8344,20 +8344,24 @@ function stat_aggregate_for(entries, stat) {
     totalStageDelta: 0
   };
 }
-function active_buff_debuffs_for_slot(state, slot_id) {
+function active_buff_debuffs_for_slot(state, slot_id, options) {
   const raw = state.activeBuffDebuffsBySlot?.[slot_id];
   if (!Array.isArray(raw)) {
     return [];
   }
   const player = state.players[slot_id];
-  const active_monster_id = player.team[player.activeIndex]?.id ?? null;
+  const selected_monster_id = typeof options?.monsterId === "string" && options.monsterId.trim().length > 0 ? options.monsterId : player.team[player.activeIndex]?.id ?? null;
+  const clear_on_switch_preview = options?.clearOnSwitchPreview === true;
   const normalized = [];
   for (const row of raw) {
-    const target_monster_id = typeof row.targetMonsterId === "string" && row.targetMonsterId.trim().length > 0 ? row.targetMonsterId : null;
-    if (target_monster_id && active_monster_id && target_monster_id !== active_monster_id) {
+    if (clear_on_switch_preview && row.clearsOnSwitch === true) {
       continue;
     }
-    if (target_monster_id && !active_monster_id) {
+    const target_monster_id = typeof row.targetMonsterId === "string" && row.targetMonsterId.trim().length > 0 ? row.targetMonsterId : null;
+    if (target_monster_id && selected_monster_id && target_monster_id !== selected_monster_id) {
+      continue;
+    }
+    if (target_monster_id && !selected_monster_id) {
       continue;
     }
     const id = typeof row.id === "string" && row.id.trim().length > 0 ? row.id : "buff_debuff";
@@ -8425,14 +8429,18 @@ function tooltip_from_config(monster_id) {
     }
   };
 }
-function tooltip_from_state(state, slot_id, mon) {
+function tooltip_from_state(state, slot_id, mon, options) {
   const fallback_base = base_stats_for(mon.id, mon.level);
   const base = {
     attack: Math.max(0, Number.isFinite(mon.baseAttack) ? Math.trunc(mon.baseAttack) : fallback_base.attack),
     defense: Math.max(0, Number.isFinite(mon.baseDefense) ? Math.trunc(mon.baseDefense) : fallback_base.defense),
     speed: Math.max(0, Number.isFinite(mon.baseSpeed) ? Math.trunc(mon.baseSpeed) : fallback_base.speed)
   };
-  const entries = active_buff_debuffs_for_slot(state, slot_id);
+  const preview_switch_in = options?.previewSwitchIn === true;
+  const entries = active_buff_debuffs_for_slot(state, slot_id, {
+    monsterId: mon.id,
+    clearOnSwitchPreview: preview_switch_in
+  });
   const attack_aggregate = stat_aggregate_for(entries, "attack");
   const attack_total_percent = tooltip_total_percent_for_stat(state, slot_id, "attack", entries);
   const defense_total_percent = tooltip_total_percent_for_stat(state, slot_id, "defense", entries);
@@ -9165,13 +9173,13 @@ function update_bench(state, viewer_slot) {
   player_bench_slots.forEach((slot_el, i) => {
     const idx = my_bench[i] ?? null;
     const mon = idx !== null ? me.team[idx] : null;
-    const tooltip = mon && idx !== null ? tooltip_from_state(state, viewer_slot, mon) : null;
+    const tooltip = mon && idx !== null ? tooltip_from_state(state, viewer_slot, mon, { previewSwitchIn: true }) : null;
     set_bench_slot(slot_el, mon, idx, can_switch, my_switch_blocked, tooltip);
   });
   enemy_bench_slots.forEach((slot_el, i) => {
     const idx = opp_bench[i] ?? null;
     const mon = idx !== null ? opp.team[idx] : null;
-    const tooltip = mon && idx !== null ? tooltip_from_state(state, enemy_slot, mon) : null;
+    const tooltip = mon && idx !== null ? tooltip_from_state(state, enemy_slot, mon, { previewSwitchIn: true }) : null;
     set_bench_slot(slot_el, mon, idx, false, false, tooltip);
   });
 }

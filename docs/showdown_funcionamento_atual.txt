@@ -1,0 +1,177 @@
+VibiShowdown - funcionamento atual (estado real do codigo)
+Data de leitura: 2026-03-03
+
+1) Visao geral da arquitetura
+- Frontend principal: vibishowdown/index.ts
+- Runtime de relay/fallback: vibishowdown/relay_runtime.ts
+- Motor de combate: src/engine.ts
+- Tipos compartilhados: src/shared.ts
+- Rede websocket: src/client.ts (via vibinet@0.1.1)
+- Catalogo de monstros/moves: src/data/mon.ts e src/data/moves.ts
+
+
+2) Como a sessao comeca
+- Ao abrir a pagina, o app resolve room e nome assim:
+  - querystring (?room=... e ?name=...) OU
+  - localStorage (vibi_showdown_last_room / vibi_showdown_last_player_name) OU
+  - gen_name() do vibinet
+- Mesmo com defaults salvos, ele pergunta novamente via prompt:
+  - "Room name?"
+  - "Your name?"
+- O player_id e estavel por nome: name:<nome-normalizado-encodeado>.
+- O cliente vibinet e criado sem URL custom, entao usa o server oficial padrao do pacote:
+  wss://net.studiovibi.com
+
+
+3) Fluxo de rede
+3.1) Sync inicial
+- No on_sync:
+  - watch(room, consume_network_message)
+  - load(room, 0, consume_network_message)
+  - post(join)
+- Chat e input sao habilitados apos sync.
+
+3.2) Guardas e parse
+- Mensagens de rede entram como info_post.
+- O cliente so encaminha payload que passa em src/room_post_guards.ts.
+- Payload invalido e ignorado.
+
+3.3) Dois modos de processamento
+- Modo server-managed:
+  - Ativa automaticamente quando aparece qualquer post:
+    assign, spectator, participants, ready_state, turn_start, state, intent_locked.
+  - A partir dai, mensagens sao apenas repassadas para o handle_post da UI.
+
+- Modo fallback cliente-deterministico (relay_runtime):
+  - Reconstrui lobby/partida localmente com join/ready/intent/forced_switch/surrender/chat/turn_config.
+  - Deduplica mensagens por index.
+  - Prune de inativos por TTL (90s), com heartbeat de join a cada 25s.
+  - Quando dois jogadores estao ready com time valido, cria estado inicial e comeca turnos.
+  - Se faltar intent no deadline do turno, ele fecha o turno com intents default deterministicos.
+
+
+4) Lobby e configuracao pre-match
+- Apenas estes monstros estao habilitados no lobby:
+  armoth, kairus, farien, knight, vealkiria, babydragonbuf
+- O jogador precisa selecionar exatamente 3 monstros.
+- Cada monstro configura 3 moves ativos no lobby (o move run fica fora do editor e vira botao separado em batalha).
+- Passiva no lobby e forcada para "none".
+- Level permitido: 1..12.
+- EV permitido: max 252 por stat, total max 508.
+- EV de HP e forcado para 0 no fluxo atual de lobby.
+- Configuracoes ficam salvas em localStorage:
+  - perfil: vibi_showdown_profile:<player_name>
+  - selecao de time: vibi_showdown_team:<room>:<player_name>
+- Duracao de turno configuravel antes da partida:
+  - minimo 5s, maximo 300s
+  - default do projeto: 50s
+
+
+5) Estado inicial de combate
+- Cada lado comeca com:
+  - sharedHp = 600
+  - sharedMSPE = 100
+  - baseTurnLimit = 12
+- HP e mSPE sao recursos compartilhados por lado (nao por monstro individual).
+- O estado nasce em "setup" e a partida roda em "running".
+
+
+6) Ordem do turno no engine (src/engine.ts)
+- resolve_turn() clona estado, valida defaults, e processa fases nesta ordem:
+  1. switch
+  2. guard
+  3. attack_01
+  4. run
+- Antes de executar a fase switch:
+  - checa condicao de fim por mSPE (escape tecnico)
+  - aplica bonus de mindgame (rpsScore), inclusive variante de Switch Sovietico
+- Iniciativa em fases com disputa usa prioridade de stats:
+  speed > attack > hp > defense
+  (quick_attack tem prioridade especial entre moves)
+
+
+7) Regras chave do combate atual
+7.1) Mindgame (rpsScore)
+- Compara intencao de cada lado no turno:
+  - switch vs switch: usa triangulo de tipo (buf > def > atk > buf)
+  - attack vs switch: attack vence
+  - attack vs attack: compara tipo dos ativos
+- Vencedor ganha ponto, perdedor perde ponto.
+- Se ambos vierem de resolucao de Switch Sovietico, delta e dobrado.
+
+7.2) Switch
+- Pode ser bloqueado por: arena trapped, taunt, confuse, immobilize.
+- Ao trocar:
+  - limpa curses/buffs/heal buffs que limpam no switch
+  - reseta stages/flags do monstro que saiu
+  - aplica Spikes se estiver armado no proprio lado (e consome)
+
+7.3) Passivas de tipo em switch simultaneo
+- So disparam quando ambos efetivamente trocam no turno.
+- Define vencedor por tipo e ativa bonus no vencedor:
+  - tipo atk: true damage no oponente (50 por trigger)
+  - tipo def: ganha stack de armor (+10% por stack, max 5)
+  - tipo buf: ganha stack de regen (+5 HP/turn por stack)
+
+7.4) Run e mSPE
+- Run executa na fase run e aumenta mSPE compartilhado em +10%.
+- Hook interage com Run:
+  - bloqueia Run do alvo naquele turno
+  - se alvo tentar Run mesmo assim: penalidade de -20% mSPE
+  - usuario de Hook recebe Exposicao (+66% dano recebido em fases de ataque) e -10% mSPE
+
+7.5) Moves importantes no estado atual
+- protect/endure: guard com cooldown compartilhado.
+- spikes: arma hazard para punir proximo switch do alvo.
+- recover/heal: cura instantanea de 20% do sharedHpMax.
+- wish: cura 50% no comeco do ending_turn do proximo turno.
+- rejuvenation: cura reativa (50% do dano tomado no turno) + regen escalavel.
+- leech_life: aplica Leech Seed (drena no ending_turn, termina com switch do alvo).
+- sekyps: curse de dano flat por stack (24, 48, 72...) no ending_turn; nao limpa no switch.
+- switch_sovietico: arma forced switch para os lados que tiverem alvo valido.
+- team_cure: remove efeitos/debuffs negativos do proprio lado.
+- bounce_kick: dano flat + auto-switch para alvo escolhido.
+
+
+8) Ending turn e cooldowns
+- Ordem fixa do ending_turn:
+  1. focus_punch
+  2. rejuvenation_reactive
+  3. wish
+  4. leech_life (ticks de curses, incluindo sekyps/leech)
+  5. rejuvenation_regen
+  6. type_regen
+- Depois:
+  - decrementa cooldowns
+  - decai duracao de efeitos
+  - reseta flags de protect/endure/bait para proximo turno
+  - checa limite de turnos
+
+
+9) Como a partida termina hoje
+- hp_zero:
+  - se um lado chega a 0 e o outro nao: vitoria do lado vivo
+  - se ambos chegam a 0: empate direto
+- turn_limit:
+  - ao atingir turn 12 (baseTurnLimit), vence quem tiver mais shared HP
+  - HP igual: empate
+- mSPE_escape:
+  - se canMSPE ficar true para algum lado
+  - canMSPE = (mSPE >= 500) OU (gap percentual >= 33%)
+  - encerra tecnicamente; pode ser escape de um lado ou double escape
+- surrender:
+  - derrota imediata do lado que rendeu
+
+
+10) Observacoes importantes (diferencas para docs antigas)
+- O HP compartilhado inicial atual e 600 (nao 200).
+- Hoje existe fim tecnico por mSPE_escape.
+- O limite de turno atual fecha em 12 com decisao por HP/empate (sem overtime extra no codigo atual).
+- A passiva de tipo DEF ativa armor stack; nao esta aplicando arena trap no fluxo atual.
+- Passivas de item/catalogo legacy (src/data/passives.ts) nao dirigem o combate atual.
+
+
+11) Validacao rapida executada nesta leitura
+- npm run check:engine -> ok
+- npm run check:lobby -> ok
+- npm run check:integrity -> ok (14 monsters)

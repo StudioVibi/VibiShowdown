@@ -2,6 +2,11 @@ import type { MonsterType, Stats } from "../shared.ts";
 
 export type DamageType = "scaled" | "true" | "flat";
 
+// Kind define o canal técnico de execução do componente:
+// - effect: status temporário com duração em turnos (ex.: taunt, stun)
+// - buff_debuff: modificador de status numérico (ATK/DEF/DEX) com delta percentual
+// - curse: maldição com regra própria de tick/remoção (ex.: leech_seed, sekyps)
+// - instant: resolução imediata sem estado persistente
 export type CollateralKind = "effect" | "buff_debuff" | "curse" | "instant";
 
 export type CollateralRank = "S" | "A" | "B" | "C" | "?";
@@ -30,6 +35,7 @@ export type BuffDebuffTarget = "self" | "opponent";
 export type BuffDebuffStat = "attack" | "defense" | "speed";
 
 export type EffectCollateral = {
+  // Status controlado por duração (remainingTurns) no runtime.
   kind: "effect";
   id: EffectCollateralId;
   rank?: CollateralRank;
@@ -38,6 +44,7 @@ export type EffectCollateral = {
 };
 
 export type BuffDebuffCollateral = {
+  // Modificador de atributo numérico (deltaPercent) aplicado ao alvo.
   kind: "buff_debuff";
   id: string;
   target: BuffDebuffTarget;
@@ -47,6 +54,7 @@ export type BuffDebuffCollateral = {
 };
 
 export type CurseCollateral = {
+  // Maldição com regras de efeito contínuo/stack conforme id.
   kind: "curse";
   id: CurseCollateralId;
   rank?: CollateralRank;
@@ -54,6 +62,7 @@ export type CurseCollateral = {
 };
 
 export type InstantCollateral = {
+  // Efeito pontual: executa no momento e não persiste em lista ativa.
   kind: "instant";
   id: InstantCollateralId;
   target?: BuffDebuffTarget;
