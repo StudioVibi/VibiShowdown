@@ -111,8 +111,8 @@ export function assert_monster_integrity(monsters: readonly MonsterCatalogEntry[
       .slice(0, ACTIVE_MOVE_SLOTS)
       .filter((move_id) => move_id !== "none");
     ensure(
-      active_default_moves.length === 2,
-      `${monster.id}: defaultMoves must contain exactly 2 active abilities in first ${ACTIVE_MOVE_SLOTS} slots`
+      active_default_moves.length >= 2,
+      `${monster.id}: defaultMoves must contain at least 2 active abilities in first ${ACTIVE_MOVE_SLOTS} slots`
     );
 
     ensure(monster.possiblePassives.length > 0, `${monster.id}: possiblePassives cannot be empty`);

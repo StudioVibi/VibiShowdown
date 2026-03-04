@@ -93,6 +93,21 @@ function first_player_damage(log: EventLog[]): number | null {
   return null;
 }
 
+function happiness_remaining_turns(state: GameState, slot: PlayerSlot): number | null {
+  const curses = state.activeCursesBySlot?.[slot];
+  if (!Array.isArray(curses)) {
+    return null;
+  }
+  const happiness = curses.find((entry) => entry.id === "happiness");
+  if (!happiness) {
+    return null;
+  }
+  if (typeof happiness.remainingTurns !== "number" || !Number.isFinite(happiness.remainingTurns)) {
+    return null;
+  }
+  return Math.max(0, Math.floor(happiness.remainingTurns));
+}
+
 {
   const state = create_running_state(["seismic_toss", "none", "none"], ["none", "none", "none"]);
   const error = validate_intent(state, "player1", { action: "use_move", moveIndex: 5 });
@@ -291,6 +306,79 @@ function first_player_damage(log: EventLog[]): number | null {
   const after_switch_back = resolve_turn(after_switch, intents(null, { action: "switch", targetIndex: 0 })).state;
   const target_after_clear = after_switch_back.players.player2.team[0];
   assert_equal(target_after_clear.attack, target_after_clear.baseAttack, "mirror effect should be gone after switch");
+}
+
+{
+  const state = create_running_state(["fervor", "none", "none"], ["none", "none", "none"]);
+  const turn1 = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 }));
+  turn1.state.turn += 1;
+  const turn2 = resolve_turn(turn1.state, p1_intent({ action: "use_move", moveIndex: 0 }));
+  turn2.state.turn += 1;
+  const turn3 = resolve_turn(turn2.state, p1_intent({ action: "use_move", moveIndex: 0 }));
+  turn3.state.turn += 1;
+  const turn4 = resolve_turn(turn3.state, p1_intent({ action: "use_move", moveIndex: 0 }));
+  const dmg1 = first_player_damage(turn1.log);
+  const dmg2 = first_player_damage(turn2.log);
+  const dmg3 = first_player_damage(turn3.log);
+  const dmg4 = first_player_damage(turn4.log);
+  assert(typeof dmg1 === "number" && dmg1 > 0, "fervor cast 1 should deal damage");
+  assert(typeof dmg2 === "number" && dmg2 > 0, "fervor cast 2 should deal damage");
+  assert(typeof dmg3 === "number" && dmg3 > 0, "fervor cast 3 should deal damage");
+  assert(typeof dmg4 === "number" && dmg4 > 0, "fervor cast 4 should deal damage");
+  if (dmg1 === null || dmg2 === null || dmg3 === null || dmg4 === null) {
+    throw new Error("[engine-test] fervor damage event missing");
+  }
+  assert(dmg2 > dmg1, "fervor cast 2 should be stronger than cast 1 (50 -> 100)");
+  assert(dmg3 > dmg2, "fervor cast 3 should be stronger than cast 2 (100 -> 200)");
+  assert_equal(dmg4, dmg3, "fervor cast 4 should stay at cap (200)");
+
+  assert_equal(happiness_remaining_turns(turn1.state, "player1"), 2, "happiness should start with 2 future turns");
+  assert_equal(
+    happiness_remaining_turns(turn2.state, "player1"),
+    1,
+    "recasting fervor must not refresh happiness duration"
+  );
+  assert_equal(happiness_remaining_turns(turn3.state, "player1"), null, "happiness should expire after lock window");
+}
+
+{
+  const state = create_running_state(["fervor", "punch", "none"], ["none", "none", "none"]);
+  const turn1 = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 })).state;
+  const blocked_alt = validate_intent(turn1, "player1", { action: "use_move", moveIndex: 1 });
+  const allowed_same = validate_intent(turn1, "player1", { action: "use_move", moveIndex: 0 });
+  assert_equal(blocked_alt, "happiness", "happiness should block non-last move");
+  assert_equal(allowed_same, null, "happiness should allow repeating the last move");
+}
+
+{
+  const state = create_running_state(["fervor", "none", "none"], ["none", "none", "none"]);
+  const turn1 = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 }));
+  const turn2 = resolve_turn(turn1.state, p1_intent({ action: "use_move", moveIndex: 0 }));
+  const turn3 = resolve_turn(turn2.state, p1_intent({ action: "switch", targetIndex: 1 }));
+  const turn4 = resolve_turn(turn3.state, p1_intent({ action: "switch", targetIndex: 0 }));
+  const turn5 = resolve_turn(turn4.state, p1_intent({ action: "use_move", moveIndex: 0 }));
+
+  const dmg1 = first_player_damage(turn1.log);
+  const dmg2 = first_player_damage(turn2.log);
+  const dmg5 = first_player_damage(turn5.log);
+  if (dmg1 === null || dmg2 === null || dmg5 === null) {
+    throw new Error("[engine-test] fervor switch reset damage event missing");
+  }
+  assert(dmg2 > dmg1, "fervor cast 2 should be stronger before switch reset");
+  assert_equal(
+    happiness_remaining_turns(turn3.state, "player1"),
+    null,
+    "switch should remove happiness because it is a curse"
+  );
+  assert_equal(turn3.state.fervorChainBySlot.player1, 0, "switch should reset fervor chain");
+  assert_equal(dmg5, dmg1, "after switch cycle fervor should restart at first multiplier");
+}
+
+{
+  const state = create_running_state(["punch", "fervor", "none"], ["none", "none", "none"]);
+  state.fervorChainBySlot.player1 = 2;
+  const after_punch = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 })).state;
+  assert_equal(after_punch.fervorChainBySlot.player1, 0, "non-fervor successful move should reset fervor chain");
 }
 
 console.log("[engine-test] ok");

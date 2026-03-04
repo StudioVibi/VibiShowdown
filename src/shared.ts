@@ -93,6 +93,7 @@ export type ActiveCurseState = {
   sourceSlot: PlayerSlot | null;
   stacks: number;
   appliedTurn?: number;
+  remainingTurns?: number;
 };
 
 export type BuffDebuffStat = "attack" | "defense" | "speed";
@@ -145,6 +146,7 @@ export type GameState = {
   typePassiveRegenStacks: Record<PlayerSlot, number>;
   rejuvenationStacks: Record<PlayerSlot, number>;
   rejuvenationStartTurn: Record<PlayerSlot, number>;
+  fervorChainBySlot: Record<PlayerSlot, number>;
   arenaTrapUntilTurn: Record<PlayerSlot, number>;
   spikesArmedByTarget: Record<PlayerSlot, boolean>;
   players: Record<PlayerSlot, PlayerState>;

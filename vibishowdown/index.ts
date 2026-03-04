@@ -97,6 +97,8 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
   punch: "Golpe fisico com multiplicador 93 (passa por DEF e armadura).",
   power: "Aumenta ATK em +1 stage (perde no switch) e reduz DEX em 10% no usuario (individual permanente).",
+  fervor:
+    "Ataque escalado por recast consecutivo: 50/100/200. Ao usar, agenda Happiness no ending_turn (3 turnos no total: atual +2). Reaplicar nao renova a duracao.",
   hook:
     "Impede o Run do adversario neste turno; se ele tentar Run, recebe -20% de mSPE. Aplica Exposicao no usuario (+66% dano recebido em fases de ataque) e auto-aplica -10% de mSPE.",
   kick: "Golpe fisico forte de dano escalado.",
@@ -2221,7 +2223,6 @@ const EFFECT_UI_LABELS: Record<string, string> = {
   confuse: "Confuse",
   sleep: "Sleep",
   stun: "Stun",
-  happiness: "Happiness",
   taunt: "Taunt",
   frustration: "Frustration",
   nocaute: "Nocaute",
@@ -2233,7 +2234,9 @@ const EFFECT_UI_LABELS: Record<string, string> = {
 };
 const CURSE_UI_LABELS: Record<string, string> = {
   madness: "Madness",
+  happiness: "Happiness",
   leech_seed: "Leech Seed",
+  sekyps: "Sekyps",
   mirror: "Mirror",
   destiny_bond: "Destiny Bond",
   endure: "Endure"
@@ -2263,7 +2266,13 @@ function effect_kind_for_stat_aggregate(entry: UiStatAggregate): EffectChipKind 
   return "buff";
 }
 
-type ActiveCurseUi = { id: string; sourceSlot: PlayerSlot | null; stacks: number; appliedTurn?: number };
+type ActiveCurseUi = {
+  id: string;
+  sourceSlot: PlayerSlot | null;
+  stacks: number;
+  appliedTurn?: number;
+  remainingTurns?: number;
+};
 
 function active_curses_for_slot(state: GameState, slot_id: PlayerSlot): ActiveCurseUi[] {
   const input = state.activeCursesBySlot?.[slot_id];
@@ -2275,7 +2284,11 @@ function active_curses_for_slot(state: GameState, slot_id: PlayerSlot): ActiveCu
     sourceSlot: row.sourceSlot === "player1" || row.sourceSlot === "player2" ? row.sourceSlot : null,
     stacks: typeof row.stacks === "number" && Number.isFinite(row.stacks) ? Math.max(1, Math.floor(row.stacks)) : 1,
     appliedTurn:
-      typeof row.appliedTurn === "number" && Number.isFinite(row.appliedTurn) ? Math.floor(row.appliedTurn) : undefined
+      typeof row.appliedTurn === "number" && Number.isFinite(row.appliedTurn) ? Math.floor(row.appliedTurn) : undefined,
+    remainingTurns:
+      typeof row.remainingTurns === "number" && Number.isFinite(row.remainingTurns)
+        ? Math.max(1, Math.floor(row.remainingTurns))
+        : undefined
   }));
 }
 
@@ -2504,7 +2517,24 @@ function curse_sekyps_tag_builder(curse: ActiveCurseUi, ctx: TagContext): TagChi
   ];
 }
 
+function curse_happiness_tag_builder(curse: ActiveCurseUi): TagChip[] {
+  const remaining_turns =
+    typeof curse.remainingTurns === "number" && Number.isFinite(curse.remainingTurns)
+      ? Math.max(1, Math.floor(curse.remainingTurns))
+      : 1;
+  return [
+    {
+      id: "curse_happiness",
+      label: `Happiness | ${remaining_turns}t`,
+      kind: "debuff",
+      category: "control",
+      order: 125
+    }
+  ];
+}
+
 const CURSE_TAG_BUILDERS: Record<string, CurseTagBuilder> = {
+  happiness: curse_happiness_tag_builder,
   leech_seed: curse_leech_seed_tag_builder,
   sekyps: curse_sekyps_tag_builder
 };

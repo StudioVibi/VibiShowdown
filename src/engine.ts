@@ -61,7 +61,8 @@ const END_TURN_EFFECT_ORDER = [
   "wish",
   "leech_life",
   "rejuvenation_regen",
-  "type_regen"
+  "type_regen",
+  "happiness_apply"
 ] as const;
 type EndTurnEffectId = (typeof END_TURN_EFFECT_ORDER)[number];
 
@@ -127,6 +128,9 @@ const SEKYPS_DAMAGE_PER_STACK = 24;
 const REJUVENATION_REGEN_FLAT_PER_STACK = 30;
 const REJUVENATION_REGEN_STACK_MAX = 3;
 const REJUVENATION_REGEN_FLAT_MAX = REJUVENATION_REGEN_FLAT_PER_STACK * REJUVENATION_REGEN_STACK_MAX;
+const FERVOR_CHAIN_MAX = 2;
+const FERVOR_MULTIPLIERS_100 = [50, 100, 200] as const;
+const HAPPINESS_DURATION_AFTER_ENDING_APPLY = 2;
 const TYPE_BUF_REGEN_HEAL_BUFF_ID = "type_buf_regen";
 const REJUVENATION_REGEN_HEAL_BUFF_ID = "rejuvenation_regen";
 const HEAL_MOVE_HEAL_BUFF_ID = "heal_move";
@@ -135,7 +139,6 @@ const EFFECT_IDS: readonly EffectCollateralId[] = [
   "confuse",
   "sleep",
   "stun",
-  "happiness",
   "taunt",
   "frustration",
   "nocaute",
@@ -149,6 +152,7 @@ const EFFECT_IDS: readonly EffectCollateralId[] = [
 const EFFECT_ID_SET = new Set<string>(EFFECT_IDS);
 const CURSE_IDS: readonly CurseCollateralId[] = [
   "madness",
+  "happiness",
   "leech_seed",
   "sekyps",
   "mirror",
@@ -161,7 +165,6 @@ const EFFECT_LABELS: Record<EffectCollateralId, string> = {
   confuse: "Confuse",
   sleep: "Sleep",
   stun: "Stun",
-  happiness: "Happiness",
   taunt: "Taunt",
   frustration: "Frustration",
   nocaute: "Nocaute",
@@ -174,6 +177,7 @@ const EFFECT_LABELS: Record<EffectCollateralId, string> = {
 };
 const CURSE_LABELS: Record<CurseCollateralId, string> = {
   madness: "Madness",
+  happiness: "Happiness",
   leech_seed: "Leech Seed",
   sekyps: "Sekyps",
   mirror: "Mirror",
@@ -239,6 +243,20 @@ function stat_value_from_delta_percent(base_value: number, delta_percent: number
 function stat_value_from_delta_percent_and_stage(base_value: number, delta_percent: number, stage: number): number {
   const value_after_percent = stat_value_from_delta_percent(base_value, delta_percent);
   return stat_value_from_stage(value_after_percent, stage);
+}
+
+function normalize_fervor_chain(value: unknown): number {
+  const raw = typeof value === "number" ? value : 0;
+  return Math.max(0, Math.min(FERVOR_CHAIN_MAX, normalize_int(raw, 0, 0)));
+}
+
+function fervor_cast_streak_from_chain(chain: number): number {
+  return Math.max(1, Math.min(FERVOR_MULTIPLIERS_100.length, normalize_fervor_chain(chain) + 1));
+}
+
+function fervor_multiplier100_for_chain(chain: number): number {
+  const streak = fervor_cast_streak_from_chain(chain);
+  return FERVOR_MULTIPLIERS_100[streak - 1] ?? FERVOR_MULTIPLIERS_100[0];
 }
 
 function entry_targets_monster(entry: ActiveBuffDebuffState, monster_id: string): boolean {
@@ -473,6 +491,10 @@ function empty_rejuvenation_start_turn(): Record<PlayerSlot, number> {
   return empty_slot_record(0, 0);
 }
 
+function empty_fervor_chain_by_slot(): Record<PlayerSlot, number> {
+  return empty_slot_record(0, 0);
+}
+
 function empty_pending_wish(): Record<PlayerSlot, number | null> {
   return empty_slot_record<number | null>(null, null);
 }
@@ -569,7 +591,13 @@ function normalize_active_curses(input: unknown): ActiveCurseState[] {
     if (!item || typeof item !== "object") {
       continue;
     }
-    const row = item as { id?: unknown; sourceSlot?: unknown; stacks?: unknown; appliedTurn?: unknown };
+    const row = item as {
+      id?: unknown;
+      sourceSlot?: unknown;
+      stacks?: unknown;
+      appliedTurn?: unknown;
+      remainingTurns?: unknown;
+    };
     if (typeof row.id !== "string" || !CURSE_ID_SET.has(row.id)) {
       continue;
     }
@@ -581,7 +609,17 @@ function normalize_active_curses(input: unknown): ActiveCurseState[] {
       typeof row.appliedTurn === "number" && Number.isFinite(row.appliedTurn)
         ? normalize_int(row.appliedTurn, 0, -1000000)
         : undefined;
-    normalized.push({ id: row.id, sourceSlot: source_slot, stacks, appliedTurn: applied_turn });
+    const remaining_turns =
+      typeof row.remainingTurns === "number" && Number.isFinite(row.remainingTurns)
+        ? Math.max(1, normalize_int(row.remainingTurns, 1, 1))
+        : undefined;
+    normalized.push({
+      id: row.id,
+      sourceSlot: source_slot,
+      stacks,
+      appliedTurn: applied_turn,
+      ...(typeof remaining_turns === "number" ? { remainingTurns: remaining_turns } : {})
+    });
   }
   return normalized;
 }
@@ -745,6 +783,14 @@ function curse_stacks(state: GameState, slot: PlayerSlot, curse_id: CurseCollate
   return curse_state(state, slot, curse_id)?.stacks ?? 0;
 }
 
+function curse_turns_remaining(state: GameState, slot: PlayerSlot, curse_id: CurseCollateralId): number {
+  const remaining = curse_state(state, slot, curse_id)?.remainingTurns;
+  if (typeof remaining !== "number" || !Number.isFinite(remaining)) {
+    return 0;
+  }
+  return Math.max(0, normalize_int(remaining, 0, 0));
+}
+
 function effect_turns_remaining(state: GameState, slot: PlayerSlot, effect_id: EffectCollateralId): number {
   return effect_state(state, slot, effect_id)?.remainingTurns ?? 0;
 }
@@ -820,16 +866,25 @@ function apply_move_effects_from_collateral(
   }
 }
 
+type UpsertCurseOptions = {
+  remainingTurns?: number;
+};
+
 function upsert_curse(
   state: GameState,
   log: EventLog[],
   target_slot: PlayerSlot,
   curse_id: CurseCollateralId,
   source_slot: PlayerSlot | null,
-  source_move_id: string
+  source_move_id: string,
+  options?: UpsertCurseOptions
 ): void {
   ensure_state_runtime_defaults(state);
   const curses = state.activeCursesBySlot[target_slot];
+  const requested_remaining_turns =
+    typeof options?.remainingTurns === "number" && Number.isFinite(options.remainingTurns)
+      ? Math.max(1, normalize_int(options.remainingTurns, 1, 1))
+      : undefined;
   const existing = curses.find((entry) => entry.id === curse_id) ?? null;
   if (existing) {
     if (curse_id === "sekyps") {
@@ -863,7 +918,11 @@ function upsert_curse(
         targetSlot: target_slot,
         move: source_move_id,
         curse: curse_id,
-        alreadyActive: true
+        alreadyActive: true,
+        remainingTurns:
+          typeof existing.remainingTurns === "number" && Number.isFinite(existing.remainingTurns)
+            ? Math.max(1, normalize_int(existing.remainingTurns, 1, 1))
+            : null
       }
     });
     return;
@@ -872,18 +931,23 @@ function upsert_curse(
     id: curse_id,
     sourceSlot: source_slot,
     stacks: 1,
-    appliedTurn: state.turn
+    appliedTurn: state.turn,
+    ...(typeof requested_remaining_turns === "number" ? { remainingTurns: requested_remaining_turns } : {})
   });
   log.push({
     type: "curse_apply",
     turn: state.turn,
-    summary: `${curse_label(curse_id)} cursed ${target_slot}`,
+    summary:
+      typeof requested_remaining_turns === "number"
+        ? `${curse_label(curse_id)} cursed ${target_slot} (${requested_remaining_turns} turn${requested_remaining_turns === 1 ? "" : "s"})`
+        : `${curse_label(curse_id)} cursed ${target_slot}`,
     data: {
       slot: source_slot,
       targetSlot: target_slot,
       move: source_move_id,
       curse: curse_id,
-      alreadyActive: false
+      alreadyActive: false,
+      remainingTurns: typeof requested_remaining_turns === "number" ? requested_remaining_turns : null
     }
   });
 }
@@ -1324,6 +1388,43 @@ function decay_effects_end_turn(state: GameState, log: EventLog[]): void {
   }
 }
 
+function decay_curses_end_turn(state: GameState, log: EventLog[]): void {
+  ensure_state_runtime_defaults(state);
+  for (const slot of SLOT_ORDER) {
+    const current = state.activeCursesBySlot[slot];
+    if (!Array.isArray(current) || current.length === 0) {
+      state.activeCursesBySlot[slot] = [];
+      continue;
+    }
+    const next: ActiveCurseState[] = [];
+    for (const curse of current) {
+      if (typeof curse.remainingTurns !== "number" || !Number.isFinite(curse.remainingTurns)) {
+        next.push(curse);
+        continue;
+      }
+      if ((curse.appliedTurn ?? -1) === state.turn) {
+        next.push({
+          ...curse,
+          remainingTurns: Math.max(1, normalize_int(curse.remainingTurns, 1, 1))
+        });
+        continue;
+      }
+      const remaining = Math.max(0, normalize_int(curse.remainingTurns, 1, 0) - 1);
+      if (remaining > 0) {
+        next.push({ ...curse, remainingTurns: remaining });
+        continue;
+      }
+      log.push({
+        type: "curse_end",
+        turn: state.turn,
+        summary: `${curse_label(curse.id)} ended on ${slot}`,
+        data: { slot, source: curse.sourceSlot, curse: curse.id, reason: "duration" }
+      });
+    }
+    state.activeCursesBySlot[slot] = next;
+  }
+}
+
 function is_slot_taunted(state: GameState, slot: PlayerSlot): boolean {
   return (state.tauntUntilTurn?.[slot] ?? 0) >= state.turn || has_effect(state, slot, "taunt");
 }
@@ -1439,7 +1540,7 @@ function move_block_reason(
   if (typeof last_move === "number" && has_effect(state, slot, "frustration") && move_index === last_move) {
     return "frustration";
   }
-  if (typeof last_move === "number" && has_effect(state, slot, "happiness") && move_index !== last_move) {
+  if (typeof last_move === "number" && has_curse(state, slot, "happiness") && move_index !== last_move) {
     return "happiness";
   }
   return null;
@@ -1495,6 +1596,21 @@ function mark_last_move_used(state: GameState, slot: PlayerSlot, move_id: MoveId
   state.lastMoveIndexBySlot[slot] = move_index;
 }
 
+function reset_fervor_chain(state: GameState, slot: PlayerSlot): void {
+  ensure_state_runtime_defaults(state);
+  state.fervorChainBySlot[slot] = 0;
+}
+
+function update_fervor_chain_after_move_success(state: GameState, slot: PlayerSlot, move_id: MoveId): void {
+  ensure_state_runtime_defaults(state);
+  if (move_id !== "fervor") {
+    state.fervorChainBySlot[slot] = 0;
+    return;
+  }
+  const current = normalize_fervor_chain(state.fervorChainBySlot[slot]);
+  state.fervorChainBySlot[slot] = Math.min(FERVOR_CHAIN_MAX, current + 1);
+}
+
 function clone_player(player: PlayerState): PlayerState {
   const active = player.team[player.activeIndex] ?? player.team[0];
   const fallback_max_hp = active ? normalize_int(active.maxHp, SHARED_HP_START, 1) : SHARED_HP_START;
@@ -1528,6 +1644,7 @@ export function clone_state(state: GameState): GameState {
     typePassiveRegenStacks: empty_type_passive_regen_stacks(),
     rejuvenationStacks: empty_rejuvenation_stacks(),
     rejuvenationStartTurn: empty_rejuvenation_start_turn(),
+    fervorChainBySlot: empty_fervor_chain_by_slot(),
     arenaTrapUntilTurn: empty_arena_trap_until_turn(),
     spikesArmedByTarget: empty_spikes_armed_by_target(),
     players: {
@@ -1575,6 +1692,8 @@ export function clone_state(state: GameState): GameState {
   );
   cloned.rejuvenationStartTurn.player1 = normalize_int(state.rejuvenationStartTurn?.player1, 0, 0);
   cloned.rejuvenationStartTurn.player2 = normalize_int(state.rejuvenationStartTurn?.player2, 0, 0);
+  cloned.fervorChainBySlot.player1 = normalize_fervor_chain(state.fervorChainBySlot?.player1);
+  cloned.fervorChainBySlot.player2 = normalize_fervor_chain(state.fervorChainBySlot?.player2);
   cloned.arenaTrapUntilTurn.player1 = normalize_int(state.arenaTrapUntilTurn?.player1, 0, 0);
   cloned.arenaTrapUntilTurn.player2 = normalize_int(state.arenaTrapUntilTurn?.player2, 0, 0);
   cloned.spikesArmedByTarget.player1 = !!state.spikesArmedByTarget?.player1;
@@ -1713,6 +1832,9 @@ function ensure_state_runtime_defaults(state: GameState): void {
   if (!state.rejuvenationStartTurn) {
     state.rejuvenationStartTurn = empty_rejuvenation_start_turn();
   }
+  if (!state.fervorChainBySlot) {
+    state.fervorChainBySlot = empty_fervor_chain_by_slot();
+  }
   if (!state.arenaTrapUntilTurn) {
     state.arenaTrapUntilTurn = empty_arena_trap_until_turn();
   }
@@ -1720,6 +1842,7 @@ function ensure_state_runtime_defaults(state: GameState): void {
     state.spikesArmedByTarget = empty_spikes_armed_by_target();
   }
   for (const slot of SLOT_ORDER) {
+    state.fervorChainBySlot[slot] = normalize_fervor_chain(state.fervorChainBySlot?.[slot]);
     const buffs = state.activeHealBuffsBySlot[slot];
     if (!Array.isArray(buffs)) {
       state.activeHealBuffsBySlot[slot] = [];
@@ -2759,6 +2882,25 @@ function apply_focus_punch_end_turn(
   }
 }
 
+function apply_pending_happiness_end_turn(
+  state: GameState,
+  log: EventLog[],
+  pending_happiness_apply_by_slot: Record<PlayerSlot, boolean>
+): void {
+  for (const slot of SLOT_ORDER) {
+    if (!pending_happiness_apply_by_slot[slot]) {
+      continue;
+    }
+    const target = active_monster(state.players[slot]);
+    if (!is_alive(target)) {
+      continue;
+    }
+    upsert_curse(state, log, slot, "happiness", slot, "fervor", {
+      remainingTurns: HAPPINESS_DURATION_AFTER_ENDING_APPLY
+    });
+  }
+}
+
 function apply_end_turn_effect(
   state: GameState,
   log: EventLog[],
@@ -2769,7 +2911,8 @@ function apply_end_turn_effect(
   switched_this_turn: Record<PlayerSlot, boolean>,
   rejuvenation_used_this_turn: Record<PlayerSlot, boolean>,
   damage_taken_this_turn: Record<PlayerSlot, number>,
-  incoming_damage_multiplier_percent: Record<PlayerSlot, number>
+  incoming_damage_multiplier_percent: Record<PlayerSlot, number>,
+  pending_happiness_apply_by_slot: Record<PlayerSlot, boolean>
 ): void {
   if (effect_id === "focus_punch") {
     apply_focus_punch_end_turn(
@@ -2812,9 +2955,13 @@ function apply_end_turn_effect(
     }
     return;
   }
-  for (const slot of SLOT_ORDER) {
-    apply_type_passive_regen_end_turn(state, log, slot, hp_changed);
+  if (effect_id === "type_regen") {
+    for (const slot of SLOT_ORDER) {
+      apply_type_passive_regen_end_turn(state, log, slot, hp_changed);
+    }
+    return;
   }
+  apply_pending_happiness_end_turn(state, log, pending_happiness_apply_by_slot);
 }
 
 function apply_end_turn_phase(
@@ -2826,7 +2973,8 @@ function apply_end_turn_phase(
   switched_this_turn: Record<PlayerSlot, boolean>,
   rejuvenation_used_this_turn: Record<PlayerSlot, boolean>,
   damage_taken_this_turn: Record<PlayerSlot, number>,
-  incoming_damage_multiplier_percent: Record<PlayerSlot, number>
+  incoming_damage_multiplier_percent: Record<PlayerSlot, number>,
+  pending_happiness_apply_by_slot: Record<PlayerSlot, boolean>
 ): MatchProgress {
   for (const effect_id of END_TURN_EFFECT_ORDER) {
     apply_end_turn_effect(
@@ -2839,7 +2987,8 @@ function apply_end_turn_phase(
       switched_this_turn,
       rejuvenation_used_this_turn,
       damage_taken_this_turn,
-      incoming_damage_multiplier_percent
+      incoming_damage_multiplier_percent,
+      pending_happiness_apply_by_slot
     );
     const progress = check_zero_hp_match_result(state, log);
     if (progress !== "continue") {
@@ -3235,6 +3384,7 @@ function apply_run_action(
   player_slot: PlayerSlot,
   blocked_by_hook_this_turn: boolean = false
 ): void {
+  ensure_state_runtime_defaults(state);
   const player = state.players[player_slot];
   const actor = active_monster(player);
   if (!is_alive(actor)) {
@@ -3247,6 +3397,7 @@ function apply_run_action(
     });
     return;
   }
+  reset_fervor_chain(state, player_slot);
   if (blocked_by_hook_this_turn) {
     const before_mSPE = Math.max(0, player.sharedMSPE);
     const reduction = before_mSPE > 0
@@ -3340,7 +3491,8 @@ function apply_move(
   damage_taken_this_turn: Record<PlayerSlot, number>,
   rejuvenation_used_this_turn: Record<PlayerSlot, boolean>,
   hook_run_blocked_this_turn: Record<PlayerSlot, boolean>,
-  incoming_damage_multiplier_percent: Record<PlayerSlot, number>
+  incoming_damage_multiplier_percent: Record<PlayerSlot, number>,
+  pending_happiness_apply_by_slot: Record<PlayerSlot, boolean>
 ): void {
   const player = state.players[player_slot];
   const opponent = state.players[other_slot(player_slot)];
@@ -3372,6 +3524,7 @@ function apply_move(
     (entry): entry is InstantCollateral => entry.kind === "instant"
   );
   const finalize_move_success = (): void => {
+    update_fervor_chain_after_move_success(state, player_slot, move_id);
     mark_last_move_used(state, player_slot, move_id, move_index);
     apply_move_effects_from_collateral(state, log, player_slot, effect_collaterals, spec.id);
     apply_move_curses_from_collateral(state, log, player_slot, curse_collaterals, spec.id);
@@ -3382,8 +3535,11 @@ function apply_move(
   const blocked_by = move_block_reason(state, player_slot, move_index, spec);
   if (blocked_by) {
     const type = blocked_by === "taunt" ? "taunt_blocked" : "effect_blocked";
-    const turns_remaining =
-      EFFECT_ID_SET.has(blocked_by) ? effect_turns_remaining(state, player_slot, blocked_by as EffectCollateralId) : 0;
+    const turns_remaining = blocked_by === "happiness"
+      ? curse_turns_remaining(state, player_slot, "happiness")
+      : EFFECT_ID_SET.has(blocked_by)
+        ? effect_turns_remaining(state, player_slot, blocked_by as EffectCollateralId)
+        : 0;
     log.push({
       type,
       turn: state.turn,
@@ -4017,6 +4173,52 @@ function apply_move(
     return;
   }
 
+  if (spec.id === "fervor") {
+    ensure_state_runtime_defaults(state);
+    const chain_before = normalize_fervor_chain(state.fervorChainBySlot[player_slot]);
+    const cast_streak = fervor_cast_streak_from_chain(chain_before);
+    const multiplier100 = fervor_multiplier100_for_chain(chain_before);
+    const fervor_spec: ReturnType<typeof move_spec> = {
+      ...spec,
+      attackMultiplier100: multiplier100,
+      attackMultiplierPerLevel100: 0
+    };
+    apply_damage_move(
+      state,
+      log,
+      player_slot,
+      fervor_spec,
+      hp_changed,
+      spec.phaseId,
+      took_damage_this_turn,
+      damage_taken_this_turn,
+      incoming_damage_multiplier_percent
+    );
+    finalize_move_success();
+    pending_happiness_apply_by_slot[player_slot] = true;
+    const chain_after = normalize_fervor_chain(state.fervorChainBySlot[player_slot]);
+    const next_multiplier100 = fervor_multiplier100_for_chain(chain_after);
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary:
+        `Fervor: cast ${cast_streak} -> multiplier ${multiplier100}; ` +
+        `next cast ${Math.min(3, chain_after + 1)} -> ${next_multiplier100}; ` +
+        "Happiness queued for ending_turn",
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        target: defender.id,
+        castStreak: cast_streak,
+        multiplier100,
+        nextCastStreak: Math.min(3, chain_after + 1),
+        nextMultiplier100: next_multiplier100
+      }
+    });
+    return;
+  }
+
   if (spec.id === "leech_life") {
     const target_slot = other_slot(player_slot);
     log.push({
@@ -4301,10 +4503,12 @@ function perform_switch(
   damage_taken_this_turn?: Record<PlayerSlot, number>,
   incoming_damage_multiplier_percent?: Record<PlayerSlot, number>
 ): void {
+  ensure_state_runtime_defaults(state);
   const player = state.players[slot];
   const from = player.activeIndex;
   const outgoing = player.team[from];
   reset_monster_on_switch_out(outgoing);
+  reset_fervor_chain(state, slot);
   clear_curses_on_target_switch(state, log, slot);
   clear_buff_debuffs_on_target_switch(state, log, slot);
   clear_heal_buffs_on_target_switch(state, log, slot);
@@ -4506,6 +4710,7 @@ export function create_initial_state(
     typePassiveRegenStacks: empty_type_passive_regen_stacks(),
     rejuvenationStacks: empty_rejuvenation_stacks(),
     rejuvenationStartTurn: empty_rejuvenation_start_turn(),
+    fervorChainBySlot: empty_fervor_chain_by_slot(),
     arenaTrapUntilTurn: empty_arena_trap_until_turn(),
     spikesArmedByTarget: empty_spikes_armed_by_target(),
     players: {
@@ -4543,6 +4748,7 @@ export function resolve_turn(
   const hook_run_blocked_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   const incoming_damage_multiplier_percent: Record<PlayerSlot, number> = { player1: 100, player2: 100 };
   const rejuvenation_used_this_turn: Record<PlayerSlot, boolean> = { player1: false, player2: false };
+  const pending_happiness_apply_by_slot: Record<PlayerSlot, boolean> = { player1: false, player2: false };
   sync_all_players_shared_hp(next);
   sync_all_players_shared_mSPE(next);
   refresh_active_monster_stats(next);
@@ -4691,7 +4897,8 @@ export function resolve_turn(
           damage_taken_this_turn,
           rejuvenation_used_this_turn,
           hook_run_blocked_this_turn,
-          incoming_damage_multiplier_percent
+          incoming_damage_multiplier_percent,
+          pending_happiness_apply_by_slot
         );
       } else {
         apply_run_action(next, log, action.player, hook_run_blocked_this_turn[action.player]);
@@ -4727,12 +4934,14 @@ export function resolve_turn(
       switched_this_turn,
       rejuvenation_used_this_turn,
       damage_taken_this_turn,
-      incoming_damage_multiplier_percent
+      incoming_damage_multiplier_percent,
+      pending_happiness_apply_by_slot
     );
   }
   decrement_cooldowns(next);
   if (next.status === "running") {
     decay_effects_end_turn(next, log);
+    decay_curses_end_turn(next, log);
   }
   refresh_active_monster_stats(next);
   // Clear guard flags after the turn resolves (so next turn starts unprotected/not-enduring).

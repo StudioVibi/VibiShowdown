@@ -119,7 +119,7 @@ export const MONSTER_ROSTER: readonly MonsterCatalogEntry[] = [
     stats: { level: 12, maxHp: 242, attack: 115, defense: 75, speed: 75 },
     possibleMoves: all_move_options(),
     possiblePassives: ["none"],
-    defaultMoves: ["punch", "heal", "none", "run"],
+    defaultMoves: ["punch", "heal", "mirror", "run"],
     defaultPassive: "none"
   },
   {
