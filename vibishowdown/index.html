@@ -1717,14 +1717,11 @@
 
       body {
         color: var(--text);
-        background:
-          radial-gradient(circle at 8% 0%, rgba(38, 139, 210, 0.15) 0%, rgba(38, 139, 210, 0) 44%),
-          radial-gradient(circle at 92% 100%, rgba(181, 137, 0, 0.16) 0%, rgba(181, 137, 0, 0) 48%),
-          linear-gradient(180deg, #fdf6e3 0%, #f4edd9 100%);
+        background: #fdf6e3;
       }
 
       #game {
-        background: linear-gradient(160deg, #fdf6e3 0%, #efe4cd 72%);
+        background: #f4edd9;
         border: 1px solid rgba(101, 123, 131, 0.24);
         box-shadow: 0 22px 52px var(--shadow);
       }
@@ -1741,14 +1738,11 @@
       }
 
       .arena {
-        background: linear-gradient(155deg, rgba(253, 246, 227, 0.98) 0%, rgba(238, 232, 213, 0.94) 100%);
+        background: rgba(253, 246, 227, 0.96);
       }
 
       #prematch {
-        background:
-          radial-gradient(circle at 14% 12%, rgba(38, 139, 210, 0.14) 0%, rgba(38, 139, 210, 0) 42%),
-          radial-gradient(circle at 86% 90%, rgba(181, 137, 0, 0.18) 0%, rgba(181, 137, 0, 0) 48%),
-          rgba(253, 246, 227, 0.9);
+        background: rgba(253, 246, 227, 0.9);
       }
 
       .switch-modal {
@@ -1760,20 +1754,20 @@
       }
 
       .match-end-card {
-        background: linear-gradient(165deg, rgba(253, 246, 227, 0.97) 0%, rgba(238, 232, 213, 0.94) 100%);
+        background: rgba(253, 246, 227, 0.96);
         border-color: rgba(101, 123, 131, 0.22);
         box-shadow: 0 18px 40px rgba(88, 110, 117, 0.24);
       }
 
       .roster,
       .config {
-        background: linear-gradient(160deg, rgba(238, 232, 213, 0.9) 0%, rgba(244, 237, 217, 0.88) 100%);
+        background: rgba(238, 232, 213, 0.9);
         border: 1px solid rgba(101, 123, 131, 0.2);
       }
 
       .roster-card,
       .slot-card {
-        background: linear-gradient(170deg, rgba(253, 246, 227, 0.88), rgba(238, 232, 213, 0.78));
+        background: rgba(246, 239, 221, 0.9);
         border-color: rgba(101, 123, 131, 0.18);
       }
 
@@ -1793,7 +1787,7 @@
       }
 
       .tab.active {
-        background: linear-gradient(140deg, rgba(38, 139, 210, 0.24), rgba(133, 153, 0, 0.22));
+        background: rgba(173, 132, 89, 0.26);
         border-color: rgba(111, 81, 54, 0.44);
         color: var(--text);
       }
@@ -1857,7 +1851,7 @@
       }
 
       .sprite {
-        background: linear-gradient(145deg, rgba(255, 255, 255, 0.65), rgba(238, 232, 213, 0.9));
+        background: rgba(253, 246, 227, 0.82);
       }
 
       .sprite img {
@@ -1869,7 +1863,7 @@
       }
 
       .hp-bar span {
-        background: linear-gradient(90deg, #859900 0%, #b58900 62%, #dc322f 100%);
+        background: #859900;
       }
 
       .bench-slot,
@@ -1891,7 +1885,7 @@
       }
 
       .action-pad .action-btn {
-        background: linear-gradient(180deg, #fdf6e3 0%, #eee8d5 100%);
+        background: rgba(238, 232, 213, 0.92);
         border: 1px solid rgba(101, 123, 131, 0.26);
         color: var(--text);
       }
@@ -1903,29 +1897,34 @@
       }
 
       .action-pad .action-btn.danger {
-        background: linear-gradient(140deg, #dc322f, #cb4b16);
+        background: #dc322f;
         color: #fdf6e3;
       }
 
       #ready-btn {
-        background: linear-gradient(135deg, #c5a27b, #ad8459);
+        background: #ad8459;
         border: 1px solid rgba(93, 74, 50, 0.35);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52);
         color: #2f2418;
       }
 
       #ready-btn:hover:not(:disabled) {
-        background: linear-gradient(135deg, #ceae8b, #b99169);
+        background: #ad8459;
       }
 
       #ready-btn:active:not(:disabled) {
-        background: linear-gradient(135deg, #bb946a, #a57b4f);
+        background: #ad8459;
       }
 
       #ready-btn:disabled {
-        background: linear-gradient(135deg, rgba(231, 223, 202, 0.92), rgba(215, 205, 187, 0.9));
+        background: rgba(231, 223, 202, 0.92);
         border-color: rgba(101, 123, 131, 0.2);
         color: rgba(88, 110, 117, 0.8);
+      }
+
+      .match-end-card button {
+        background: #ad8459;
+        color: #fdf6e3;
       }
 
       .status-line,
