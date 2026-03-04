@@ -5449,7 +5449,7 @@ function apply_move(state, log, player_slot, move_id, move_index, hp_changed, fo
       stat: "speed",
       deltaPercent: -10,
       clearsOnSwitch: false
-    }, player_slot, spec.id, { targetMonsterId: attacker.id });
+    }, player_slot, spec.id);
     refresh_active_monster_stats_for_slot(state, player_slot);
     const after_stage = effective_attack_stage_for_monster(state, player_slot, attacker);
     const after_attack = attacker.attack;
@@ -7717,7 +7717,7 @@ var MOVE_TOOLTIP_DELAY_MS = 2000;
 var MOVE_TOOLTIP_DESCRIPTIONS = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
   punch: "Golpe fisico com multiplicador 93 (passa por DEF e armadura).",
-  power: "Aumenta ATK em +1 stage e reduz DEX em 10% do base.",
+  power: "Aumenta ATK em +1 stage no usuario e reduz DEX em 10% no proprio lado (permanente no slot).",
   hook: "Impede o Run do adversario neste turno; se ele tentar Run, recebe -20% de mSPE. Aplica Exposicao no usuario (+66% dano recebido em fases de ataque) e auto-aplica -10% de mSPE.",
   kick: "Golpe fisico forte de dano escalado.",
   throw: "Golpe com formula fixa (90x90) escalada pelo nivel de formula.",

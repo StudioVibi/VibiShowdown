@@ -3564,8 +3564,7 @@ function apply_move(
         clearsOnSwitch: false
       },
       player_slot,
-      spec.id,
-      { targetMonsterId: attacker.id }
+      spec.id
     );
     refresh_active_monster_stats_for_slot(state, player_slot);
     const after_stage = effective_attack_stage_for_monster(state, player_slot, attacker);

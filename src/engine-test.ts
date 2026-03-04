@@ -236,7 +236,7 @@ function first_player_damage(log: EventLog[]): number | null {
   assert_equal(after_switch_out.players.player1.activeIndex, 1, "switch should move to bench slot 1");
   const kairus_active = after_switch_out.players.player1.team[1];
   assert_equal(kairus_active.attack, kairus_active.baseAttack, "active replacement should not inherit power attack buff");
-  assert_equal(kairus_active.speed, kairus_active.baseSpeed, "active replacement should not inherit power speed debuff");
+  assert(kairus_active.speed < kairus_active.baseSpeed, "active replacement should inherit power speed debuff from slot");
 
   const after_switch_back = resolve_turn(after_switch_out, p1_intent({ action: "switch", targetIndex: 0 })).state;
   assert_equal(after_switch_back.players.player1.activeIndex, 0, "switch back should return to caster monster");
