@@ -1687,6 +1687,13 @@
         --bg-2: #eee8d5;
         --panel: #f4ecd8;
         --panel-2: #eee4cf;
+        --surface-0: #fdf6e3;
+        --surface-1: #f4edd9;
+        --surface-2: #eee8d5;
+        --surface-3: #e7dfca;
+        --pastel-sky: #e4f1f8;
+        --pastel-mint: #e6f1e1;
+        --pastel-peach: #f6e3d8;
         --accent: #b58900;
         --accent-2: #268bd2;
         --text: #586e75;
@@ -1731,6 +1738,57 @@
 
       .arena {
         background: linear-gradient(155deg, rgba(253, 246, 227, 0.98) 0%, rgba(238, 232, 213, 0.94) 100%);
+      }
+
+      #prematch {
+        background:
+          radial-gradient(circle at 14% 12%, rgba(38, 139, 210, 0.14) 0%, rgba(38, 139, 210, 0) 42%),
+          radial-gradient(circle at 86% 90%, rgba(181, 137, 0, 0.18) 0%, rgba(181, 137, 0, 0) 48%),
+          rgba(253, 246, 227, 0.9);
+      }
+
+      .switch-modal {
+        background: rgba(253, 246, 227, 0.64);
+      }
+
+      #match-end {
+        background: rgba(253, 246, 227, 0.78);
+      }
+
+      .match-end-card {
+        background: linear-gradient(165deg, rgba(253, 246, 227, 0.97) 0%, rgba(238, 232, 213, 0.94) 100%);
+        border-color: rgba(101, 123, 131, 0.22);
+        box-shadow: 0 18px 40px rgba(88, 110, 117, 0.24);
+      }
+
+      .roster,
+      .config {
+        background: linear-gradient(160deg, rgba(238, 232, 213, 0.9) 0%, rgba(244, 237, 217, 0.88) 100%);
+        border: 1px solid rgba(101, 123, 131, 0.2);
+      }
+
+      .roster-card,
+      .slot-card {
+        background: linear-gradient(170deg, rgba(253, 246, 227, 0.88), rgba(238, 232, 213, 0.78));
+        border-color: rgba(101, 123, 131, 0.18);
+      }
+
+      .tab {
+        background: rgba(228, 241, 248, 0.72);
+        border: 1px solid rgba(101, 123, 131, 0.16);
+      }
+
+      .tab.active {
+        background: linear-gradient(140deg, rgba(38, 139, 210, 0.24), rgba(133, 153, 0, 0.22));
+        color: var(--text);
+      }
+
+      .chip,
+      .turn-seconds-control,
+      .stat-static-value,
+      .stat-result-value {
+        background: rgba(238, 232, 213, 0.9);
+        border-color: rgba(101, 123, 131, 0.22);
       }
 
       .sprite {
@@ -1787,6 +1845,11 @@
       #ready-btn {
         background: linear-gradient(135deg, #b58900, #cb4b16);
         color: #fdf6e3;
+      }
+
+      #ready-btn:disabled {
+        background: linear-gradient(135deg, rgba(147, 161, 161, 0.45), rgba(101, 123, 131, 0.4));
+        color: rgba(88, 110, 117, 0.95);
       }
 
       .status-line,
