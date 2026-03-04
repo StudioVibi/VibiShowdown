@@ -295,17 +295,6 @@ export class RelayRuntime {
     return null;
   }
 
-  private relay_default_self_switch_target(
-    state: GameState,
-    slot_id: PlayerSlot,
-    move_id: string
-  ): number | null {
-    if (move_id !== "bounce_kick") {
-      return null;
-    }
-    return this.relay_default_switch_target(state, slot_id);
-  }
-
   private relay_default_intent(state: GameState, slot_id: PlayerSlot): PlayerIntent {
     const player = state.players[slot_id];
     const active = player.team[player.activeIndex];
@@ -317,13 +306,7 @@ export class RelayRuntime {
       }
     }
     for (let index = 0; index < active.chosenMoves.length; index++) {
-      const move_id = active.chosenMoves[index] ?? "none";
-      const self_switch_target = this.relay_default_self_switch_target(state, slot_id, move_id);
-      const candidate: PlayerIntent = {
-        action: "use_move",
-        moveIndex: index,
-        ...(typeof self_switch_target === "number" ? { selfSwitchTargetIndex: self_switch_target } : {})
-      };
+      const candidate: PlayerIntent = { action: "use_move", moveIndex: index };
       if (!validate_intent(state, slot_id, candidate)) {
         return candidate;
       }
@@ -332,15 +315,7 @@ export class RelayRuntime {
     if (!validate_intent(state, slot_id, run_intent)) {
       return run_intent;
     }
-    const first_move_id = active.chosenMoves[0] ?? "none";
-    const fallback_self_switch_target = this.relay_default_self_switch_target(state, slot_id, first_move_id);
-    return {
-      action: "use_move",
-      moveIndex: 0,
-      ...(typeof fallback_self_switch_target === "number"
-        ? { selfSwitchTargetIndex: fallback_self_switch_target }
-        : {})
-    };
+    return { action: "use_move", moveIndex: 0 };
   }
 
   private relay_try_resolve_turn(trigger: "intent" | "timeout"): void {

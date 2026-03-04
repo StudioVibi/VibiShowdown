@@ -93,9 +93,9 @@ function first_player_damage(log: EventLog[]): number | null {
 }
 
 {
-  const state = create_running_state(["bounce_kick", "none", "none"], ["none", "none", "none"]);
+  const state = create_running_state(["switch_sovietico", "none", "none"], ["none", "none", "none"]);
   const error = validate_intent(state, "player1", { action: "use_move", moveIndex: 0 });
-  assert_equal(error, "bounce kick requires switch target", "bounce kick should require self switch target");
+  assert_equal(error, null, "switch sovietico should be valid when there is a bench target");
 }
 
 {

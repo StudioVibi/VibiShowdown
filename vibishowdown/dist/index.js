@@ -2187,14 +2187,6 @@ var MOVE_CATALOG = [
   { id: "recover", label: "Recover", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "heal", label: "Heal", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "mega_punch", label: "Mega Punch", phaseId: "attack_01", attackMultiplier100: 100, damageType: "flat", flatDamage: 20 },
-  {
-    id: "bounce_kick",
-    label: "Bounce Kick",
-    phaseId: "attack_01",
-    attackMultiplier100: 100,
-    damageType: "flat",
-    flatDamage: 5
-  },
   { id: "meditate", label: "Meditate", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "ki_blast", label: "Ki Blast", phaseId: "attack_01", attackMultiplier100: 0 },
   { id: "endure", label: "Endure", phaseId: "guard", attackMultiplier100: 0 },
@@ -5244,7 +5236,7 @@ function apply_run_action(state, log, player_slot, blocked_by_hook_this_turn = f
     }
   });
 }
-function apply_move(state, log, player_slot, move_id, move_index, self_switch_target_index, hp_changed, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn, rejuvenation_used_this_turn, hook_run_blocked_this_turn, incoming_damage_multiplier_percent) {
+function apply_move(state, log, player_slot, move_id, move_index, hp_changed, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn, rejuvenation_used_this_turn, hook_run_blocked_this_turn, incoming_damage_multiplier_percent) {
   const player = state.players[player_slot];
   const opponent = state.players[other_slot(player_slot)];
   const attacker = active_monster(player);
@@ -5840,47 +5832,6 @@ function apply_move(state, log, player_slot, move_id, move_index, self_switch_ta
     });
     return;
   }
-  if (spec.id === "bounce_kick") {
-    apply_damage_move(state, log, player_slot, spec, hp_changed, spec.phaseId, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
-    if (state.players[other_slot(player_slot)].sharedHp <= 0) {
-      finalize_move_success();
-      return;
-    }
-    const bounce_switch_blocked = switch_block_reason(state, player_slot);
-    if (bounce_switch_blocked && bounce_switch_blocked !== "taunt") {
-      log.push({
-        type: "move_detail",
-        turn: state.turn,
-        phase: spec.phaseId,
-        summary: `Bounce Kick switch blocked (${effect_label(bounce_switch_blocked)})`,
-        data: { move: spec.id, slot: player_slot, reason: bounce_switch_blocked }
-      });
-      finalize_move_success();
-      return;
-    }
-    if (!Number.isInteger(self_switch_target_index)) {
-      log.push({
-        type: "move_detail",
-        turn: state.turn,
-        phase: spec.phaseId,
-        summary: "Bounce Kick had no self-switch target and only dealt damage",
-        data: { move: spec.id, slot: player_slot }
-      });
-      finalize_move_success();
-      return;
-    }
-    const target_index = Number(self_switch_target_index);
-    const switched = apply_switch(state, log, player_slot, target_index, hp_changed, took_damage_this_turn, damage_taken_this_turn, incoming_damage_multiplier_percent);
-    log.push({
-      type: "move_detail",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: switched ? `Bounce Kick switched ${player_slot} to slot ${target_index}` : `Bounce Kick failed to switch ${player_slot} to slot ${target_index}`,
-      data: { slot: player_slot, move: spec.id, targetIndex: target_index, switched }
-    });
-    finalize_move_success();
-    return;
-  }
   if (spec.id === "leech_life") {
     const target_slot = other_slot(player_slot);
     log.push({
@@ -6151,8 +6102,7 @@ function build_actions(intents, state) {
         type: "move",
         phase: spec.phaseId,
         moveId,
-        moveIndex: intent.moveIndex,
-        selfSwitchTargetIndex: intent.selfSwitchTargetIndex
+        moveIndex: intent.moveIndex
       });
     }
   }
@@ -6388,7 +6338,7 @@ function resolve_turn(state, intents) {
           });
         }
       } else if (action.type === "move") {
-        apply_move(next, log, action.player, action.moveId, action.moveIndex, action.selfSwitchTargetIndex, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn, rejuvenation_used_this_turn, hook_run_blocked_this_turn, incoming_damage_multiplier_percent);
+        apply_move(next, log, action.player, action.moveId, action.moveIndex, hp_changed_this_turn, focus_punch_pending, took_damage_this_turn, damage_taken_this_turn, rejuvenation_used_this_turn, hook_run_blocked_this_turn, incoming_damage_multiplier_percent);
       } else {
         apply_run_action(next, log, action.player, hook_run_blocked_this_turn[action.player]);
       }
@@ -6509,26 +6459,6 @@ function validate_intent(state, slot, intent) {
   }
   if (moveId === "endure" && guard_cooldown > 0) {
     return "endure on cooldown";
-  }
-  if (moveId === "bounce_kick") {
-    const switch_blocked = switch_block_reason(state, slot);
-    if (switch_blocked && switch_blocked !== "taunt") {
-      return switch_blocked;
-    }
-    if (!Number.isInteger(intent.selfSwitchTargetIndex)) {
-      return "bounce kick requires switch target";
-    }
-    const target_index = Number(intent.selfSwitchTargetIndex);
-    const switch_error = validate_switch_target(player, target_index);
-    if (switch_error === "invalid switch target") {
-      return "invalid bounce kick switch target";
-    }
-    if (switch_error === "already active") {
-      return "bounce kick target already active";
-    }
-    if (switch_error === "target fainted") {
-      return "bounce kick target fainted";
-    }
   }
   if (moveId === "switch_sovietico") {
     if (!has_available_switch_target(player)) {
@@ -7444,12 +7374,6 @@ class RelayRuntime {
     }
     return null;
   }
-  relay_default_self_switch_target(state, slot_id, move_id) {
-    if (move_id !== "bounce_kick") {
-      return null;
-    }
-    return this.relay_default_switch_target(state, slot_id);
-  }
   relay_default_intent(state, slot_id) {
     const player = state.players[slot_id];
     const active = player.team[player.activeIndex];
@@ -7461,13 +7385,7 @@ class RelayRuntime {
       }
     }
     for (let index = 0;index < active.chosenMoves.length; index++) {
-      const move_id = active.chosenMoves[index] ?? "none";
-      const self_switch_target = this.relay_default_self_switch_target(state, slot_id, move_id);
-      const candidate = {
-        action: "use_move",
-        moveIndex: index,
-        ...typeof self_switch_target === "number" ? { selfSwitchTargetIndex: self_switch_target } : {}
-      };
+      const candidate = { action: "use_move", moveIndex: index };
       if (!validate_intent(state, slot_id, candidate)) {
         return candidate;
       }
@@ -7476,13 +7394,7 @@ class RelayRuntime {
     if (!validate_intent(state, slot_id, run_intent)) {
       return run_intent;
     }
-    const first_move_id = active.chosenMoves[0] ?? "none";
-    const fallback_self_switch_target = this.relay_default_self_switch_target(state, slot_id, first_move_id);
-    return {
-      action: "use_move",
-      moveIndex: 0,
-      ...typeof fallback_self_switch_target === "number" ? { selfSwitchTargetIndex: fallback_self_switch_target } : {}
-    };
+    return { action: "use_move", moveIndex: 0 };
   }
   relay_try_resolve_turn(trigger) {
     if (!this.relay_state || this.relay_ended) {
@@ -7830,7 +7742,6 @@ var MOVE_TOOLTIP_DESCRIPTIONS = {
   recover: "Cura 20% do HP compartilhado maximo.",
   heal: "Cura 20% do HP compartilhado maximo.",
   mega_punch: "Golpe de dano flat 20.",
-  bounce_kick: "Da dano flat 5 e tenta fazer auto-switch para o aliado escolhido.",
   meditate: "Aumenta o ATK por estagios (stackavel).",
   ki_blast: "Dano verdadeiro baseado na STR efetiva: 75% da STR (ignora DEF/armor).",
   endure: "Sobrevive ao dano letal no turno (minimo 1% HP) e ganha DEX ao ativar.",
@@ -8012,7 +7923,6 @@ var chat_ready = false;
 var forced_switch_target_index = null;
 var forced_switch_target_turn = 0;
 var switch_modal_mode = "intent";
-var switch_target_move_index = null;
 var room_game_count = 0;
 var ICON_ALIASES = {
   armoth: "panda",
@@ -9121,18 +9031,6 @@ function switch_block_reason_for_ui(state, target_slot) {
   }
   return null;
 }
-function switch_block_label_for_ui(reason) {
-  if (reason === "arena trapped") {
-    return "arena trapped";
-  }
-  if (reason === "taunt") {
-    return "taunt";
-  }
-  if (reason === "confuse") {
-    return "confuse";
-  }
-  return "immobilize";
-}
 function has_available_switch_target_for_ui(state, target_slot) {
   const player = state.players[target_slot];
   return player.team.some((mon, index) => index !== player.activeIndex && mon.hp > 0);
@@ -9210,7 +9108,6 @@ function update_action_controls() {
   let guard_on_cooldown = false;
   let active_moves = config.moves;
   let self_switch_has_target = true;
-  const switch_blocked_reason = latest_state && slot ? switch_block_reason_for_ui(latest_state, slot) : null;
   const run_blocked_reason = latest_state && slot ? run_block_reason_for_ui(latest_state, slot) : null;
   if (latest_state && slot) {
     const player_state = latest_state.players[slot];
@@ -9232,10 +9129,7 @@ function update_action_controls() {
     } else if (move === "endure" && guard_on_cooldown) {
       btn.textContent = `${index + 1}. Endure (cooldown)`;
       btn.disabled = true;
-    } else if (move === "bounce_kick" && switch_blocked_reason) {
-      btn.textContent = `${index + 1}. ${label} (${switch_block_label_for_ui(switch_blocked_reason)})`;
-      btn.disabled = true;
-    } else if ((move === "bounce_kick" || move === "switch_sovietico") && !self_switch_has_target) {
+    } else if (move === "switch_sovietico" && !self_switch_has_target) {
       btn.textContent = `${index + 1}. ${label} (no switch target)`;
       btn.disabled = true;
     } else {
@@ -9354,18 +9248,6 @@ function send_move_intent(moveIndex) {
     send_run_intent();
     return;
   }
-  if (move_id === "bounce_kick") {
-    const bounce_block_reason = latest_state && slot ? switch_block_reason_for_ui(latest_state, slot) : null;
-    if (bounce_block_reason) {
-      append_log(`${switch_block_label_for_ui(bounce_block_reason)}: bounce kick switch blocked`);
-      return;
-    }
-    open_switch_modal("bounce_kick", moveIndex);
-    if (switch_modal.classList.contains("open")) {
-      append_log("Bounce Kick: choose your replacement monster");
-    }
-    return;
-  }
   if (!post_turn_intent({ action: "use_move", moveIndex })) {
     return;
   }
@@ -9378,21 +9260,6 @@ function send_move_intent(moveIndex) {
     return;
   }
   append_log(was_selected ? "intent updated" : "intent sent");
-}
-function send_bounce_kick_intent(moveIndex, selfSwitchTargetIndex) {
-  const intent = {
-    action: "use_move",
-    moveIndex,
-    selfSwitchTargetIndex
-  };
-  if (!post_turn_intent(intent)) {
-    return;
-  }
-  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
-  selected_intent = intent;
-  selected_intent_turn = current_turn;
-  update_action_controls();
-  append_log(was_selected ? `intent updated (Bounce Kick -> switch ${selfSwitchTargetIndex})` : `intent sent (Bounce Kick -> switch ${selfSwitchTargetIndex})`);
 }
 function send_switch_intent(targetIndex) {
   if (has_pending_switch()) {
@@ -9438,33 +9305,21 @@ function close_switch_modal(force = false) {
     return;
   }
   switch_modal_mode = "intent";
-  switch_target_move_index = null;
   switch_close.disabled = false;
   if (switch_title) {
     switch_title.textContent = "Switch Pokemon";
   }
   switch_modal.classList.remove("open");
 }
-function open_switch_modal(mode = "intent", move_index) {
+function open_switch_modal(mode = "intent") {
   if (!latest_state || !slot)
     return;
-  if ((mode === "intent" || mode === "bounce_kick") && !can_send_intent())
+  if (mode === "intent" && !can_send_intent())
     return;
   close_move_tooltip();
-  if (mode === "bounce_kick") {
-    if (!Number.isInteger(move_index)) {
-      append_log("Bounce Kick unavailable: missing move index");
-      return;
-    }
-    switch_target_move_index = move_index;
-  } else {
-    switch_target_move_index = null;
-  }
   switch_modal_mode = mode;
   if (switch_title) {
-    if (mode === "bounce_kick") {
-      switch_title.textContent = "Bounce Kick - Choose Switch";
-    } else if (mode === "forced") {
+    if (mode === "forced") {
       switch_title.textContent = "Forced Switch";
     } else {
       switch_title.textContent = "Switch Pokemon";
@@ -9496,19 +9351,6 @@ function open_switch_modal(mode = "intent", move_index) {
       label.textContent = monster_label(entry.mon.id);
       button.append(icon, label);
       button.addEventListener("click", () => {
-        if (switch_modal_mode === "bounce_kick") {
-          if (!Number.isInteger(switch_target_move_index)) {
-            append_log("Bounce Kick unavailable: missing move index");
-            return;
-          }
-          send_bounce_kick_intent(switch_target_move_index, entry.index);
-          close_switch_modal();
-          return;
-        }
-        if (switch_modal_mode === "intent") {
-          send_switch_intent(entry.index);
-          return;
-        }
         send_switch_intent(entry.index);
       });
       switch_options.appendChild(button);

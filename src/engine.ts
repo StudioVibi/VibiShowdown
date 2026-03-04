@@ -97,7 +97,6 @@ type Action =
       phase: string;
       moveId: MoveId;
       moveIndex: number;
-      selfSwitchTargetIndex?: number;
     };
 
 type MatchProgress = "continue" | "stop_turn" | "ended";
@@ -3314,7 +3313,6 @@ function apply_move(
   player_slot: PlayerSlot,
   move_id: MoveId,
   move_index: number,
-  self_switch_target_index: number | undefined,
   hp_changed: WeakSet<MonsterState>,
   focus_punch_pending: Record<PlayerSlot, boolean>,
   took_damage_this_turn: Record<PlayerSlot, boolean>,
@@ -3998,69 +3996,6 @@ function apply_move(
     return;
   }
 
-  if (spec.id === "bounce_kick") {
-    apply_damage_move(
-      state,
-      log,
-      player_slot,
-      spec,
-      hp_changed,
-      spec.phaseId,
-      took_damage_this_turn,
-      damage_taken_this_turn,
-      incoming_damage_multiplier_percent
-    );
-    if (state.players[other_slot(player_slot)].sharedHp <= 0) {
-      finalize_move_success();
-      return;
-    }
-    const bounce_switch_blocked = switch_block_reason(state, player_slot);
-    if (bounce_switch_blocked && bounce_switch_blocked !== "taunt") {
-      log.push({
-        type: "move_detail",
-        turn: state.turn,
-        phase: spec.phaseId,
-        summary: `Bounce Kick switch blocked (${effect_label(bounce_switch_blocked)})`,
-        data: { move: spec.id, slot: player_slot, reason: bounce_switch_blocked }
-      });
-      finalize_move_success();
-      return;
-    }
-    if (!Number.isInteger(self_switch_target_index)) {
-      log.push({
-        type: "move_detail",
-        turn: state.turn,
-        phase: spec.phaseId,
-        summary: "Bounce Kick had no self-switch target and only dealt damage",
-        data: { move: spec.id, slot: player_slot }
-      });
-      finalize_move_success();
-      return;
-    }
-    const target_index = Number(self_switch_target_index);
-    const switched = apply_switch(
-      state,
-      log,
-      player_slot,
-      target_index,
-      hp_changed,
-      took_damage_this_turn,
-      damage_taken_this_turn,
-      incoming_damage_multiplier_percent
-    );
-    log.push({
-      type: "move_detail",
-      turn: state.turn,
-      phase: spec.phaseId,
-      summary: switched
-        ? `Bounce Kick switched ${player_slot} to slot ${target_index}`
-        : `Bounce Kick failed to switch ${player_slot} to slot ${target_index}`,
-      data: { slot: player_slot, move: spec.id, targetIndex: target_index, switched }
-    });
-    finalize_move_success();
-    return;
-  }
-
   if (spec.id === "leech_life") {
     const target_slot = other_slot(player_slot);
     log.push({
@@ -4405,8 +4340,7 @@ function build_actions(intents: Record<PlayerSlot, PlayerIntent | null>, state: 
         type: "move",
         phase: spec.phaseId,
         moveId,
-        moveIndex: intent.moveIndex,
-        selfSwitchTargetIndex: intent.selfSwitchTargetIndex
+        moveIndex: intent.moveIndex
       });
     }
   }
@@ -4698,7 +4632,6 @@ export function resolve_turn(
           action.player,
           action.moveId,
           action.moveIndex,
-          action.selfSwitchTargetIndex,
           hp_changed_this_turn,
           focus_punch_pending,
           took_damage_this_turn,
@@ -4858,26 +4791,6 @@ export function validate_intent(state: GameState, slot: PlayerSlot, intent: Play
   }
   if (moveId === "endure" && guard_cooldown > 0) {
     return "endure on cooldown";
-  }
-  if (moveId === "bounce_kick") {
-    const switch_blocked = switch_block_reason(state, slot);
-    if (switch_blocked && switch_blocked !== "taunt") {
-      return switch_blocked;
-    }
-    if (!Number.isInteger(intent.selfSwitchTargetIndex)) {
-      return "bounce kick requires switch target";
-    }
-    const target_index = Number(intent.selfSwitchTargetIndex);
-    const switch_error = validate_switch_target(player, target_index);
-    if (switch_error === "invalid switch target") {
-      return "invalid bounce kick switch target";
-    }
-    if (switch_error === "already active") {
-      return "bounce kick target already active";
-    }
-    if (switch_error === "target fainted") {
-      return "bounce kick target fainted";
-    }
   }
   if (moveId === "switch_sovietico") {
     if (!has_available_switch_target(player)) {

@@ -148,7 +148,7 @@ Legenda:
 - seismic_toss: dano flat 35.
 - focus_punch: carrega no attack_01, resolve no inicio do ending_turn, falha se tomou dano real antes.
 - mega_punch: dano flat 20.
-- bounce_kick: dano flat 5 + self switch para alvo escolhido.
+- kick: dano fisico escalado.
 - ki_blast: dano flat 20.
 
 7.2) Moves de setup/controle/suporte
@@ -191,8 +191,8 @@ Armoth (DEF)
 
 Kairus (ATK)
 - stats base: level 12, hp 180, atk 521, def 230, spe 430
-- possibleMoves: mega_punch, bounce_kick, run, none
-- defaultMoves: mega_punch, bounce_kick, none
+- possibleMoves: mega_punch, kick, run, none
+- defaultMoves: mega_punch, kick, none
 
 Farien (BUF)
 - stats base: level 12, hp 325, atk 396, def 396, spe 396
@@ -271,4 +271,3 @@ Observacao:
 - defaultPassive obrigatoriamente "none".
 - moves de catalogo precisam existir no MOVE_BY_ID.
 - tipos validos de mon: buf/def/atk.
-

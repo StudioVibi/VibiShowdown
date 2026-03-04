@@ -108,7 +108,7 @@ Mons novos:
 - Armoth (DEF) - base temporaria de stats: Panda
   moves: Spikes / Recover / none
 - Kairus (ATK) - base temporaria de stats: Harpy
-  moves: Mega Punch / Bounce Kick / none
+  moves: Mega Punch / Kick / none
 - Farien (BUF) - base temporaria de stats: Miren
   moves: Meditate / Ki Blast / none
 
@@ -116,7 +116,7 @@ Moves novos no catalogo:
 - Spikes: arma hazard no lado alvo (1 carga).
 - Recover: cura 20% do sharedHpMax do proprio lado.
 - Mega Punch: dano flat 20.
-- Bounce Kick: dano flat 10 + tenta forcar switch aleatorio no alvo.
+- Kick: dano fisico escalado.
 - Meditate: ATK x2 no usuario.
 - Ki Blast: dano flat 20.
 

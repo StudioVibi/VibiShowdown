@@ -70,7 +70,7 @@ type MonsterTooltipPayload = {
   stages: { attack: number; defense: number; speed: number };
 };
 
-type SwitchModalMode = "intent" | "forced" | "bounce_kick";
+type SwitchModalMode = "intent" | "forced";
 
 const LOBBY_MOVE_SLOTS = 3;
 const STARTER_MONSTER_IDS = new Set<string>(["armoth", "kairus", "farien", "knight", "vealkiria", "babydragonbuf"]);
@@ -124,7 +124,6 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   recover: "Cura 20% do HP compartilhado maximo.",
   heal: "Cura 20% do HP compartilhado maximo.",
   mega_punch: "Golpe de dano flat 20.",
-  bounce_kick: "Da dano flat 5 e tenta fazer auto-switch para o aliado escolhido.",
   meditate: "Aumenta o ATK por estagios (stackavel).",
   ki_blast: "Dano verdadeiro baseado na STR efetiva: 75% da STR (ignora DEF/armor).",
   endure: "Sobrevive ao dano letal no turno (minimo 1% HP) e ganha DEX ao ativar.",
@@ -330,7 +329,6 @@ let chat_ready = false;
 let forced_switch_target_index: number | null = null;
 let forced_switch_target_turn = 0;
 let switch_modal_mode: SwitchModalMode = "intent";
-let switch_target_move_index: number | null = null;
 let room_game_count = 0;
 
 const ICON_ALIASES: Record<string, string> = {
@@ -1618,19 +1616,6 @@ function switch_block_reason_for_ui(state: GameState, target_slot: PlayerSlot): 
   return null;
 }
 
-function switch_block_label_for_ui(reason: UiSwitchBlockReason): string {
-  if (reason === "arena trapped") {
-    return "arena trapped";
-  }
-  if (reason === "taunt") {
-    return "taunt";
-  }
-  if (reason === "confuse") {
-    return "confuse";
-  }
-  return "immobilize";
-}
-
 type UiRunBlockReason = "nocaute" | "sleep" | "silence" | "taunt";
 
 function has_available_switch_target_for_ui(state: GameState, target_slot: PlayerSlot): boolean {
@@ -1719,7 +1704,6 @@ function update_action_controls(): void {
   let guard_on_cooldown = false;
   let active_moves = config.moves;
   let self_switch_has_target = true;
-  const switch_blocked_reason = latest_state && slot ? switch_block_reason_for_ui(latest_state, slot) : null;
   const run_blocked_reason = latest_state && slot ? run_block_reason_for_ui(latest_state, slot) : null;
   if (latest_state && slot) {
     const player_state = latest_state.players[slot];
@@ -1747,10 +1731,7 @@ function update_action_controls(): void {
     } else if (move === "endure" && guard_on_cooldown) {
       btn.textContent = `${index + 1}. Endure (cooldown)`;
       btn.disabled = true;
-    } else if (move === "bounce_kick" && switch_blocked_reason) {
-      btn.textContent = `${index + 1}. ${label} (${switch_block_label_for_ui(switch_blocked_reason)})`;
-      btn.disabled = true;
-    } else if ((move === "bounce_kick" || move === "switch_sovietico") && !self_switch_has_target) {
+    } else if (move === "switch_sovietico" && !self_switch_has_target) {
       btn.textContent = `${index + 1}. ${label} (no switch target)`;
       btn.disabled = true;
     } else {
@@ -1885,18 +1866,6 @@ function send_move_intent(moveIndex: number): void {
     send_run_intent();
     return;
   }
-  if (move_id === "bounce_kick") {
-    const bounce_block_reason = latest_state && slot ? switch_block_reason_for_ui(latest_state, slot) : null;
-    if (bounce_block_reason) {
-      append_log(`${switch_block_label_for_ui(bounce_block_reason)}: bounce kick switch blocked`);
-      return;
-    }
-    open_switch_modal("bounce_kick", moveIndex);
-    if (switch_modal.classList.contains("open")) {
-      append_log("Bounce Kick: choose your replacement monster");
-    }
-    return;
-  }
   if (!post_turn_intent({ action: "use_move", moveIndex })) {
     return;
   }
@@ -1909,26 +1878,6 @@ function send_move_intent(moveIndex: number): void {
     return;
   }
   append_log(was_selected ? "intent updated" : "intent sent");
-}
-
-function send_bounce_kick_intent(moveIndex: number, selfSwitchTargetIndex: number): void {
-  const intent: PlayerIntent = {
-    action: "use_move",
-    moveIndex,
-    selfSwitchTargetIndex
-  };
-  if (!post_turn_intent(intent)) {
-    return;
-  }
-  const was_selected = selected_intent_turn === current_turn && selected_intent !== null;
-  selected_intent = intent;
-  selected_intent_turn = current_turn;
-  update_action_controls();
-  append_log(
-    was_selected
-      ? `intent updated (Bounce Kick -> switch ${selfSwitchTargetIndex})`
-      : `intent sent (Bounce Kick -> switch ${selfSwitchTargetIndex})`
-  );
 }
 
 function send_switch_intent(targetIndex: number): void {
@@ -1982,7 +1931,6 @@ function close_switch_modal(force: boolean = false): void {
     return;
   }
   switch_modal_mode = "intent";
-  switch_target_move_index = null;
   switch_close.disabled = false;
   if (switch_title) {
     switch_title.textContent = "Switch Pokemon";
@@ -1990,24 +1938,13 @@ function close_switch_modal(force: boolean = false): void {
   switch_modal.classList.remove("open");
 }
 
-function open_switch_modal(mode: SwitchModalMode = "intent", move_index?: number): void {
+function open_switch_modal(mode: SwitchModalMode = "intent"): void {
   if (!latest_state || !slot) return;
-  if ((mode === "intent" || mode === "bounce_kick") && !can_send_intent()) return;
+  if (mode === "intent" && !can_send_intent()) return;
   close_move_tooltip();
-  if (mode === "bounce_kick") {
-    if (!Number.isInteger(move_index)) {
-      append_log("Bounce Kick unavailable: missing move index");
-      return;
-    }
-    switch_target_move_index = move_index!;
-  } else {
-    switch_target_move_index = null;
-  }
   switch_modal_mode = mode;
   if (switch_title) {
-    if (mode === "bounce_kick") {
-      switch_title.textContent = "Bounce Kick - Choose Switch";
-    } else if (mode === "forced") {
+    if (mode === "forced") {
       switch_title.textContent = "Forced Switch";
     } else {
       switch_title.textContent = "Switch Pokemon";
@@ -2041,19 +1978,6 @@ function open_switch_modal(mode: SwitchModalMode = "intent", move_index?: number
       label.textContent = monster_label(entry.mon.id);
       button.append(icon, label);
       button.addEventListener("click", () => {
-        if (switch_modal_mode === "bounce_kick") {
-          if (!Number.isInteger(switch_target_move_index)) {
-            append_log("Bounce Kick unavailable: missing move index");
-            return;
-          }
-          send_bounce_kick_intent(switch_target_move_index!, entry.index);
-          close_switch_modal();
-          return;
-        }
-        if (switch_modal_mode === "intent") {
-          send_switch_intent(entry.index);
-          return;
-        }
         send_switch_intent(entry.index);
       });
       switch_options.appendChild(button);

@@ -130,7 +130,7 @@ Data de leitura: 2026-03-03
 - sekyps: curse de dano flat por stack (24, 48, 72...) no ending_turn; nao limpa no switch.
 - switch_sovietico: arma forced switch para os lados que tiverem alvo valido.
 - team_cure: remove efeitos/debuffs negativos do proprio lado.
-- bounce_kick: dano flat + auto-switch para alvo escolhido.
+- kick: dano fisico de dano escalado.
 
 
 8) Ending turn e cooldowns
