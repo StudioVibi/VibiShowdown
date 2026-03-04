@@ -1,0 +1,25 @@
+Preferencias de layout e aparencia (usuario)
+===========================================
+
+Contexto geral
+- Tema principal: Solarized Light.
+- Tipografia: estilo Vim/hacker-like, monospaced.
+- Estilo visual: limpo, legivel e consistente entre telas.
+
+Cores e contraste
+- Evitar blocos pretos ou escuros fora de contexto.
+- Para destaque visual, preferir tons pasteis (ex.: marrom/bege, mint, sky) em vez de cores muito saturadas.
+- Manter contraste claro entre texto e fundo em todos os estados (normal, hover, disabled).
+- Quando existir sinal semantico:
+  - positivo -> verde
+  - negativo -> vermelho
+  - neutro -> tons base do tema
+
+Componentes com atencao especial
+- Lobby, Prematch, Roster e Monster Builder devem seguir a mesma linguagem Solarized.
+- Botao Ready deve ter destaque, mas com paleta pastel/coesa ao tema.
+- Evitar que um componente volte para estilo antigo (fundo preto ou gradientes muito fortes).
+
+Diretriz de manutencao
+- Ao criar novos componentes/estados, reutilizar variaveis de tema antes de criar novas cores.
+- Priorizar consistencia de superficie, borda e tipografia para reduzir "quebra" visual entre areas.
