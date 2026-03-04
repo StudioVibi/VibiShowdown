@@ -151,6 +151,7 @@ const CURSE_IDS: readonly CurseCollateralId[] = [
   "madness",
   "leech_seed",
   "sekyps",
+  "mirror",
   "destiny_bond",
   "endure"
 ] as const;
@@ -175,6 +176,7 @@ const CURSE_LABELS: Record<CurseCollateralId, string> = {
   madness: "Madness",
   leech_seed: "Leech Seed",
   sekyps: "Sekyps",
+  mirror: "Mirror",
   destiny_bond: "Destiny Bond",
   endure: "Endure"
 };
@@ -261,13 +263,35 @@ function power_attack_stage_bonus_from_entries(entries: readonly ActiveBuffDebuf
   return bonus;
 }
 
-function effective_attack_stage_for_monster(state: GameState, slot: PlayerSlot, monster: MonsterState): number {
-  const attack_delta = total_delta_percent_from_buff_debuffs(state, slot, "attack", monster.id);
-  const attack_base_after_percent = stat_value_from_delta_percent(monster.baseAttack, attack_delta);
-  const attack_stage_fallback = infer_stage_from_attack(monster.attack, attack_base_after_percent);
-  const attack_stage = normalize_stat_stage(monster.attackStage, attack_stage_fallback);
+function intrinsic_attack_stage_for_monster(monster: MonsterState): number {
+  return normalize_stat_stage(monster.attackStage, 0);
+}
+
+function local_attack_stage_without_mirror(state: GameState, slot: PlayerSlot, monster: MonsterState): number {
+  const intrinsic_stage = intrinsic_attack_stage_for_monster(monster);
   const power_bonus = power_attack_stage_bonus_from_entries(buff_debuff_entries_for_monster(state, slot, monster.id));
-  return clamp_stat_stage(attack_stage + power_bonus);
+  return clamp_stat_stage(intrinsic_stage + power_bonus);
+}
+
+function mirror_source_slot_for_target(state: GameState, target_slot: PlayerSlot): PlayerSlot | null {
+  for (const curse of curse_list(state, target_slot)) {
+    if (curse.id !== "mirror") {
+      continue;
+    }
+    if (curse.sourceSlot === "player1" || curse.sourceSlot === "player2") {
+      return curse.sourceSlot;
+    }
+  }
+  return null;
+}
+
+function effective_attack_stage_for_monster(state: GameState, slot: PlayerSlot, monster: MonsterState): number {
+  const mirror_source_slot = mirror_source_slot_for_target(state, slot);
+  if (mirror_source_slot) {
+    const source_monster = active_monster(state.players[mirror_source_slot]);
+    return local_attack_stage_without_mirror(state, mirror_source_slot, source_monster);
+  }
+  return local_attack_stage_without_mirror(state, slot, monster);
 }
 
 function total_delta_percent_from_buff_debuffs(
@@ -296,11 +320,8 @@ function refresh_active_monster_stats_for_slot(state: GameState, slot: PlayerSlo
   const attack_delta = total_delta_percent_from_buff_debuffs(state, slot, "attack", monster.id);
   const defense_delta = total_delta_percent_from_buff_debuffs(state, slot, "defense", monster.id);
   const speed_delta = total_delta_percent_from_buff_debuffs(state, slot, "speed", monster.id);
-  const attack_base_after_percent = stat_value_from_delta_percent(monster.baseAttack, attack_delta);
-  const attack_stage_fallback = infer_stage_from_attack(monster.attack, attack_base_after_percent);
-  const attack_stage = normalize_stat_stage(monster.attackStage, attack_stage_fallback);
-  const power_attack_stage_bonus = power_attack_stage_bonus_from_entries(entries);
-  const effective_attack_stage = clamp_stat_stage(attack_stage + power_attack_stage_bonus);
+  const attack_stage = intrinsic_attack_stage_for_monster(monster);
+  const effective_attack_stage = effective_attack_stage_for_monster(state, slot, monster);
   const defense_stage = normalize_stat_stage((monster as { defenseStage?: unknown }).defenseStage, 0);
   const speed_stage = normalize_stat_stage((monster as { speedStage?: unknown }).speedStage, 0);
 
@@ -4029,6 +4050,38 @@ function apply_move(
       }
     });
     finalize_move_success();
+    return;
+  }
+
+  if (spec.id === "mirror") {
+    const target_slot = other_slot(player_slot);
+    refresh_active_monster_stats_for_slot(state, target_slot);
+    const source_stage = effective_attack_stage_for_monster(state, player_slot, attacker);
+    const target_stage_before = effective_attack_stage_for_monster(state, target_slot, defender);
+    const target_attack_before = defender.attack;
+    finalize_move_success();
+    refresh_active_monster_stats_for_slot(state, target_slot);
+    const target_stage_after = effective_attack_stage_for_monster(state, target_slot, defender);
+    const target_attack_after = defender.attack;
+    log.push({
+      type: "move_detail",
+      turn: state.turn,
+      phase: spec.phaseId,
+      summary:
+        `Mirror: target ATK stage mirrors caster (${target_stage_before} -> ${target_stage_after}; ` +
+        `source stage ${source_stage}, ${target_attack_before} -> ${target_attack_after})`,
+      data: {
+        move: spec.id,
+        slot: player_slot,
+        target: defender.id,
+        targetSlot: target_slot,
+        sourceStage: source_stage,
+        targetStageBefore: target_stage_before,
+        targetStageAfter: target_stage_after,
+        targetAttackBefore: target_attack_before,
+        targetAttackAfter: target_attack_after
+      }
+    });
     return;
   }
 

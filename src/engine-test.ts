@@ -1,5 +1,6 @@
 import { create_initial_state, resolve_turn, validate_intent } from "./engine.ts";
 import { MONSTER_BY_ID } from "./data/mon.ts";
+import { mul_div_round } from "./int_math.ts";
 import type { EVSpread, EventLog, GameState, MonsterConfig, PlayerIntent, PlayerSlot, TeamSelection } from "./shared.ts";
 
 type TeamIds = [string, string, string];
@@ -17,6 +18,12 @@ function assert_equal<T>(actual: T, expected: T, message: string): void {
   if (actual !== expected) {
     throw new Error(`[engine-test] ${message} (expected ${String(expected)}, got ${String(actual)})`);
   }
+}
+
+function attack_from_stage(base_attack: number, stage: number): number {
+  const normalized = Math.max(-6, Math.min(6, Math.floor(stage)));
+  const ratio = normalized >= 0 ? { numerator: 2 + normalized, denominator: 2 } : { numerator: 2, denominator: 2 - normalized };
+  return Math.max(0, mul_div_round(base_attack, ratio.numerator, ratio.denominator));
 }
 
 function monster_from_id(id: string, moves: string[]): MonsterConfig {
@@ -247,6 +254,43 @@ function first_player_damage(log: EventLog[]): number | null {
   const armoth_back = after_switch_back.players.player1.team[0];
   assert_equal(armoth_back.attack, armoth_back.baseAttack, "power attack boost should be lost on switch");
   assert(armoth_back.speed < armoth_back.baseSpeed, "power speed debuff should persist after switching out and back");
+}
+
+{
+  const state = create_running_state(["mirror", "none", "none"], ["none", "none", "none"]);
+  state.players.player1.team[0].attackStage = 3;
+  const after_mirror = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 })).state;
+  const target = after_mirror.players.player2.team[0];
+  assert(target.attack > target.baseAttack, "mirror should copy positive attack stage");
+  assert_equal(
+    target.attack,
+    attack_from_stage(target.baseAttack, 3),
+    "mirror should set target attack to the caster positive stage value"
+  );
+}
+
+{
+  const state = create_running_state(["mirror", "none", "none"], ["none", "none", "none"]);
+  state.players.player1.team[0].attackStage = -2;
+  const after_mirror = resolve_turn(state, p1_intent({ action: "use_move", moveIndex: 0 })).state;
+  const target_before_switch = after_mirror.players.player2.team[0];
+  assert(target_before_switch.attack < target_before_switch.baseAttack, "mirror should copy negative attack stage");
+  assert_equal(
+    target_before_switch.attack,
+    attack_from_stage(target_before_switch.baseAttack, -2),
+    "mirror should set target attack to the caster negative stage value"
+  );
+  assert(after_mirror.activeCursesBySlot.player2.some((curse) => curse.id === "mirror"), "mirror curse should be active");
+
+  const after_switch = resolve_turn(after_mirror, intents(null, { action: "switch", targetIndex: 1 })).state;
+  assert(
+    !after_switch.activeCursesBySlot.player2.some((curse) => curse.id === "mirror"),
+    "mirror curse should be removed when the target switches"
+  );
+
+  const after_switch_back = resolve_turn(after_switch, intents(null, { action: "switch", targetIndex: 0 })).state;
+  const target_after_clear = after_switch_back.players.player2.team[0];
+  assert_equal(target_after_clear.attack, target_after_clear.baseAttack, "mirror effect should be gone after switch");
 }
 
 console.log("[engine-test] ok");

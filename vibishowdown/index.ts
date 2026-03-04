@@ -116,6 +116,8 @@ const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   leech_life: "Aplica Leech Seed (dreno no ending_turn) ate o alvo trocar.",
   sekyps:
     "Aplica o debuff Sekyps: no ending_turn causa dano flat 24 por stack (24/48/72/...), stacka ao reaplicar, nao remove no switch, cada stack novo so entra no dano no turno seguinte e nao causa dano no turno em que o alvo troca.",
+  mirror:
+    "Aplica Mirror (curse removivel no switch): o stage de ATK do alvo passa a espelhar o stage de ATK do usuario (positivo ou negativo).",
   focus_punch: "Carrega e resolve no inicio do ending_turn; falha se tomar dano real antes.",
   pain_split: "Ambos ficam com floor((HP_user + HP_target)/2), respeitando clamp de HP.",
   screech: "Reduz DEF do alvo em 50% ate trocar.",
@@ -2232,6 +2234,7 @@ const EFFECT_UI_LABELS: Record<string, string> = {
 const CURSE_UI_LABELS: Record<string, string> = {
   madness: "Madness",
   leech_seed: "Leech Seed",
+  mirror: "Mirror",
   destiny_bond: "Destiny Bond",
   endure: "Endure"
 };
