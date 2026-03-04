@@ -1694,6 +1694,10 @@
         --pastel-sky: #e4f1f8;
         --pastel-mint: #e6f1e1;
         --pastel-peach: #f6e3d8;
+        --brown-dark: #6f5136;
+        --brown-mid: #8a6848;
+        --brown-soft: #c5a27b;
+        --brown-soft-2: #ad8459;
         --accent: #b58900;
         --accent-2: #268bd2;
         --text: #586e75;
@@ -1773,6 +1777,16 @@
         border-color: rgba(101, 123, 131, 0.18);
       }
 
+      .roster-card.active,
+      .slot-card.active {
+        border-color: rgba(111, 81, 54, 0.72);
+        box-shadow: inset 0 0 0 1px rgba(88, 62, 39, 0.45);
+      }
+
+      .slot-card:focus-visible {
+        outline: 2px solid rgba(111, 81, 54, 0.62);
+      }
+
       .tab {
         background: rgba(228, 241, 248, 0.72);
         border: 1px solid rgba(101, 123, 131, 0.16);
@@ -1780,6 +1794,7 @@
 
       .tab.active {
         background: linear-gradient(140deg, rgba(38, 139, 210, 0.24), rgba(133, 153, 0, 0.22));
+        border-color: rgba(111, 81, 54, 0.44);
         color: var(--text);
       }
 
@@ -1789,6 +1804,56 @@
       .stat-result-value {
         background: rgba(238, 232, 213, 0.9);
         border-color: rgba(101, 123, 131, 0.22);
+      }
+
+      .config-grid input:not([type="range"]),
+      .config-grid select,
+      .stat-alloc-input,
+      #moves-grid input[type="number"] {
+        background: rgba(238, 232, 213, 0.92);
+        border-color: rgba(101, 123, 131, 0.28);
+        color: var(--text);
+        color-scheme: light;
+      }
+
+      .stat-alloc-slider {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 14px;
+        background: transparent;
+        accent-color: var(--brown-mid);
+      }
+
+      .stat-alloc-slider::-webkit-slider-runnable-track {
+        height: 6px;
+        border-radius: 999px;
+        background: rgba(111, 81, 54, 0.82);
+      }
+
+      .stat-alloc-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        margin-top: -4px;
+        border: 1px solid rgba(111, 81, 54, 0.85);
+        background: rgba(169, 133, 96, 0.98);
+      }
+
+      .stat-alloc-slider::-moz-range-track {
+        height: 6px;
+        border-radius: 999px;
+        border: none;
+        background: rgba(111, 81, 54, 0.82);
+      }
+
+      .stat-alloc-slider::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 1px solid rgba(111, 81, 54, 0.85);
+        background: rgba(169, 133, 96, 0.98);
       }
 
       .sprite {
@@ -1833,7 +1898,7 @@
 
       .action-pad .action-btn.selected-intent {
         box-shadow:
-          inset 0 0 0 2px rgba(38, 139, 210, 0.72),
+          inset 0 0 0 2px rgba(111, 81, 54, 0.72),
           0 0 0 1px rgba(255, 255, 255, 0.55);
       }
 
@@ -1843,18 +1908,18 @@
       }
 
       #ready-btn {
-        background: linear-gradient(135deg, #d8c3a3, #c6ab86);
+        background: linear-gradient(135deg, #c5a27b, #ad8459);
         border: 1px solid rgba(93, 74, 50, 0.35);
         box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52);
-        color: #3c3124;
+        color: #2f2418;
       }
 
       #ready-btn:hover:not(:disabled) {
-        background: linear-gradient(135deg, #ddcaad, #cfb595);
+        background: linear-gradient(135deg, #ceae8b, #b99169);
       }
 
       #ready-btn:active:not(:disabled) {
-        background: linear-gradient(135deg, #ccb292, #c19f77);
+        background: linear-gradient(135deg, #bb946a, #a57b4f);
       }
 
       #ready-btn:disabled {
