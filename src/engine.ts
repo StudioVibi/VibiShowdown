@@ -3547,7 +3547,7 @@ function apply_move(
         source: spec.id,
         stat: "attack",
         deltaPercent: 0,
-        clearsOnSwitch: false,
+        clearsOnSwitch: true,
         targetMonsterId: attacker.id
       });
     }
@@ -3564,7 +3564,8 @@ function apply_move(
         clearsOnSwitch: false
       },
       player_slot,
-      spec.id
+      spec.id,
+      { targetMonsterId: attacker.id }
     );
     refresh_active_monster_stats_for_slot(state, player_slot);
     const after_stage = effective_attack_stage_for_monster(state, player_slot, attacker);

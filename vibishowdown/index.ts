@@ -96,7 +96,7 @@ const MOVE_TOOLTIP_DELAY_MS = 2000;
 const MOVE_TOOLTIP_DESCRIPTIONS: Record<string, string> = {
   quick_attack: "Golpe rapido com prioridade de fase, ignorando comparacao de DEX.",
   punch: "Golpe fisico com multiplicador 93 (passa por DEF e armadura).",
-  power: "Aumenta ATK em +1 stage no usuario e reduz DEX em 10% no proprio lado (permanente no slot).",
+  power: "Aumenta ATK em +1 stage (perde no switch) e reduz DEX em 10% no usuario (individual permanente).",
   hook:
     "Impede o Run do adversario neste turno; se ele tentar Run, recebe -20% de mSPE. Aplica Exposicao no usuario (+66% dano recebido em fases de ataque) e auto-aplica -10% de mSPE.",
   kick: "Golpe fisico forte de dano escalado.",
