@@ -199,12 +199,12 @@
         height: 100%;
         width: 100%;
         background: linear-gradient(90deg, #5ef2a0 0%, #ffcf6a 65%, #ff7d7d 100%);
-        transition: width 0.5s ease;
+        transition: width 0.86s ease;
         will-change: width;
       }
 
       .hp-bar span.hp-anim {
-        transition-delay: 0.2s;
+        transition-delay: 0.28s;
       }
 
       .effects-row {
@@ -297,7 +297,7 @@
       }
 
       .sprite.hit::after {
-        animation: hitFlash 0.55s ease;
+        animation: hitFlash 1.05s ease;
       }
 
       .sprite::before {
@@ -312,11 +312,11 @@
       }
 
       .sprite.heal::before {
-        animation: healFlash 0.5s ease;
+        animation: healFlash 0.96s ease;
       }
 
       .sprite.jump {
-        animation: jump 0.45s ease;
+        animation: jump 0.72s ease;
       }
 
       .sprite img {
@@ -372,29 +372,52 @@
         transform: translateY(0) scale(1);
       }
 
+      .heal-plus-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+        z-index: 6;
+      }
+
+      .heal-plus {
+        position: absolute;
+        transform: translate(-50%, 0) scale(0.74);
+        color: rgb(126, 255, 118);
+        font-family: "Space Mono", monospace;
+        font-size: 16px;
+        line-height: 1;
+        font-weight: 700;
+        text-shadow:
+          0 0 5px rgba(92, 255, 126, 0.92),
+          0 0 14px rgba(92, 255, 126, 0.78);
+        opacity: 0;
+        animation: healPlusRise 1.06s ease-out forwards;
+      }
+
       .shield {
         position: absolute;
         width: 42%;
         aspect-ratio: 1;
         border-radius: 50%;
-        background: rgba(204, 212, 224, 0.45);
+        background: rgba(204, 212, 224, 0.76);
         opacity: 0;
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%) scale(0.7);
         box-shadow:
-          0 0 10px rgba(195, 205, 220, 0.4),
-          0 0 24px rgba(195, 205, 220, 0.2);
+          0 0 14px rgba(195, 205, 220, 0.68),
+          0 0 30px rgba(195, 205, 220, 0.42);
         z-index: 2;
         pointer-events: none;
       }
 
       .sprite.shield-on .shield {
-        animation: shieldAppear 0.65s ease forwards;
+        animation: shieldAppear 1.02s ease forwards;
       }
 
       .sprite.shield-hit .shield {
-        animation: shieldHit 0.9s ease forwards;
+        animation: shieldHit 1.28s ease forwards;
       }
 
       .arena {
@@ -1594,10 +1617,13 @@
         0% {
           transform: translateY(0);
         }
-        40% {
-          transform: translateY(-8px);
+        28% {
+          transform: translateY(-10px);
         }
-        70% {
+        52% {
+          transform: translateY(-6px);
+        }
+        76% {
           transform: translateY(0);
         }
         100% {
@@ -1609,14 +1635,20 @@
         0% {
           opacity: 0;
         }
-        20% {
+        16% {
           opacity: 0.8;
         }
-        40% {
+        32% {
+          opacity: 0.18;
+        }
+        50% {
+          opacity: 0.8;
+        }
+        68% {
           opacity: 0;
         }
-        60% {
-          opacity: 0.8;
+        82% {
+          opacity: 0.32;
         }
         100% {
           opacity: 0;
@@ -1627,11 +1659,34 @@
         0% {
           opacity: 0;
         }
-        35% {
+        22% {
+          opacity: 0.75;
+        }
+        48% {
+          opacity: 0.28;
+        }
+        66% {
           opacity: 0.75;
         }
         100% {
           opacity: 0;
+        }
+      }
+
+      @keyframes healPlusRise {
+        0% {
+          opacity: 0;
+          transform: translate(-50%, 6px) scale(0.72);
+        }
+        12% {
+          opacity: 1;
+        }
+        70% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+          transform: translate(-50%, -30px) scale(1.04);
         }
       }
 
@@ -1640,37 +1695,44 @@
           opacity: 0;
           transform: translate(-50%, -50%) scale(0.62);
         }
-        55% {
-          opacity: 0.72;
+        42% {
+          opacity: 0.93;
           transform: translate(-50%, -50%) scale(1);
         }
         100% {
-          opacity: 0.45;
+          opacity: 0.82;
           transform: translate(-50%, -50%) scale(1);
         }
       }
 
       @keyframes shieldHit {
         0% {
-          opacity: 0.45;
-          background: rgba(204, 212, 224, 0.45);
+          opacity: 0.82;
+          background: rgba(204, 212, 224, 0.76);
           box-shadow:
-            0 0 10px rgba(195, 205, 220, 0.4),
-            0 0 24px rgba(195, 205, 220, 0.2);
+            0 0 14px rgba(195, 205, 220, 0.68),
+            0 0 30px rgba(195, 205, 220, 0.42);
         }
         45% {
-          opacity: 0.62;
-          background: rgba(204, 212, 224, 0.5);
+          opacity: 0.9;
+          background: rgba(204, 212, 224, 0.82);
           box-shadow:
-            0 0 12px rgba(195, 205, 220, 0.45),
-            0 0 26px rgba(195, 205, 220, 0.24);
+            0 0 16px rgba(195, 205, 220, 0.74),
+            0 0 34px rgba(195, 205, 220, 0.5);
         }
-        78% {
-          opacity: 0.92;
-          background: rgba(255, 76, 76, 0.82);
+        64% {
+          opacity: 0.82;
+          background: rgba(204, 212, 224, 0.76);
           box-shadow:
-            0 0 14px rgba(255, 92, 92, 0.55),
-            0 0 30px rgba(255, 92, 92, 0.3);
+            0 0 14px rgba(195, 205, 220, 0.68),
+            0 0 30px rgba(195, 205, 220, 0.42);
+        }
+        82% {
+          opacity: 1;
+          background: rgba(255, 76, 76, 0.95);
+          box-shadow:
+            0 0 18px rgba(255, 92, 92, 0.82),
+            0 0 36px rgba(255, 92, 92, 0.54);
         }
         100% {
           opacity: 0;

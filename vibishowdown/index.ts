@@ -314,6 +314,32 @@ let selected_intent_turn = 0;
 const hp_animation: { player?: number; enemy?: number } = {};
 const animation_timers: number[] = [];
 const sprite_fx_classes = ["jump", "hit", "heal", "shield-on", "shield-hit"];
+const HP_BAR_ANIM_CLASS_CLEAR_MS = 1180;
+const VISUAL_STEP_MIN_DURATION_MS = 760;
+const VISUAL_STEP_GAP_MS = 120;
+const DAMAGE_STEP_DURATION_MS = 1120;
+const SHIELD_HIT_STEP_DURATION_MS = 1260;
+const SHIELD_ON_STEP_DURATION_MS = 980;
+const HEAL_STEP_DURATION_MS = 960;
+const DAMAGE_ANIM_ATTACKER_JUMP_MS = 760;
+const DAMAGE_ANIM_DEFENDER_HIT_MS = 980;
+const DAMAGE_ANIM_HP_TEXT_DELAY_MS = 300;
+const SHIELD_HIT_ANIM_TOTAL_MS = 1320;
+const HEAL_ANIM_MS = 920;
+const HEAL_PLUS_BURST_TOTAL_MS = 1360;
+const HEAL_PLUS_STEP_DURATION_MS = 1040;
+const PANEL_SYNC_AFTER_ANIMS_MS = 120;
+const heal_plus_clear_timers = new WeakMap<HTMLElement, number>();
+const HEAL_PLUS_POINTS: ReadonlyArray<{ left: number; top: number; delayMs: number }> = [
+  { left: 19, top: 76, delayMs: 0 },
+  { left: 33, top: 68, delayMs: 70 },
+  { left: 50, top: 62, delayMs: 140 },
+  { left: 67, top: 69, delayMs: 210 },
+  { left: 81, top: 75, delayMs: 280 },
+  { left: 29, top: 54, delayMs: 350 },
+  { left: 50, top: 47, delayMs: 420 },
+  { left: 72, top: 55, delayMs: 490 }
+];
 
 const selected: string[] = [];
 let active_tab: string | null = null;
@@ -2757,7 +2783,8 @@ type VisualStep =
   | { kind: "damage"; attackerSide: "player" | "enemy"; defenderSide: "player" | "enemy"; from: number; to: number; level: number; maxHp: number }
   | { kind: "shield_on"; side: "player" | "enemy" }
   | { kind: "shield_hit"; attackerSide: "player" | "enemy"; defenderSide: "player" | "enemy" }
-  | { kind: "heal"; side: "player" | "enemy" };
+  | { kind: "heal"; side: "player" | "enemy" }
+  | { kind: "heal_plus"; side: "player" | "enemy" };
 
 function build_visual_steps(prev_state: GameState, log: EventLog[], viewer_slot: PlayerSlot | null): VisualStep[] {
   const temp: GameState = JSON.parse(JSON.stringify(prev_state));
@@ -2769,7 +2796,7 @@ function build_visual_steps(prev_state: GameState, log: EventLog[], viewer_slot:
       temp.players[data.slot].activeIndex = data.to;
       continue;
     }
-    if (entry.type === "protect") {
+    if (entry.type === "protect" || entry.type === "special_protect") {
       const data = entry.data as { slot?: PlayerSlot } | undefined;
       if (!data?.slot) continue;
       const side = side_from_slot(viewer_slot, data.slot);
@@ -2799,6 +2826,17 @@ function build_visual_steps(prev_state: GameState, log: EventLog[], viewer_slot:
       }
       const side = side_from_slot(viewer_slot, data.slot);
       steps.push({ kind: "heal", side });
+      continue;
+    }
+    if (entry.type === "move_detail") {
+      const data = entry.data as { slot?: PlayerSlot; move?: unknown } | undefined;
+      if (!data?.slot || typeof data.move !== "string") {
+        continue;
+      }
+      if (data.move === "rejuvenation" || data.move === "team_cure") {
+        const side = side_from_slot(viewer_slot, data.slot);
+        steps.push({ kind: "heal_plus", side });
+      }
       continue;
     }
     if (
@@ -2860,7 +2898,7 @@ function animate_hp_bar(bar: HTMLSpanElement, from: number, to: number): void {
   bar.style.width = `${to}%`;
   window.setTimeout(() => {
     bar.classList.remove("hp-anim");
-  }, 760);
+  }, HP_BAR_ANIM_CLASS_CLEAR_MS);
 }
 
 function sprite_wrap(side: "player" | "enemy"): HTMLDivElement {
@@ -2871,6 +2909,13 @@ function reset_sprite_fx(): void {
   [player_sprite_wrap, enemy_sprite_wrap].forEach((wrap) => {
     sprite_fx_classes.forEach((fx) => wrap.classList.remove(fx));
     wrap.style.transform = "";
+    const timer_id = heal_plus_clear_timers.get(wrap);
+    if (typeof timer_id === "number") {
+      window.clearTimeout(timer_id);
+      heal_plus_clear_timers.delete(wrap);
+    }
+    const layer = wrap.querySelector<HTMLElement>(".heal-plus-layer");
+    layer?.replaceChildren();
   });
 }
 
@@ -2903,6 +2948,36 @@ function trigger_shield_hit(el: HTMLElement, duration: number): void {
   }, duration);
 }
 
+function trigger_heal_plus_burst(el: HTMLElement): void {
+  const existing_timer = heal_plus_clear_timers.get(el);
+  if (typeof existing_timer === "number") {
+    window.clearTimeout(existing_timer);
+    heal_plus_clear_timers.delete(el);
+  }
+  let layer = el.querySelector<HTMLElement>(".heal-plus-layer");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.className = "heal-plus-layer";
+    layer.setAttribute("aria-hidden", "true");
+    el.appendChild(layer);
+  }
+  layer.replaceChildren();
+  for (const point of HEAL_PLUS_POINTS) {
+    const token = document.createElement("span");
+    token.className = "heal-plus";
+    token.textContent = "+";
+    token.style.left = `${point.left}%`;
+    token.style.top = `${point.top}%`;
+    token.style.animationDelay = `${point.delayMs}ms`;
+    layer.appendChild(token);
+  }
+  const clear_id = window.setTimeout(() => {
+    layer?.replaceChildren();
+    heal_plus_clear_timers.delete(el);
+  }, HEAL_PLUS_BURST_TOTAL_MS);
+  heal_plus_clear_timers.set(el, clear_id);
+}
+
 function handle_state(data: { state: GameState; log: EventLog[] }): void {
   const prev_state = latest_state;
   clear_animation_timers();
@@ -2932,24 +3007,32 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
     }
   });
   if (steps.length > 0) {
-    const min_step_duration = 500;
-    const step_gap = 70;
+    const min_step_duration = VISUAL_STEP_MIN_DURATION_MS;
+    const step_gap = VISUAL_STEP_GAP_MS;
     let cursor = 0;
     for (const step of steps) {
       const base_duration =
-        step.kind === "damage" ? 720 : step.kind === "shield_hit" ? 760 : step.kind === "shield_on" ? 620 : 560;
+        step.kind === "damage"
+          ? DAMAGE_STEP_DURATION_MS
+          : step.kind === "shield_hit"
+            ? SHIELD_HIT_STEP_DURATION_MS
+            : step.kind === "shield_on"
+              ? SHIELD_ON_STEP_DURATION_MS
+              : step.kind === "heal_plus"
+                ? HEAL_PLUS_STEP_DURATION_MS
+                : HEAL_STEP_DURATION_MS;
       const duration = Math.max(min_step_duration, base_duration);
       schedule_animation(() => {
         if (step.kind === "damage") {
           const attacker_wrap = sprite_wrap(step.attackerSide);
           const defender_wrap = sprite_wrap(step.defenderSide);
-          trigger_class(attacker_wrap, "jump", 420);
-          trigger_class(defender_wrap, "hit", 520);
+          trigger_class(attacker_wrap, "jump", DAMAGE_ANIM_ATTACKER_JUMP_MS);
+          trigger_class(defender_wrap, "hit", DAMAGE_ANIM_DEFENDER_HIT_MS);
           const bar = step.defenderSide === "player" ? player_hp : enemy_hp;
           const from_percent = Math.max(0, Math.min(1, step.from / step.maxHp)) * 100;
           const to_percent = Math.max(0, Math.min(1, step.to / step.maxHp)) * 100;
           animate_hp_bar(bar, from_percent, to_percent);
-          animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, 220);
+          animate_hp_text(step.defenderSide, step.level, step.from, step.to, step.maxHp, DAMAGE_ANIM_HP_TEXT_DELAY_MS);
           return;
         }
         if (step.kind === "shield_on") {
@@ -2960,20 +3043,26 @@ function handle_state(data: { state: GameState; log: EventLog[] }): void {
         if (step.kind === "shield_hit") {
           const attacker_wrap = sprite_wrap(step.attackerSide);
           const defender_wrap = sprite_wrap(step.defenderSide);
-          trigger_class(attacker_wrap, "jump", 420);
-          trigger_shield_hit(defender_wrap, 820);
+          trigger_class(attacker_wrap, "jump", DAMAGE_ANIM_ATTACKER_JUMP_MS);
+          trigger_shield_hit(defender_wrap, SHIELD_HIT_ANIM_TOTAL_MS);
           return;
         }
         if (step.kind === "heal") {
           const wrap = sprite_wrap(step.side);
-          trigger_class(wrap, "heal", 520);
+          trigger_class(wrap, "heal", HEAL_ANIM_MS);
+          return;
+        }
+        if (step.kind === "heal_plus") {
+          const wrap = sprite_wrap(step.side);
+          trigger_class(wrap, "heal", HEAL_ANIM_MS);
+          trigger_heal_plus_burst(wrap);
         }
       }, cursor);
       cursor += duration + step_gap;
     }
     schedule_animation(() => {
       update_panels(data.state);
-    }, cursor + 60);
+    }, cursor + PANEL_SYNC_AFTER_ANIMS_MS);
   } else {
     update_panels(data.state);
   }
