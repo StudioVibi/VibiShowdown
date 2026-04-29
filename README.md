@@ -27,7 +27,7 @@ Comandos:
 
 Networking:
 
-- endpoint travado em `wss://net.studiovibi.com`.
+- endpoint travado em `wss://net.vibistudiotest.site`.
 - modo atual: cliente-deterministico. Cada jogador envia `join/ready/intent/forced_switch/surrender` e todos recomputam o estado localmente com `src/engine.ts`.
 - stack de rede: apenas `vibinet@0.1.1` oficial (sem protocolo custom em `src/vibinet/*`).
 - identificacao de jogador por `player_id` estavel derivado do nome (mesmo nome => mesmo id).

@@ -15,7 +15,8 @@ export type RoomInfoPostMessage = {
 type MessageHandler = (message: RoomInfoPostMessage) => void;
 
 const ROOM_POST_PACKER = { $: "String" } as const;
-const client = create_client<string>();
+const VIBINET_SERVER_URL = "wss://net.vibistudiotest.site";
+const client = create_client<string>(VIBINET_SERVER_URL);
 const room_watchers = new Map<string, MessageHandler>();
 
 function emit_if_valid(room: string, message: unknown): void {
